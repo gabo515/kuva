@@ -630,6 +630,7 @@ dependencies = [
  "rand",
  "rand_distr",
  "resvg 0.44.0",
+ "ryu",
  "svg2pdf",
 ]
 

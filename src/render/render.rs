@@ -1,6 +1,7 @@
 use crate::render::render_utils::{self, percentile, linear_regression, pearson_corr};
 use std::collections::HashMap;
 use std::fmt::Write;
+use rayon::prelude::*;
 use crate::render::layout::{Layout, ComputedLayout};
 use crate::render::plots::Plot;
 use crate::render::axis::{add_axes_and_grid, add_labels_and_title, add_y2_axis};
@@ -343,27 +344,45 @@ fn add_band(band: &BandPlot, scene: &mut Scene, computed: &ComputedLayout) {
 }
 
 fn add_scatter(scatter: &ScatterPlot, scene: &mut Scene, computed: &ComputedLayout) {
-    // Draw band behind points if present
     if let Some(ref band) = scatter.band {
         add_band(band, scene, computed);
     }
 
-    // Draw points
-    for (i, point) in scatter.data.iter().enumerate() {
-        let size = scatter.sizes.as_ref()
-            .and_then(|s| s.get(i).copied())
-            .unwrap_or(scatter.size);
-        let color = scatter.colors.as_ref()
-            .and_then(|c| c.get(i).map(|s| s.as_str()))
-            .unwrap_or(&scatter.color);
-        draw_marker(
-            scene,
-            scatter.marker,
-            computed.map_x(point.x),
-            computed.map_y(point.y),
-            size,
-            color,
-        );
+    // Fast path: uniform circle markers with no per-point colors/sizes → emit CircleBatch
+    let uniform_circles = matches!(scatter.marker, MarkerShape::Circle)
+        && scatter.sizes.is_none()
+        && scatter.colors.is_none()
+        && !scatter.data.iter().any(|p| p.x_err.is_some() || p.y_err.is_some());
+
+    if uniform_circles {
+        let (cx_vec, cy_vec): (Vec<f64>, Vec<f64>) = scatter.data
+            .par_iter()
+            .map(|point| (computed.map_x(point.x), computed.map_y(point.y)))
+            .unzip();
+        scene.add(Primitive::CircleBatch {
+            cx: cx_vec,
+            cy: cy_vec,
+            r: scatter.size,
+            fill: Color::from(scatter.color.as_str()),
+        });
+        // Still need to draw trend line, error bars, etc. below — but no error bars
+        // in the fast path, and trend lines are handled after this block.
+    } else {
+        for (i, point) in scatter.data.iter().enumerate() {
+            let size = scatter.sizes.as_ref()
+                .and_then(|s| s.get(i).copied())
+                .unwrap_or(scatter.size);
+            let color = scatter.colors.as_ref()
+                .and_then(|c| c.get(i).map(|s| s.as_str()))
+                .unwrap_or(&scatter.color);
+            draw_marker(
+                scene,
+                scatter.marker,
+                computed.map_x(point.x),
+                computed.map_y(point.y),
+                size,
+                color,
+            );
 
         // x error
         if let Some((neg, pos)) = point.x_err {
@@ -441,6 +460,7 @@ fn add_scatter(scatter: &ScatterPlot, scene: &mut Scene, computed: &ComputedLayo
             });
         }
     }
+    } // end else (non-batch path)
     
     // if trend, draw the line
     if let Some(trend) = scatter.trend {
@@ -1161,7 +1181,6 @@ fn add_pie(pie: &PiePlot, scene: &mut Scene, computed: &ComputedLayout) {
 }
 
 fn add_heatmap(heatmap: &Heatmap, scene: &mut Scene, computed: &ComputedLayout) {
-
     let rows = heatmap.data.len();
     let cols = heatmap.data.first().map_or(0, |row| row.len());
     if rows == 0 || cols == 0 {
@@ -1177,35 +1196,58 @@ fn add_heatmap(heatmap: &Heatmap, scene: &mut Scene, computed: &ComputedLayout) 
     let norm = |v: f64| (v - min) / (max - min + f64::EPSILON);
 
     let cmap = heatmap.color_map.clone();
-    for (i, row) in heatmap.data.iter().enumerate() {
-        for (j, &value) in row.iter().enumerate() {
-            // Bounds are (0.5, cols+0.5) / (0.5, rows+0.5) so cell j spans
-            // [j+0.5, j+1.5] in x and cell i spans [i+0.5, i+1.5] in y.
-            let x0 = computed.map_x(j as f64 + 0.5);
-            let x1 = computed.map_x(j as f64 + 1.5);
-            let y0 = computed.map_y(i as f64 + 1.5);
-            let y1 = computed.map_y(i as f64 + 0.5);
-            scene.add(Primitive::Rect {
-                x: x0,
-                y: y0,
-                width: (x1-x0).abs()*0.99,
-                height: (y1-y0).abs()*0.99,
-                fill: cmap.map(norm(value)).into(),
-                stroke: None,
-                stroke_width: None,
-                opacity: None,
+    let total = rows * cols;
+
+    // Build rect data in parallel across rows.
+    struct CellData { x: f64, y: f64, w: f64, h: f64, fill: Color }
+    let cell_data: Vec<CellData> = heatmap.data
+        .par_iter()
+        .enumerate()
+        .flat_map_iter(|(i, row)| {
+            let cmap = cmap.clone();
+            row.iter().enumerate().map(move |(j, &value)| {
+                let x0 = computed.map_x(j as f64 + 0.5);
+                let x1 = computed.map_x(j as f64 + 1.5);
+                let y0 = computed.map_y(i as f64 + 1.5);
+                let y1 = computed.map_y(i as f64 + 0.5);
+                CellData {
+                    x: x0, y: y0,
+                    w: (x1 - x0).abs() * 0.99,
+                    h: (y1 - y0).abs() * 0.99,
+                    fill: Color::from(cmap.map(norm(value))),
+                }
+            })
+        })
+        .collect();
+
+    let mut xs = Vec::with_capacity(total);
+    let mut ys = Vec::with_capacity(total);
+    let mut ws = Vec::with_capacity(total);
+    let mut hs = Vec::with_capacity(total);
+    let mut fills = Vec::with_capacity(total);
+    for cd in &cell_data {
+        xs.push(cd.x);
+        ys.push(cd.y);
+        ws.push(cd.w);
+        hs.push(cd.h);
+        fills.push(cd.fill.clone());
+    }
+    scene.add(Primitive::RectBatch { x: xs, y: ys, w: ws, h: hs, fills });
+
+    if heatmap.show_values {
+        for (idx, cd) in cell_data.iter().enumerate() {
+            let i = idx / cols;
+            let j = idx % cols;
+            let _ = (i, j);
+            scene.add(Primitive::Text {
+                x: cd.x + cd.w / 2.0 / 0.99,
+                y: cd.y + cd.h / 2.0 / 0.99,
+                content: format!("{:.2}", heatmap.data[idx / cols][idx % cols]),
+                size: computed.body_size,
+                anchor: TextAnchor::Middle,
+                rotate: None,
+                bold: false,
             });
-            if heatmap.show_values {
-                scene.add(Primitive::Text {
-                    x: x0 + ((x1-x0).abs() / 2.0),
-                    y: y0 + ((y1-y0).abs() / 2.0),
-                    content: format!("{:.2}", value),
-                    size: computed.body_size,
-                    anchor: TextAnchor::Middle,
-                    rotate: None,
-                    bold: false,
-                });
-            }
         }
     }
 }

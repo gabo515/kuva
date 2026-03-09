@@ -1,10 +1,17 @@
 use crate::render::render_utils::{self, percentile, linear_regression, pearson_corr};
 use std::collections::HashMap;
+use std::fmt::Write;
 use crate::render::layout::{Layout, ComputedLayout};
 use crate::render::plots::Plot;
 use crate::render::axis::{add_axes_and_grid, add_labels_and_title, add_y2_axis};
 use crate::render::annotations::{add_shaded_regions, add_reference_lines, add_text_annotations};
 use crate::render::theme::Theme;
+
+/// Round to 2 decimal places for compact SVG output.
+#[inline(always)]
+fn round2(v: f64) -> f64 {
+    (v * 100.0).round() * 0.01
+}
 
 use crate::plot::scatter::{ScatterPlot, TrendLine, MarkerShape};
 use crate::plot::line::LinePlot;
@@ -108,8 +115,20 @@ impl Scene {
                background_color: Some("white".to_string()),
                text_color: None,
                font_family: None,
-               elements: vec![],
-               defs: vec![] }
+               elements: Vec::new(),
+               defs: Vec::new() }
+    }
+
+    /// Create a scene with a pre-allocated element buffer.
+    /// Use when the approximate number of primitives is known upfront.
+    pub fn with_capacity(width: f64, height: f64, capacity: usize) -> Self {
+        Self { width,
+               height,
+               background_color: Some("white".to_string()),
+               text_color: None,
+               font_family: None,
+               elements: Vec::with_capacity(capacity),
+               defs: Vec::new() }
     }
 
     pub fn with_background(mut self, color: Option<&str>) -> Self {
@@ -130,13 +149,15 @@ fn apply_theme(scene: &mut Scene, theme: &Theme) {
 
 /// Build an SVG path string from a sequence of (x, y) screen-coordinate points.
 pub fn build_path(points: &[(f64, f64)]) -> String {
-    let mut path = String::new();
+    let mut path = String::with_capacity(points.len() * 16);
+    let mut rb = ryu::Buffer::new();
     for (i, &(x, y)) in points.iter().enumerate() {
-        if i == 0 {
-            path += &format!("M {x} {y} ");
-        } else {
-            path += &format!("L {x} {y} ");
-        }
+        path.push(if i == 0 { 'M' } else { 'L' });
+        path.push(' ');
+        path.push_str(rb.format(round2(x)));
+        path.push(' ');
+        path.push_str(rb.format(round2(y)));
+        path.push(' ');
     }
     path
 }
@@ -144,14 +165,26 @@ pub fn build_path(points: &[(f64, f64)]) -> String {
 /// Build an SVG step-path (staircase) from a sequence of (x, y) screen-coordinate points.
 /// For each pair of consecutive points, inserts a horizontal segment to x1 before moving to y1.
 pub fn build_step_path(points: &[(f64, f64)]) -> String {
-    let mut path = String::new();
+    let mut path = String::with_capacity(points.len() * 24);
+    let mut rb = ryu::Buffer::new();
     for (i, &(x, y)) in points.iter().enumerate() {
         if i == 0 {
-            path += &format!("M {x} {y} ");
+            path.push_str("M ");
+            path.push_str(rb.format(round2(x)));
+            path.push(' ');
+            path.push_str(rb.format(round2(y)));
+            path.push(' ');
         } else {
             let prev_y = points[i - 1].1;
-            path += &format!("L {x} {prev_y} ");
-            path += &format!("L {x} {y} ");
+            path.push_str("L ");
+            path.push_str(rb.format(round2(x)));
+            path.push(' ');
+            path.push_str(rb.format(round2(prev_y)));
+            path.push_str(" L ");
+            path.push_str(rb.format(round2(x)));
+            path.push(' ');
+            path.push_str(rb.format(round2(y)));
+            path.push(' ');
         }
     }
     path
@@ -175,13 +208,19 @@ fn draw_marker(scene: &mut Scene, marker: MarkerShape, cx: f64, cy: f64, size: f
             });
         }
         MarkerShape::Triangle => {
-            let h = size * 1.7; // equilateral-ish
-            let d = format!(
-                "M{},{} L{},{} L{},{} Z",
-                cx, cy - h * 0.6,
-                cx - size, cy + h * 0.4,
-                cx + size, cy + h * 0.4,
-            );
+            let h = size * 1.7;
+            let mut d = String::with_capacity(64);
+            let mut rb = ryu::Buffer::new();
+            d.push('M');
+            d.push_str(rb.format(round2(cx))); d.push(',');
+            d.push_str(rb.format(round2(cy - h * 0.6)));
+            d.push_str(" L");
+            d.push_str(rb.format(round2(cx - size))); d.push(',');
+            d.push_str(rb.format(round2(cy + h * 0.4)));
+            d.push_str(" L");
+            d.push_str(rb.format(round2(cx + size))); d.push(',');
+            d.push_str(rb.format(round2(cy + h * 0.4)));
+            d.push_str(" Z");
             scene.add(Primitive::Path {
                 d,
                 fill: Some(fill.into()),
@@ -193,13 +232,21 @@ fn draw_marker(scene: &mut Scene, marker: MarkerShape, cx: f64, cy: f64, size: f
         }
         MarkerShape::Diamond => {
             let s = size * 1.3;
-            let d = format!(
-                "M{},{} L{},{} L{},{} L{},{} Z",
-                cx, cy - s,
-                cx + s, cy,
-                cx, cy + s,
-                cx - s, cy,
-            );
+            let mut d = String::with_capacity(80);
+            let mut rb = ryu::Buffer::new();
+            d.push('M');
+            d.push_str(rb.format(round2(cx))); d.push(',');
+            d.push_str(rb.format(round2(cy - s)));
+            d.push_str(" L");
+            d.push_str(rb.format(round2(cx + s))); d.push(',');
+            d.push_str(rb.format(round2(cy)));
+            d.push_str(" L");
+            d.push_str(rb.format(round2(cx))); d.push(',');
+            d.push_str(rb.format(round2(cy + s)));
+            d.push_str(" L");
+            d.push_str(rb.format(round2(cx - s))); d.push(',');
+            d.push_str(rb.format(round2(cy)));
+            d.push_str(" Z");
             scene.add(Primitive::Path {
                 d,
                 fill: Some(fill.into()),
@@ -236,24 +283,29 @@ fn draw_marker(scene: &mut Scene, marker: MarkerShape, cx: f64, cy: f64, size: f
 
 fn add_band(band: &BandPlot, scene: &mut Scene, computed: &ComputedLayout) {
     if band.x.len() < 2 { return; }
-    let mut path = String::new();
-    // Forward along upper curve
+    let cap = (band.x.len() * 2 + 1) * 16;
+    let mut path = String::with_capacity(cap);
+    let mut rb = ryu::Buffer::new();
     for (i, (&x, &y)) in band.x.iter().zip(band.y_upper.iter()).enumerate() {
         let sx = computed.map_x(x);
         let sy = computed.map_y(y);
-        if i == 0 {
-            path += &format!("M {sx} {sy} ");
-        } else {
-            path += &format!("L {sx} {sy} ");
-        }
+        path.push(if i == 0 { 'M' } else { 'L' });
+        path.push(' ');
+        path.push_str(rb.format(round2(sx)));
+        path.push(' ');
+        path.push_str(rb.format(round2(sy)));
+        path.push(' ');
     }
-    // Backward along lower curve
     for (&x, &y) in band.x.iter().zip(band.y_lower.iter()).rev() {
         let sx = computed.map_x(x);
         let sy = computed.map_y(y);
-        path += &format!("L {sx} {sy} ");
+        path.push_str("L ");
+        path.push_str(rb.format(round2(sx)));
+        path.push(' ');
+        path.push_str(rb.format(round2(sy)));
+        path.push(' ');
     }
-    path += "Z";
+    path.push('Z');
     scene.add(Primitive::Path {
         d: path,
         fill: Some(band.color.clone()),
@@ -846,28 +898,30 @@ fn add_violin(violin: &ViolinPlot, scene: &mut Scene, computed: &ComputedLayout)
         let max_density = kde.iter().map(|(_, y)| *y).fold(f64::NEG_INFINITY, f64::max);
         let scale = violin.width / max_density;
 
-        // Map KDE to plot coordinates
-        let mut path_data = String::new();
-
-        //from top, left to right
-        for (j, (y, d)) in kde.iter().enumerate() {
-            let dy = computed.map_y(*y);
-            let dx = x_center - d * scale;
-            if j == 0 {
-                path_data += &format!("M {dx} {dy} ");
-            } else {
-                path_data += &format!("L {dx} {dy} ");
+        let mut path_data = String::with_capacity(kde.len() * 32);
+        {
+            let mut rb = ryu::Buffer::new();
+            for (j, (y, d)) in kde.iter().enumerate() {
+                let dy = computed.map_y(*y);
+                let dx = x_center - d * scale;
+                path_data.push(if j == 0 { 'M' } else { 'L' });
+                path_data.push(' ');
+                path_data.push_str(rb.format(round2(dx)));
+                path_data.push(' ');
+                path_data.push_str(rb.format(round2(dy)));
+                path_data.push(' ');
+            }
+            for (y, d) in kde.iter().rev() {
+                let dy = computed.map_y(*y);
+                let dx = x_center + d * scale;
+                path_data.push_str("L ");
+                path_data.push_str(rb.format(round2(dx)));
+                path_data.push(' ');
+                path_data.push_str(rb.format(round2(dy)));
+                path_data.push(' ');
             }
         }
-
-        // from bottom, right to left
-        for (y, d) in kde.iter().rev() {
-            let dy = computed.map_y(*y);
-            let dx = x_center + d * scale;
-            path_data += &format!("L {dx} {dy} ");
-        }
-
-        path_data += "Z";
+        path_data.push('Z');
 
         scene.add(Primitive::Path {
             d: path_data,
@@ -2152,6 +2206,7 @@ pub fn render_pie(pie: &PiePlot, layout: &Layout) -> Scene {
         let needed_plot_width = needed_half * 2.0;
         if needed_plot_width > computed.plot_width() {
             computed.width = needed_plot_width + computed.margin_left + computed.margin_right;
+            computed.recompute_transforms();
         }
     }
 
@@ -3087,23 +3142,30 @@ fn add_stacked_area(sa: &StackedAreaPlot, scene: &mut Scene, computed: &Computed
             lower[i] + raw / t * scale
         }).collect();
 
-        // Build closed SVG path: forward along upper, backward along lower
-        let mut path = String::new();
-        for (i, &x) in sa.x.iter().enumerate() {
-            let sx = computed.map_x(x);
-            let sy = computed.map_y(upper[i]);
-            if i == 0 {
-                path += &format!("M {sx} {sy} ");
-            } else {
-                path += &format!("L {sx} {sy} ");
+        let mut path = String::with_capacity(n * 32);
+        {
+            let mut rb = ryu::Buffer::new();
+            for (i, &x) in sa.x.iter().enumerate() {
+                let sx = computed.map_x(x);
+                let sy = computed.map_y(upper[i]);
+                path.push(if i == 0 { 'M' } else { 'L' });
+                path.push(' ');
+                path.push_str(rb.format(round2(sx)));
+                path.push(' ');
+                path.push_str(rb.format(round2(sy)));
+                path.push(' ');
+            }
+            for i in (0..n).rev() {
+                let sx = computed.map_x(sa.x[i]);
+                let sy = computed.map_y(lower[i]);
+                path.push_str("L ");
+                path.push_str(rb.format(round2(sx)));
+                path.push(' ');
+                path.push_str(rb.format(round2(sy)));
+                path.push(' ');
             }
         }
-        for i in (0..n).rev() {
-            let sx = computed.map_x(sa.x[i]);
-            let sy = computed.map_y(lower[i]);
-            path += &format!("L {sx} {sy} ");
-        }
-        path += "Z";
+        path.push('Z');
 
         scene.add(Primitive::Path {
             d: path,
@@ -3114,17 +3176,18 @@ fn add_stacked_area(sa: &StackedAreaPlot, scene: &mut Scene, computed: &Computed
             stroke_dasharray: None,
         });
 
-        // Optional stroke along the top edge
         if sa.show_strokes {
-            let mut stroke_path = String::new();
+            let mut stroke_path = String::with_capacity(n * 16);
+            let mut rb = ryu::Buffer::new();
             for (i, &x) in sa.x.iter().enumerate() {
                 let sx = computed.map_x(x);
                 let sy = computed.map_y(upper[i]);
-                if i == 0 {
-                    stroke_path += &format!("M {sx} {sy} ");
-                } else {
-                    stroke_path += &format!("L {sx} {sy} ");
-                }
+                stroke_path.push(if i == 0 { 'M' } else { 'L' });
+                stroke_path.push(' ');
+                stroke_path.push_str(rb.format(round2(sx)));
+                stroke_path.push(' ');
+                stroke_path.push_str(rb.format(round2(sy)));
+                stroke_path.push(' ');
             }
             scene.add(Primitive::Path {
                 d: stroke_path,
@@ -3302,9 +3365,8 @@ fn contour_path(
         (computed.map_x(x_coords[col]), computed.map_y(wy))
     };
 
-    // Append one line segment to the path string.
     let mut seg = |p1: (f64, f64), p2: (f64, f64)| {
-        d += &format!("M{:.2} {:.2} L{:.2} {:.2} ", p1.0, p1.1, p2.0, p2.1);
+        let _ = write!(d, "M{:.2} {:.2} L{:.2} {:.2} ", p1.0, p1.1, p2.0, p2.1);
     };
 
     for row in 0..rows - 1 {
@@ -3398,14 +3460,13 @@ fn contour_fill_path(
         (computed.map_x(x_coords[col]), computed.map_y(wy))
     };
 
-    // Append one closed polygon subpath.
     let mut poly = |verts: &[(f64, f64)]| {
         if verts.len() < 3 { return; }
-        d += &format!("M{:.2} {:.2}", verts[0].0, verts[0].1);
+        let _ = write!(d, "M{:.2} {:.2}", verts[0].0, verts[0].1);
         for &(x, y) in &verts[1..] {
-            d += &format!(" L{:.2} {:.2}", x, y);
+            let _ = write!(d, " L{:.2} {:.2}", x, y);
         }
-        d += " Z ";
+        d.push_str(" Z ");
     };
 
     for row in 0..rows - 1 {
@@ -4058,12 +4119,14 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
             let needed_plot_width = needed_half * 2.0;
             if layout.width.is_none() && needed_plot_width > computed.plot_width() {
                 computed.width = needed_plot_width + computed.margin_left + computed.margin_right;
+                computed.recompute_transforms();
             }
             break; // only one pie per render_multiple call
         }
     }
 
-    let mut scene = Scene::new(computed.width, computed.height);
+    let capacity_hint: usize = plots.iter().map(|p| p.estimated_primitives()).sum::<usize>() + 64;
+    let mut scene = Scene::with_capacity(computed.width, computed.height, capacity_hint);
     scene.font_family = computed.font_family.clone();
     apply_theme(&mut scene, &computed.theme);
 

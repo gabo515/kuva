@@ -454,7 +454,7 @@ pub fn add_labels_and_title(scene: &mut Scene, computed: &ComputedLayout, layout
     if !layout.suppress_x_ticks {
         if let Some(label) = &layout.x_label {
             scene.add(Primitive::Text {
-                x: computed.width / 2.0,
+                x: computed.margin_left + computed.plot_width() / 2.0,
                 y: computed.height - computed.label_size as f64 * 0.5,
                 content: label.clone(),
                 size: computed.label_size,
@@ -483,7 +483,7 @@ pub fn add_labels_and_title(scene: &mut Scene, computed: &ComputedLayout, layout
     // Title
     if let Some(title) = &layout.title {
         scene.add(Primitive::Text {
-            x: computed.width / 2.0,
+            x: computed.margin_left + computed.plot_width() / 2.0,
             y: computed.margin_top / 2.0,
             content: title.clone(),
             size: computed.title_size,

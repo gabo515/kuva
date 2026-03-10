@@ -577,6 +577,14 @@ impl Layout {
         if any_hist {
             let bin_widths: Vec<f64> = plots.iter().filter_map(|p| {
                 if let Plot::Histogram(h) = p {
+                    if let Some((edges, _)) = &h.precomputed {
+                        if edges.len() >= 2 {
+                            let bw = edges[1] - edges[0];
+                            let uniform = edges.windows(2).all(|w| (w[1] - w[0] - bw).abs() < 1e-9 * bw.abs().max(1e-10));
+                            if uniform { return Some(bw); }
+                        }
+                        return None;
+                    }
                     h.range.map(|r| (r.1 - r.0) / h.bins as f64)
                 } else {
                     None
@@ -945,6 +953,9 @@ pub struct ComputedLayout {
     pub minor_ticks: Option<u32>,
     /// Draw faint gridlines at minor tick positions.
     pub show_minor_grid: bool,
+    /// Common bin width when all histograms share the same bin size.
+    /// When set, x-axis ticks are generated to fall exactly on bin edges.
+    pub x_bin_width: Option<f64>,
 
     // Pre-computed linear transform coefficients for map_x / map_y.
     // map_x(x) = x_offset + x * x_scale  (linear)
@@ -1114,6 +1125,7 @@ impl ComputedLayout {
             y_tick_step: layout.y_tick_step,
             minor_ticks: layout.minor_ticks,
             show_minor_grid: layout.show_minor_grid,
+            x_bin_width: layout.x_bin_width,
             x_scale: 0.0,
             x_offset: 0.0,
             y_scale: 0.0,

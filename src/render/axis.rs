@@ -38,6 +38,9 @@ pub fn add_axes_and_grid(scene: &mut Scene, computed: &ComputedLayout, layout: &
     // Always compute tick positions for grid lines
     let x_ticks: Vec<f64> = if let Some(step) = computed.x_tick_step {
         render_utils::generate_ticks_with_step(computed.x_range.0, computed.x_range.1, step)
+    } else if let Some(bw) = computed.x_bin_width {
+        render_utils::generate_ticks_bin_aligned(
+            computed.x_range.0, computed.x_range.1, bw, computed.x_ticks)
     } else if let Some(ref dt) = layout.x_datetime {
         dt.generate_ticks(computed.x_range.0, computed.x_range.1)
     } else if layout.log_x {

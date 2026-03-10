@@ -113,6 +113,14 @@ check "histogram normalize" \
     "$BIN" histogram "$DATA/histogram.tsv" --value-col value --normalize \
         --title "Value Distribution" --x-label "Value" --y-label "Density"
 
+check "histogram bin-aligned 6 bins" \
+    "$BIN" histogram "$DATA/histogram.tsv" --value-col value --bins 6 \
+        --title "Bin-Aligned Ticks (6 bins)" --x-label "Value" --y-label "Count"
+
+check "histogram bin-aligned 7 bins normalize" \
+    "$BIN" histogram "$DATA/histogram.tsv" --value-col value --bins 7 --normalize \
+        --title "Bin-Aligned Ticks (7 bins)" --x-label "Value" --y-label "Density"
+
 # ── box ───────────────────────────────────────────────────────────────────────
 check "box basic" \
     "$BIN" box "$DATA/samples.tsv" --group-col group --value-col expression \

@@ -710,6 +710,27 @@ fn add_bar(bar: &BarPlot, scene: &mut Scene, computed: &ComputedLayout) {
 
 fn add_histogram(hist: &Histogram, scene: &mut Scene, computed: &ComputedLayout) {
 
+    // Precomputed path
+    if let Some((edges, counts)) = &hist.precomputed {
+        let max_count = counts.iter().cloned().fold(0.0_f64, f64::max).max(1.0);
+        let norm = if hist.normalize { 1.0 / max_count } else { 1.0 };
+        for (i, count) in counts.iter().enumerate() {
+            if i + 1 >= edges.len() { break; }
+            let x0 = computed.map_x(edges[i]);
+            let x1 = computed.map_x(edges[i + 1]);
+            let y0 = computed.map_y(0.0);
+            let y1 = computed.map_y(count * norm);
+            scene.add(Primitive::Rect {
+                x: x0, y: y1.min(y0),
+                width: (x1 - x0).abs(),
+                height: (y0 - y1).abs(),
+                fill: Color::from(&hist.color),
+                stroke: None, stroke_width: None, opacity: None,
+            });
+        }
+        return;
+    }
+
     // fold is basically a fancy for loop
     let range: (f64, f64) = hist.range.unwrap_or_else(|| {
         let min: f64 = hist.data.iter().cloned().fold(f64::INFINITY, f64::min);

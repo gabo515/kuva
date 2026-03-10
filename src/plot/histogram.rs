@@ -37,6 +37,7 @@ pub struct Histogram {
     pub color: String,
     pub normalize: bool,
     pub legend_label: Option<String>,
+    pub precomputed: Option<(Vec<f64>, Vec<f64>)>,
 }
 
 impl Default for Histogram {
@@ -55,7 +56,36 @@ impl Histogram {
             color: "black".to_string(),
             normalize: false,
             legend_label: None,
+            precomputed: None,
         }
+    }
+
+    /// Create a histogram from precomputed bin edges and counts.
+    ///
+    /// `edges` must have length `counts.len() + 1`. Use `f64` counts to support
+    /// fractional values (density estimates, normalized inputs from R/numpy).
+    /// `range` and `with_data` / `with_bins` are ignored when precomputed bins are set.
+    ///
+    /// ```rust,no_run
+    /// # use kuva::plot::Histogram;
+    /// let edges = vec![0.0, 1.0, 2.0, 3.0];
+    /// let counts = vec![5.0, 12.0, 8.0];
+    /// let hist = Histogram::from_bins(edges, counts).with_color("steelblue");
+    /// ```
+    pub fn from_bins(edges: Vec<f64>, counts: Vec<f64>) -> Self {
+        Self {
+            precomputed: Some((edges, counts)),
+            ..Self::new()
+        }
+    }
+
+    /// Set precomputed bin edges and counts via the builder chain.
+    ///
+    /// Equivalent to `Histogram::from_bins(edges, counts)` but usable when
+    /// constructing conditionally after other options are set.
+    pub fn with_precomputed(mut self, edges: Vec<f64>, counts: Vec<f64>) -> Self {
+        self.precomputed = Some((edges, counts));
+        self
     }
 
     /// Set the input data.

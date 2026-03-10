@@ -226,6 +226,19 @@ impl Plot {
                 }
             }
             Plot::Histogram(h) => {
+                // Precomputed path: derive bounds from edges and counts directly
+                if let Some((edges, counts)) = &h.precomputed {
+                    if edges.len() < 2 || counts.is_empty() { return None; }
+                    let x_min = edges[0];
+                    let x_max = *edges.last().unwrap();
+                    let max_y = if h.normalize {
+                        1.0
+                    } else {
+                        counts.iter().cloned().fold(0.0_f64, f64::max)
+                    };
+                    return Some(((x_min, x_max), (0.0, max_y)));
+                }
+                // Auto-binning path: requires explicit range
                 let range = h.range?;
                 let bins = h.bins;
                 let bin_width = (range.1 - range.0) / bins as f64;

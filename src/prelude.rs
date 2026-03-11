@@ -59,6 +59,9 @@ pub use crate::plot::{
     SyntenyBlock,
     SyntenySequence,
     Strand,
+    DensityPlot,
+    RidgelinePlot,
+    RidgelineGroup,
     // Style / config types used when building plots
     MarkerShape,
     LineStyle,

@@ -14,6 +14,8 @@ EXAMPLES=(
     candlestick
     chord
     contour
+    density
+    ridgeline
     dotplot
     heatmap
     histogram

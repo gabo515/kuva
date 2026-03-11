@@ -296,6 +296,27 @@ check "phylo circular phylogram" \
     "$BIN" phylo "$DATA/phylo.tsv" --parent-col parent --child-col child --length-col length \
         --branch-style circular --phylogram --width 800 --height 800 --title "Phylogenetic Tree"
 
+# ── density ───────────────────────────────────────────────────────────────────
+check "density basic" \
+    "$BIN" density "$DATA/samples.tsv" \
+        --value expression --x-label "Expression" --y-label "Density" \
+        --title "Density"
+
+check "density filled color-by" \
+    "$BIN" density "$DATA/samples.tsv" \
+        --value expression --color-by group --filled \
+        --title "Density by group"
+
+# ── ridgeline ─────────────────────────────────────────────────────────────────
+check "ridgeline basic" \
+    "$BIN" ridgeline "$DATA/samples.tsv" \
+        --group-by group --value expression \
+        --title Ridgeline --x-label Expression --y-label Group
+
+check "ridgeline overlap" \
+    "$BIN" ridgeline "$DATA/samples.tsv" \
+        --group-by group --value expression --overlap 1.0
+
 # ── synteny ───────────────────────────────────────────────────────────────────
 check "synteny basic" \
     "$BIN" synteny "$DATA/synteny_seqs.tsv" \

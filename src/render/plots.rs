@@ -23,6 +23,8 @@ use crate::plot::chord::ChordPlot;
 use crate::plot::sankey::SankeyPlot;
 use crate::plot::phylo::PhyloTree;
 use crate::plot::synteny::SyntenyPlot;
+use crate::plot::density::DensityPlot;
+use crate::plot::ridgeline::RidgelinePlot;
 use crate::plot::legend::ColorBarInfo;
 use crate::render::render_utils;
 
@@ -53,6 +55,8 @@ pub enum Plot {
     Sankey(SankeyPlot),
     PhyloTree(PhyloTree),
     Synteny(SyntenyPlot),
+    Density(DensityPlot),
+    Ridgeline(RidgelinePlot),
 }
 
 impl From<ScatterPlot>    for Plot { fn from(p: ScatterPlot)    -> Self { Plot::Scatter(p) } }
@@ -80,6 +84,8 @@ impl From<ChordPlot>      for Plot { fn from(p: ChordPlot)      -> Self { Plot::
 impl From<SankeyPlot>     for Plot { fn from(p: SankeyPlot)     -> Self { Plot::Sankey(p) } }
 impl From<PhyloTree>      for Plot { fn from(p: PhyloTree)      -> Self { Plot::PhyloTree(p) } }
 impl From<SyntenyPlot>    for Plot { fn from(p: SyntenyPlot)    -> Self { Plot::Synteny(p) } }
+impl From<DensityPlot>   for Plot { fn from(p: DensityPlot)   -> Self { Plot::Density(p) } }
+impl From<RidgelinePlot> for Plot { fn from(p: RidgelinePlot) -> Self { Plot::Ridgeline(p) } }
 
 fn bounds_from_2d<I>(points: I) -> Option<((f64, f64), (f64, f64))>
     where
@@ -128,6 +134,7 @@ impl Plot {
             Plot::Violin(v) => v.color = color.into(),
             Plot::Band(b) => b.color = color.into(),
             Plot::Strip(s) => s.color = color.into(),
+            Plot::Density(d) => d.color = color.into(),
             _ => {}
         }
     }
@@ -463,6 +470,45 @@ impl Plot {
             Plot::Synteny(_) => {
                 // Rendered in pixel space; dummy bounds satisfy Layout::auto_from_plots.
                 Some(((0.0, 1.0), (0.0, 1.0)))
+            }
+            Plot::Density(dp) => {
+                // Use precomputed curve if available
+                if let Some((xs, ys)) = &dp.precomputed {
+                    if xs.is_empty() { return None; }
+                    let x_min = xs.iter().cloned().fold(f64::INFINITY, f64::min);
+                    let x_max = xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+                    let y_max = ys.iter().cloned().fold(0.0_f64, f64::max);
+                    return Some(((x_min, x_max), (0.0, y_max * 1.1)));
+                }
+                if dp.data.len() < 2 { return None; }
+                let bw = dp.bandwidth.unwrap_or_else(|| render_utils::silverman_bandwidth(&dp.data));
+                let x_min = dp.data.iter().cloned().fold(f64::INFINITY, f64::min) - 3.0 * bw;
+                let x_max = dp.data.iter().cloned().fold(f64::NEG_INFINITY, f64::max) + 3.0 * bw;
+                // Compute approximate y_max using 50 sample points
+                let curve = render_utils::simple_kde(&dp.data, bw, 50);
+                let n = dp.data.len() as f64;
+                let norm = 1.0 / (n * bw * (2.0 * std::f64::consts::PI).sqrt());
+                let y_max_pdf = curve.iter().map(|(_, y)| y * norm).fold(0.0_f64, f64::max);
+                Some(((x_min, x_max), (0.0, y_max_pdf * 1.1)))
+            }
+            Plot::Ridgeline(rp) => {
+                if rp.groups.is_empty() { return None; }
+                let n = rp.groups.len() as f64;
+                let mut x_min = f64::INFINITY;
+                let mut x_max = f64::NEG_INFINITY;
+                for g in &rp.groups {
+                    if g.values.is_empty() { continue; }
+                    let bw = rp.bandwidth.unwrap_or_else(|| render_utils::silverman_bandwidth(&g.values));
+                    let gmin = g.values.iter().cloned().fold(f64::INFINITY, f64::min);
+                    let gmax = g.values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+                    x_min = x_min.min(gmin - 3.0 * bw);
+                    x_max = x_max.max(gmax + 3.0 * bw);
+                }
+                if !x_min.is_finite() { return None; }
+                // y_max must leave room for the top ridge to extend (1+overlap)
+                // data units above group 0's center (at y = n).  Half a unit of
+                // additional padding keeps it off the very top of the plot area.
+                Some(((x_min, x_max), (0.5, n + 1.5 + rp.overlap)))
             }
             Plot::Brick(bp) => {
                 let rows = if let Some(ref exp) = bp.strigar_exp {

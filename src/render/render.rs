@@ -33,7 +33,8 @@ use crate::plot::chord::ChordPlot;
 use crate::plot::sankey::{SankeyPlot, SankeyLinkColor};
 use crate::plot::phylo::{PhyloTree, TreeBranchStyle, TreeOrientation};
 use crate::plot::synteny::{SyntenyPlot, Strand};
-
+use crate::plot::density::DensityPlot;
+use crate::plot::ridgeline::RidgelinePlot;
 
 use crate::plot::Legend;
 use crate::plot::legend::{ColorBarInfo, LegendEntry, LegendGroup, LegendPosition, LegendShape};
@@ -2418,7 +2419,188 @@ pub fn render_brickplot(brickplot: &BrickPlot, layout: &Layout) -> Scene {
     scene
 }
 
+fn add_density(dp: &DensityPlot, computed: &ComputedLayout, scene: &mut Scene) {
+    use render_utils::{silverman_bandwidth, simple_kde};
 
+    // Determine the (x, y) curve points
+    let curve: Vec<(f64, f64)> = if let Some((xs, ys)) = &dp.precomputed {
+        xs.iter().copied().zip(ys.iter().copied()).collect()
+    } else {
+        if dp.data.len() < 2 { return; }
+        let bw = dp.bandwidth.unwrap_or_else(|| silverman_bandwidth(&dp.data));
+        let raw = simple_kde(&dp.data, bw, dp.kde_samples);
+        // Normalise raw KDE sums to probability density
+        let n = dp.data.len() as f64;
+        let norm = 1.0 / (n * bw * (2.0 * std::f64::consts::PI).sqrt());
+        raw.into_iter().map(|(x, y)| (x, y * norm)).collect()
+    };
+
+    if curve.is_empty() { return; }
+
+    // Map data coords to pixel coords
+    let pts: Vec<(f64, f64)> = curve.iter()
+        .map(|&(x, y)| (computed.map_x(x), computed.map_y(y)))
+        .collect();
+
+    // Build the SVG path string
+    let mut path = String::with_capacity(pts.len() * 16);
+    let mut rb = ryu::Buffer::new();
+    for (i, &(px, py)) in pts.iter().enumerate() {
+        path.push(if i == 0 { 'M' } else { 'L' });
+        path.push(' ');
+        path.push_str(rb.format(round2(px)));
+        path.push(' ');
+        path.push_str(rb.format(round2(py)));
+        path.push(' ');
+    }
+
+    // Emit filled area first (below the outline)
+    if dp.filled {
+        let y_baseline = computed.map_y(0.0);
+        let &(last_px, _) = pts.last().unwrap();
+        let &(first_px, _) = pts.first().unwrap();
+        let fill_path = format!(
+            "{} L {} {} L {} {} Z",
+            path.trim_end(),
+            round2(last_px), round2(y_baseline),
+            round2(first_px), round2(y_baseline),
+        );
+        scene.add(Primitive::Path(Box::new(PathData {
+            d: fill_path,
+            fill: Some(Color::from(&dp.color)),
+            stroke: Color::from("none"),
+            stroke_width: 0.0,
+            opacity: Some(dp.opacity),
+            stroke_dasharray: None,
+        })));
+    }
+
+    // Emit the outline
+    scene.add(Primitive::Path(Box::new(PathData {
+        d: path.trim_end().to_string(),
+        fill: None,
+        stroke: Color::from(&dp.color),
+        stroke_width: dp.stroke_width,
+        opacity: None,
+        stroke_dasharray: dp.line_dash.clone(),
+    })));
+}
+
+fn add_ridgeline(rp: &RidgelinePlot, computed: &ComputedLayout, scene: &mut Scene) {
+    use render_utils::{silverman_bandwidth, simple_kde};
+    use crate::render::palette::Palette;
+
+    let fallback = Palette::category10();
+    let n = rp.groups.len();
+    if n == 0 { return; }
+
+    // pixels per 1 data unit on y axis
+    let cell_h_px = (computed.map_y(0.0) - computed.map_y(1.0)).abs();
+    let ridge_h_px = cell_h_px * (1.0 + rp.overlap);
+
+    for (i, group) in rp.groups.iter().enumerate() {
+        if group.values.len() < 2 { continue; }
+
+        let color = group.color.as_deref()
+            .unwrap_or_else(|| &fallback[i % fallback.len()]);
+
+        let bw = rp.bandwidth
+            .unwrap_or_else(|| silverman_bandwidth(&group.values));
+
+        let raw = simple_kde(&group.values, bw, rp.kde_samples);
+        let max_d = raw.iter().map(|&(_, d)| d).fold(0.0_f64, f64::max);
+        if max_d == 0.0 { continue; }
+
+        // group 0 = top = largest y-data value = N
+        let y_center_data = (n - i) as f64;
+        let y_center_px = computed.map_y(y_center_data);
+
+        let scale = if rp.normalize {
+            let nf = group.values.len() as f64;
+            let norm_factor = 1.0 / (nf * bw * (2.0 * std::f64::consts::PI).sqrt());
+            let max_normed = max_d * norm_factor;
+            if max_normed > 0.0 { ridge_h_px / max_normed } else { 0.0 }
+        } else {
+            ridge_h_px / max_d
+        };
+
+        // Map KDE points to pixel space
+        let pts: Vec<(f64, f64)> = raw.iter().map(|&(x, d)| {
+            let normed = if rp.normalize {
+                let nf = group.values.len() as f64;
+                d / (nf * bw * (2.0 * std::f64::consts::PI).sqrt())
+            } else {
+                d
+            };
+            (computed.map_x(x), y_center_px - normed * scale)
+        }).collect();
+
+        if pts.is_empty() { continue; }
+
+        let mut rb = ryu::Buffer::new();
+
+        // Baseline: full-width horizontal rule at the group's zero-density level.
+        // Uses the theme axis color (not the group color) so it reads as a neutral
+        // reference guide — no color clash or stroke-width mismatch with the ridge
+        // outline where they meet.  Drawn first so the fill sits on top of it.
+        if rp.show_baseline {
+            scene.add(Primitive::Line {
+                x1: computed.margin_left,
+                y1: y_center_px,
+                x2: computed.width - computed.margin_right,
+                y2: y_center_px,
+                stroke: Color::from(&computed.theme.axis_color),
+                stroke_width: computed.axis_stroke_width * 0.5,
+                stroke_dasharray: None,
+            });
+        }
+
+        // Build outline path string
+        let mut outline = String::with_capacity(pts.len() * 16);
+        for (j, &(px, py)) in pts.iter().enumerate() {
+            outline.push(if j == 0 { 'M' } else { 'L' });
+            outline.push(' ');
+            outline.push_str(rb.format(round2(px)));
+            outline.push(' ');
+            outline.push_str(rb.format(round2(py)));
+            outline.push(' ');
+        }
+        let outline = outline.trim_end().to_string();
+
+        // Emit filled area (closed path) — below outline
+        if rp.filled {
+            let first_px = pts.first().unwrap().0;
+            let last_px = pts.last().unwrap().0;
+            let s_last_px = rb.format(round2(last_px)).to_string();
+            let s_y_center = rb.format(round2(y_center_px)).to_string();
+            let s_first_px = rb.format(round2(first_px)).to_string();
+            let fill_path = format!(
+                "{} L {} {} L {} {} Z",
+                outline,
+                s_last_px, s_y_center,
+                s_first_px, s_y_center,
+            );
+            scene.add(Primitive::Path(Box::new(PathData {
+                d: fill_path,
+                fill: Some(Color::from(color)),
+                stroke: Color::from("none"),
+                stroke_width: 0.0,
+                opacity: Some(rp.opacity),
+                stroke_dasharray: None,
+            })));
+        }
+
+        // Emit outline
+        scene.add(Primitive::Path(Box::new(PathData {
+            d: outline,
+            fill: None,
+            stroke: Color::from(color),
+            stroke_width: rp.stroke_width,
+            opacity: None,
+            stroke_dasharray: rp.line_dash.clone(),
+        })));
+    }
+}
 
 pub fn render_waterfall(waterfall: &WaterfallPlot, layout: &Layout) -> Scene {
     let computed = ComputedLayout::from_layout(layout);
@@ -2945,6 +3127,32 @@ pub fn collect_legend_entries(plots: &[Plot]) -> Vec<LegendEntry> {
                             .unwrap_or_else(|| fallback[i % fallback.len()].to_string());
                         entries.push(LegendEntry {
                             label: seq.label.clone(),
+                            color,
+                            shape: LegendShape::Rect,
+                            dasharray: None,
+                        });
+                    }
+                }
+            }
+            Plot::Density(dp) => {
+                if let Some(ref label) = dp.legend_label {
+                    entries.push(LegendEntry {
+                        label: label.clone(),
+                        color: dp.color.clone(),
+                        shape: LegendShape::Line,
+                        dasharray: dp.line_dash.clone(),
+                    });
+                }
+            }
+            Plot::Ridgeline(rp) => {
+                if rp.show_legend {
+                    use crate::render::palette::Palette;
+                    let fallback = Palette::category10();
+                    for (i, group) in rp.groups.iter().enumerate() {
+                        let color = group.color.clone()
+                            .unwrap_or_else(|| fallback[i % fallback.len()].to_string());
+                        entries.push(LegendEntry {
+                            label: group.label.clone(),
                             color,
                             shape: LegendShape::Rect,
                             dasharray: None,
@@ -4309,7 +4517,7 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
             match plot {
                 Plot::Scatter(_) | Plot::Line(_) | Plot::Series(_) |
                 Plot::Histogram(_) | Plot::Box(_) | Plot::Violin(_) |
-                Plot::Band(_) | Plot::Strip(_) => {
+                Plot::Band(_) | Plot::Strip(_) | Plot::Density(_) => {
                     plot.set_color(&palette[color_idx]);
                     color_idx += 1;
                 }
@@ -4449,6 +4657,12 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
             }
             Plot::Synteny(s) => {
                 add_synteny(s, &mut scene, &computed);
+            }
+            Plot::Density(d) => {
+                add_density(d, &computed, &mut scene);
+            }
+            Plot::Ridgeline(rp) => {
+                add_ridgeline(rp, &computed, &mut scene);
             }
         }
     }

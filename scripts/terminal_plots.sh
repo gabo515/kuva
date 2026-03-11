@@ -61,6 +61,18 @@ run histogram "$DATA/histogram.tsv" --value-col value \
     --title "Value Distribution" --x-label "Value" --y-label "Count" \
     --terminal $W $H
 
+# ── density ───────────────────────────────────────────────────────────────────
+header "density"
+run density "$DATA/samples.tsv" --value expression --color-by group --filled \
+    --title "Expression by Group" --x-label "Expression" --y-label "Density" \
+    --terminal $W $H
+
+# ── ridgeline ────────────────────────────────────────────────────────────────
+header "ridgeline"
+run ridgeline "$DATA/samples.tsv" --group-by group --value expression \
+    --title "Expression by Group" --x-label "Expression" --y-label "Group" \
+    --terminal $W $H
+
 # ── boxplot ───────────────────────────────────────────────────────────────────
 header "boxplot"
 run box "$DATA/samples.tsv" --group-col group --value-col expression \

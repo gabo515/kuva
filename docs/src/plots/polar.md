@@ -60,6 +60,40 @@ let math = PolarPlot::new()
     .with_clockwise(false);
 ```
 
+### Marker opacity and stroke (scatter mode)
+
+Control fill transparency and an optional outline on scatter-mode points. Settings are per-series and must be called immediately after the series they apply to.
+
+500 observations with two dominant directions (NE at 45° and SW at 225°). With solid markers each directional cluster collapses into an opaque wedge, hiding the internal spread. At `opacity = 0.2` the denser core of each cluster is visibly darker than its fringe, and the thin `0.7 px` stroke keeps individual observations readable.
+
+```rust,no_run
+use kuva::plot::polar::PolarPlot;
+use kuva::backend::svg::SvgBackend;
+use kuva::render::render::render_multiple;
+use kuva::render::layout::Layout;
+use kuva::render::plots::Plot;
+
+// (populate r_vals and t_vals with 500 (r, theta_degrees) observations)
+# let (r_vals, t_vals): (Vec<f64>, Vec<f64>) = (vec![], vec![]);
+let plot = PolarPlot::new()
+    .with_series(r_vals, t_vals)
+    .with_color("steelblue")
+    .with_marker_opacity(0.2)
+    .with_marker_stroke_width(0.7)
+    .with_r_max(1.2)
+    .with_theta_divisions(24);
+
+let plots = vec![Plot::Polar(plot)];
+let layout = Layout::auto_from_plots(&plots)
+    .with_title("Directional scatter — semi-transparent markers (500 pts)");
+
+let svg = SvgBackend.render_scene(&render_multiple(plots, layout));
+```
+
+<img src="../assets/polar/marker_density.svg" alt="Polar scatter with two directional clusters and semi-transparent markers" width="560">
+
+These builders have no effect on `PolarMode::Line` series.
+
 ### Grid control
 
 ```rust
@@ -85,6 +119,9 @@ let plot = PolarPlot::new()
 | `.with_grid(bool)` | `true` | Show/hide grid |
 | `.with_r_labels(bool)` | `true` | Show/hide r-value labels |
 | `.with_legend(bool)` | `false` | Show legend for labeled series |
+| `.with_color(s)` | — | Set fill color of the last added series |
+| `.with_marker_opacity(f)` | solid | Fill alpha for scatter markers of the last series (`0.0`–`1.0`) |
+| `.with_marker_stroke_width(w)` | none | Outline stroke for scatter markers of the last series |
 
 ## CLI
 

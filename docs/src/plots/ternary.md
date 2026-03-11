@@ -52,6 +52,41 @@ let plot = TernaryPlot::new()
     .with_normalize(true);          // auto-divides by sum
 ```
 
+### Marker opacity and stroke
+
+For ternary plots with many overlapping points, semi-transparent or hollow markers reveal local density without merging into an opaque mass.
+
+Four soil-texture classes with 100 points each. The class boundaries overlap, so solid markers hide whether a boundary sample belongs to one class or straddles two. At `opacity = 0.3` the boundary region between Sandy loam and Loam becomes visibly darker, and individual points remain countable through the thin `0.8 px` stroke.
+
+```rust,no_run
+use kuva::plot::ternary::TernaryPlot;
+use kuva::backend::svg::SvgBackend;
+use kuva::render::render::render_multiple;
+use kuva::render::layout::Layout;
+use kuva::render::plots::Plot;
+
+// (populate each group with 100 (a, b, c) compositional samples)
+# let mut plot = TernaryPlot::new();
+let plot = TernaryPlot::new()
+    .with_corner_labels("Sand", "Silt", "Clay")
+    .with_normalize(true)
+    .with_legend(true)
+    .with_marker_size(5.0)
+    .with_marker_opacity(0.3)
+    .with_marker_stroke_width(0.8);
+// .with_point_group(a, b, c, "Sandy loam")  ← repeated for each sample
+
+let plots = vec![Plot::Ternary(plot)];
+let layout = Layout::auto_from_plots(&plots)
+    .with_title("Soil texture — semi-transparent markers (400 pts)");
+
+let svg = SvgBackend.render_scene(&render_multiple(plots, layout));
+```
+
+<img src="../assets/ternary/marker_density.svg" alt="Soil texture ternary with 400 semi-transparent markers" width="560">
+
+The stroke color matches the group color (or the category10 palette color for ungrouped points).
+
 ### Builder reference
 
 | Method | Default | Description |
@@ -66,6 +101,8 @@ let plot = TernaryPlot::new()
 | `.with_grid(bool)` | `true` | Show dashed grid lines |
 | `.with_percentages(bool)` | `true` | Show % tick labels on each edge |
 | `.with_legend(bool)` | `false` | Show group legend |
+| `.with_marker_opacity(f)` | solid | Fill alpha: `0.0` = hollow, `1.0` = solid |
+| `.with_marker_stroke_width(w)` | none | Outline stroke at the fill color |
 
 ## CLI
 

@@ -221,6 +221,48 @@ let svg = SvgBackend.render_scene(&render_multiple(plots, layout));
 
 ---
 
+## Marker opacity and stroke
+
+For dense datasets, the default solid fill causes points to merge into an opaque block. Two builders control fill transparency and an optional outline stroke to keep individual points distinguishable.
+
+### Dense strip — 500 points per group
+
+With 500 points per group, solid markers pile into uniform bars and the shape of each distribution is hidden. Setting `opacity = 0.25` makes denser bands visibly darker — here the bimodal "High dose" group clearly shows two sub-populations, and the skewed "Washout" distribution tapers naturally toward its tail. The thin `0.7 px` stroke keeps points individually readable even where they overlap most.
+
+```rust,no_run
+use kuva::plot::StripPlot;
+use kuva::backend::svg::SvgBackend;
+use kuva::render::render::render_multiple;
+use kuva::render::layout::Layout;
+use kuva::render::plots::Plot;
+
+// (populate each group with 500 values from your data source)
+# let (control, low, high, washout) = (vec![0f64], vec![0f64], vec![0f64], vec![0f64]);
+let strip = StripPlot::new()
+    .with_group("Control",   control)
+    .with_group("Low dose",  low)
+    .with_group("High dose", high)   // bimodal — two sub-populations
+    .with_group("Washout",   washout) // right-skewed
+    .with_color("steelblue")
+    .with_point_size(4.0)
+    .with_jitter(0.3)
+    .with_marker_opacity(0.25)
+    .with_marker_stroke_width(0.7);
+
+let plots = vec![Plot::Strip(strip)];
+let layout = Layout::auto_from_plots(&plots)
+    .with_title("Dense strip — semi-transparent markers (500 pts/group)")
+    .with_y_label("Measurement");
+
+let svg = SvgBackend.render_scene(&render_multiple(plots, layout));
+```
+
+<img src="../assets/strip/marker_density.svg" alt="Dense strip plot with semi-transparent markers, 500 points per group" width="560">
+
+The stroke color always matches the fill color set by `.with_color()` or `.with_group_colors()`.
+
+---
+
 ## API reference
 
 | Method | Description |
@@ -235,3 +277,5 @@ let svg = SvgBackend.render_scene(&render_multiple(plots, layout));
 | `.with_center()` | All points at group center — vertical density column |
 | `.with_seed(n)` | RNG seed for jitter positions (default `42`) |
 | `.with_legend(s)` | Attach a legend label |
+| `.with_marker_opacity(f)` | Fill alpha: `0.0` = hollow, `1.0` = solid (default: solid) |
+| `.with_marker_stroke_width(w)` | Outline stroke at the fill color; `None` = no stroke (default) |

@@ -29,6 +29,7 @@ fn main() {
     composed();
     palette();
     group_colors();
+    marker_density();
 
     println!("Strip SVGs written to {OUT}/");
 }
@@ -176,6 +177,32 @@ fn group_colors() {
 
     let svg = SvgBackend.render_scene(&render_multiple(plots, layout));
     std::fs::write(format!("{OUT}/group_colors.svg"), svg).unwrap();
+}
+
+/// 500 points per group with semi-transparent fill + stroke.
+///
+/// At this density, solid markers pile into an opaque block and the
+/// distribution shape is lost. Reducing opacity lets the darker bands reveal
+/// where points accumulate, while the stroke keeps individual points legible.
+fn marker_density() {
+    let strip = StripPlot::new()
+        .with_group("Control",   normal_samples(5.0, 0.8, 500, 50))
+        .with_group("Low dose",  normal_samples(6.0, 1.2, 500, 51))
+        .with_group("High dose", bimodal_samples(4.5, 8.5, 0.6, 500, 52))
+        .with_group("Washout",   skewed_samples(1.2, 3.5, 500, 53))
+        .with_color("steelblue")
+        .with_point_size(4.0)
+        .with_jitter(0.3)
+        .with_marker_opacity(0.25)
+        .with_marker_stroke_width(0.7);
+
+    let plots = vec![Plot::Strip(strip)];
+    let layout = Layout::auto_from_plots(&plots)
+        .with_title("Dense strip — semi-transparent markers (500 pts/group)")
+        .with_y_label("Measurement");
+
+    let svg = SvgBackend.render_scene(&render_multiple(plots, layout));
+    std::fs::write(format!("{OUT}/marker_density.svg"), svg).unwrap();
 }
 
 /// Multiple StripPlots with a palette — each plot gets a distinct color.

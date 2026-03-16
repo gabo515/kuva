@@ -25,7 +25,7 @@ pub enum TickFormat {
     Sci,
     /// Multiply by 100 and append `%`: `0.45` → `"45.0%"`.
     Percent,
-    /// Theta degree for polar plots
+    /// Theta degree for polar plots: `0.0` → `"0°"`, `90.0` → `"90°"`.
     Degree,
     /// Custom formatter function.
     Custom(Arc<dyn Fn(f64) -> String + Send + Sync>),
@@ -207,6 +207,11 @@ pub struct Layout {
     /// legend geometry, arrow sizes). Canvas `width`/`height` are not affected.
     /// Default: 1.0. Set via `with_scale(f)`.
     pub scale: f64,
+    /// Angular position (in degrees) at which r-axis (ring) labels are drawn on
+    /// polar plots. Default: midpoint between the 0° spoke and the first clockwise
+    /// spoke (`360 / (theta_divisions * 2)`). Override to avoid overlap with
+    /// custom theta tick labels.
+    pub polar_r_label_angle: Option<f64>,
 }
 
 impl Layout {
@@ -275,6 +280,7 @@ impl Layout {
             y_label_offset: (0.0, 0.0),
             y2_label_offset: (0.0, 0.0),
             scale: 1.0,
+            polar_r_label_angle: None,
         }
     }
 
@@ -618,7 +624,7 @@ impl Layout {
         }
 
         if has_polar {
-            // Use degrees as default tick for polar plots
+            // Use degrees as default tick format for polar plots.
             layout.x_tick_format = TickFormat::Degree;
         }
 
@@ -832,6 +838,27 @@ impl Layout {
     /// Clamped to a minimum of 0.1 to prevent degenerate sub-pixel rendering.
     pub fn with_scale(mut self, f: f64) -> Self {
         self.scale = f.max(0.1);
+        self
+    }
+
+    /// Override the angle (degrees) at which r-axis labels are drawn on polar plots.
+    ///
+    /// By default, labels sit at the midpoint between the 0° spoke and the first
+    /// clockwise spoke (`360 / (theta_divisions * 2)`). Use this to nudge them when
+    /// a custom theta tick label would overlap.
+    ///
+    /// ```rust,no_run
+    /// use kuva::render::layout::Layout;
+    /// use kuva::plot::polar::{PolarPlot, PolarMode};
+    /// use kuva::render::plots::Plot;
+    ///
+    /// let plot = PolarPlot::new().with_series(vec![1.0_f64], vec![0.0_f64]);
+    /// let plots = vec![Plot::Polar(plot)];
+    /// let layout = Layout::auto_from_plots(&plots)
+    ///     .with_polar_r_label_angle(30.0); // labels at 30° from north
+    /// ```
+    pub fn with_polar_r_label_angle(mut self, deg: f64) -> Self {
+        self.polar_r_label_angle = Some(deg);
         self
     }
 
@@ -1108,6 +1135,9 @@ pub struct ComputedLayout {
     /// Common bin width when all histograms share the same bin size.
     /// When set, x-axis ticks are generated to fall exactly on bin edges.
     pub x_bin_width: Option<f64>,
+    /// Angular position (degrees) at which r-axis labels are drawn on polar plots.
+    /// `None` means auto (midpoint between 0° spoke and first clockwise spoke).
+    pub polar_r_label_angle: Option<f64>,
     /// Scaled pixel constants for rendering, derived from `layout.scale`.
     /// Avoids threading the scale factor through every render function.
     pub tick_mark_major: f64,       // 5.0 * scale — major tick mark extension
@@ -1402,6 +1432,7 @@ impl ComputedLayout {
             minor_ticks: layout.minor_ticks,
             show_minor_grid: layout.show_minor_grid,
             x_bin_width: layout.x_bin_width,
+            polar_r_label_angle: layout.polar_r_label_angle,
             tick_mark_major: 5.0 * s,
             tick_mark_minor: 3.0 * s,
             tick_label_margin: 8.0 * s,

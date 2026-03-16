@@ -528,6 +528,7 @@ fn clone_layout(l: &Layout) -> Layout {
     new.y_label_offset = l.y_label_offset;
     new.y2_label_offset = l.y2_label_offset;
     new.scale = l.scale;
+    new.polar_r_label_angle = l.polar_r_label_angle;
     new
 }
 

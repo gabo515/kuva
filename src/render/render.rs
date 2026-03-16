@@ -5538,6 +5538,7 @@ fn add_polar(pp: &PolarPlot, scene: &mut Scene, computed: &ComputedLayout) {
     });
 
     let n_rings = pp.r_grid_lines.unwrap_or(4).max(1);
+    let n_div = pp.theta_divisions.max(2);
 
     // Helper: convert (r_data, theta_deg) → (px, py)
     let theta_to_px = |r_data: f64, theta_deg: f64| -> (f64, f64) {
@@ -5576,7 +5577,8 @@ fn add_polar(pp: &PolarPlot, scene: &mut Scene, computed: &ComputedLayout) {
                 stroke_dasharray: dasharray,
             })));
 
-            // R-value label at the top of each ring
+            // R-value label: place at the midpoint angle between the 0° spoke
+            // and the first clockwise spoke so it never overlaps the 0° theta label.
             if pp.show_r_labels {
                 let r_val = r_max * (i as f64) / (n_rings as f64);
                 let label = if r_val.fract() == 0.0 {
@@ -5584,9 +5586,13 @@ fn add_polar(pp: &PolarPlot, scene: &mut Scene, computed: &ComputedLayout) {
                 } else {
                     format!("{:.2}", r_val)
                 };
-                // Place label slightly to the right of north on each ring
-                let lx = cx + 4.0;
-                let ly = round2(cy - r - 4.0);
+                let mid_deg = computed.polar_r_label_angle
+                    .unwrap_or(360.0 / (n_div as f64 * 2.0));
+                let display_angle = pp.theta_start
+                    + mid_deg * if pp.clockwise { 1.0 } else { -1.0 };
+                let svg_angle = (90.0 - display_angle).to_radians();
+                let lx = round2(cx + r * svg_angle.cos() + 2.0);
+                let ly = round2(cy - r * svg_angle.sin() - 2.0);
                 scene.add(Primitive::Text {
                     x: lx,
                     y: ly,
@@ -5600,7 +5606,6 @@ fn add_polar(pp: &PolarPlot, scene: &mut Scene, computed: &ComputedLayout) {
         }
 
         // ── Spoke lines ───────────────────────────────────────────────────────
-        let n_div = pp.theta_divisions.max(2);
         for i in 0..n_div {
             let theta_deg = i as f64 * 360.0 / n_div as f64;
             let (x2, y2) = theta_to_px(r_max, theta_deg);

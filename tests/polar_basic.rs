@@ -345,3 +345,77 @@ fn test_polar_wind_rose_style() {
     assert!(svg.contains("Calm radius"));
     write("polar_wind_rose", &svg);
 }
+
+// Regression test for PR #40 / the θ=0° hardcoded-label bug.
+//
+// Before the fix, `add_polar` had:
+//   if theta_deg == 0.0 { "0°".to_string() } else { format!("{}°", ...) }
+// — meaning the 0° spoke ALWAYS showed "0°" regardless of `x_tick_format`.
+// Custom labels were "covered" at exactly θ=0.
+//
+// After the fix, all spokes go through `computed.x_tick_format.format(theta_deg)`,
+// so a custom formatter is respected at every division including 0°.
+//
+// This test uses 4 divisions (N/E/S/W) and verifies:
+//   1. The custom labels appear ("North", "East", "South", "West").
+//   2. The old hardcoded "0°" is NOT present (it would indicate the bug is back).
+//   3. Default `auto_from_plots` behaviour is unchanged: degree labels like "90°"
+//      still appear when no custom format is set.
+#[test]
+fn test_polar_custom_tick_overrides_zero_degree() {
+    use std::sync::Arc;
+    use kuva::TickFormat;
+
+    // 4-spoke polar with custom compass labels.
+    let r: Vec<f64> = vec![1.0, 2.0, 1.5, 0.5, 1.0]; // closed
+    let theta: Vec<f64> = vec![0.0, 90.0, 180.0, 270.0, 360.0];
+
+    let plot = PolarPlot::new()
+        .with_series(r, theta)
+        .with_theta_divisions(4);
+
+    let plots = vec![Plot::Polar(plot)];
+    let layout = Layout::auto_from_plots(&plots)
+        .with_x_tick_format(TickFormat::Custom(Arc::new(|v| {
+            match v as u32 {
+                0   => "North".to_string(),
+                90  => "East".to_string(),
+                180 => "South".to_string(),
+                270 => "West".to_string(),
+                _   => format!("{v}°"),
+            }
+        })));
+
+    let svg = SvgBackend.render_scene(&render_multiple(plots, layout));
+    write("polar_custom_tick_zero", &svg);
+
+    // Custom labels must appear at all four spokes.
+    assert!(svg.contains(">North<"), "θ=0° spoke must show custom label 'North'");
+    assert!(svg.contains(">East<"),  "θ=90° spoke must show 'East'");
+    assert!(svg.contains(">South<"), "θ=180° spoke must show 'South'");
+    assert!(svg.contains(">West<"),  "θ=270° spoke must show 'West'");
+
+    // The old hardcoded "0°" must NOT appear — that would mean the bug is back.
+    assert!(!svg.contains(">0°<"),
+        "θ=0° spoke must not show hardcoded '0°' when a custom format is set");
+}
+
+#[test]
+fn test_polar_default_degree_format() {
+    // Without a custom format, auto_from_plots sets TickFormat::Degree,
+    // so labels should show degree symbols: "0°", "90°", "180°", "270°".
+    let r: Vec<f64> = vec![1.0; 5];
+    let theta: Vec<f64> = vec![0.0, 90.0, 180.0, 270.0, 360.0];
+
+    let plot = PolarPlot::new()
+        .with_series(r, theta)
+        .with_theta_divisions(4);
+
+    let svg = render(plot);
+    write("polar_default_degree_format", &svg);
+
+    assert!(svg.contains(">0°<"),   "default polar format must show '0°' at θ=0");
+    assert!(svg.contains(">90°<"),  "default polar format must show '90°'");
+    assert!(svg.contains(">180°<"), "default polar format must show '180°'");
+    assert!(svg.contains(">270°<"), "default polar format must show '270°'");
+}

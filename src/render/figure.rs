@@ -317,7 +317,7 @@ impl Figure {
                         }
                     }
                 }
-                for (_, (primary, secondary)) in &twin_y_map {
+                for (primary, secondary) in twin_y_map.values() {
                     for entry in collect_legend_entries(primary).into_iter()
                         .chain(collect_legend_entries(secondary))
                     {

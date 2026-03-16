@@ -1,6 +1,6 @@
 use crate::render::layout::{Layout, DEFAULT_FONT_FAMILY};
 use crate::render::plots::Plot;
-use crate::render::render::{Primitive, Scene, TextAnchor, render_multiple, collect_legend_entries, render_legend_at};
+use crate::render::render::{Primitive, Scene, TextAnchor, render_multiple, render_twin_y, collect_legend_entries, render_legend_at};
 use crate::plot::legend::{LegendEntry, LegendGroup};
 
 #[derive(Debug, Clone)]
@@ -87,6 +87,8 @@ pub struct Figure {
     shared_legend: Option<FigureLegendPosition>,
     shared_legend_entries: Option<Vec<LegendEntry>>,
     keep_panel_legends: bool,
+    /// Sparse list of twin-Y cells: (cell_index, primary_plots, secondary_plots).
+    twin_y_plots: Vec<(usize, Vec<Plot>, Vec<Plot>)>,
 }
 
 impl Figure {
@@ -112,6 +114,7 @@ impl Figure {
             shared_legend: None,
             shared_legend_entries: None,
             keep_panel_legends: false,
+            twin_y_plots: Vec::new(),
         }
     }
 
@@ -267,6 +270,22 @@ impl Figure {
         self
     }
 
+    /// Place a twin-Y plot in a specific cell slot.
+    ///
+    /// `cell_index` is the zero-based flat cell index (row * cols + col).
+    /// Primary plots are drawn against the left Y axis; secondary plots against the right.
+    /// If no matching `Layout` is provided via `with_layouts`, the layout is auto-computed
+    /// from both plot sets via `Layout::auto_from_twin_y_plots`.
+    pub fn with_twin_y_plots(
+        mut self,
+        cell_index: usize,
+        primary: Vec<Plot>,
+        secondary: Vec<Plot>,
+    ) -> Self {
+        self.twin_y_plots.push((cell_index, primary, secondary));
+        self
+    }
+
     pub fn render(self) -> Scene {
         let Figure {
             rows, cols, structure, mut plots, layouts: user_layouts,
@@ -274,7 +293,12 @@ impl Figure {
             spacing, padding, mut cell_width, mut cell_height,
             figure_width, figure_height,
             shared_legend, shared_legend_entries, keep_panel_legends,
+            twin_y_plots,
         } = self;
+
+        // Build a lookup from cell_index → (primary, secondary) for twin-Y cells.
+        let mut twin_y_map: std::collections::HashMap<usize, (Vec<Plot>, Vec<Plot>)> =
+            twin_y_plots.into_iter().map(|(i, p, s)| (i, (p, s))).collect();
 
         validate_structure(&structure, rows, cols);
 
@@ -283,11 +307,20 @@ impl Figure {
             Some(if let Some(manual) = shared_legend_entries {
                 manual
             } else {
-                // Auto-collect from all panels, deduplicate by label
+                // Auto-collect from all panels (regular + twin-Y), deduplicate by label
                 let mut all_entries = Vec::new();
                 let mut seen_labels = std::collections::HashSet::new();
                 for panel_plots in &plots {
                     for entry in collect_legend_entries(panel_plots) {
+                        if seen_labels.insert(entry.label.clone()) {
+                            all_entries.push(entry);
+                        }
+                    }
+                }
+                for (_, (primary, secondary)) in &twin_y_map {
+                    for entry in collect_legend_entries(primary).into_iter()
+                        .chain(collect_legend_entries(secondary))
+                    {
                         if seen_labels.insert(entry.label.clone()) {
                             all_entries.push(entry);
                         }
@@ -374,6 +407,8 @@ impl Figure {
         for i in 0..structure.len() {
             let layout = if i < user_layouts.len() {
                 clone_layout(&user_layouts[i])
+            } else if let Some((primary, secondary)) = twin_y_map.get(&i) {
+                Layout::auto_from_twin_y_plots(primary, secondary)
             } else if i < plots.len() && !plots[i].is_empty() {
                 Layout::auto_from_plots(&plots[i])
             } else {
@@ -409,13 +444,21 @@ impl Figure {
 
             let slot_plots = std::mem::take(&mut plots[i]);
 
-            if !slot_plots.is_empty() {
+            let cell_scene_opt = if let Some((primary, secondary)) = twin_y_map.remove(&i) {
                 let mut layout = clone_layout(&layouts[i]);
                 layout.width = Some(cell_w);
                 layout.height = Some(cell_h);
+                Some(render_twin_y(primary, secondary, layout))
+            } else if !slot_plots.is_empty() {
+                let mut layout = clone_layout(&layouts[i]);
+                layout.width = Some(cell_w);
+                layout.height = Some(cell_h);
+                Some(render_multiple(slot_plots, layout))
+            } else {
+                None
+            };
 
-                let cell_scene = render_multiple(slot_plots, layout);
-
+            if let Some(cell_scene) = cell_scene_opt {
                 for def in cell_scene.defs {
                     master.defs.push(def);
                 }

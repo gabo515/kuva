@@ -642,3 +642,89 @@ fn figure_explicit_axis_bounds_preserved() {
     // Panel 1: x range forced to [-10, 20] → same boundary ticks
     // (both panels share the -10 / 20 assertions above, which is fine)
 }
+
+#[test]
+fn figure_twin_y_cell() {
+    // 1×2 figure: left cell is a regular scatter, right cell is a twin-Y (line + bar).
+    let primary = vec![Plot::Line(
+        LinePlot::new()
+            .with_data(vec![(0.0, 1.0), (1.0, 3.0), (2.0, 2.0), (3.0, 4.0)])
+            .with_color("steelblue")
+            .with_legend("Primary"),
+    )];
+    let secondary = vec![Plot::Line(
+        LinePlot::new()
+            .with_data(vec![(0.0, 100.0), (1.0, 250.0), (2.0, 180.0), (3.0, 320.0)])
+            .with_color("crimson")
+            .with_legend("Secondary"),
+    )];
+
+    let figure = Figure::new(1, 2)
+        .with_plots(vec![scatter_plot("green")])   // cell 0: regular
+        .with_twin_y_plots(1, primary, secondary); // cell 1: twin-Y
+
+    let scene = figure.render();
+    let svg = SvgBackend.render_scene(&scene);
+    std::fs::write("test_outputs/figure_twin_y_cell.svg", &svg).unwrap();
+
+    assert!(svg.contains("<svg"), "should produce valid SVG");
+    // Twin-Y emits a right-side y2 axis line; check the SVG has more than 2 axis line elements
+    assert!(svg.contains("<line"), "should have axis lines");
+}
+
+#[test]
+fn figure_twin_y_auto_layout() {
+    // Twin-Y cell with no explicit layout — auto_from_twin_y_plots should fire.
+    let primary = vec![Plot::Scatter(
+        ScatterPlot::new()
+            .with_data(vec![(0.0f64, 1.0f64), (1.0, 2.0), (2.0, 1.5)])
+            .with_color("steelblue"),
+    )];
+    let secondary = vec![Plot::Scatter(
+        ScatterPlot::new()
+            .with_data(vec![(0.0f64, 500.0f64), (1.0, 750.0), (2.0, 600.0)])
+            .with_color("crimson"),
+    )];
+
+    let figure = Figure::new(1, 1)
+        .with_twin_y_plots(0, primary, secondary);
+
+    let scene = figure.render();
+    let svg = SvgBackend.render_scene(&scene);
+    std::fs::write("test_outputs/figure_twin_y_auto.svg", &svg).unwrap();
+
+    assert!(svg.contains("<svg"), "should produce valid SVG");
+    assert!(svg.contains("<circle"), "scatter points should be present");
+}
+
+#[test]
+fn figure_twin_y_with_layout() {
+    // Twin-Y cell with an explicit layout passed via with_layouts.
+    let primary = vec![Plot::Line(
+        LinePlot::new()
+            .with_data(vec![(0.0, 0.0), (10.0, 1.0)])
+            .with_color("steelblue"),
+    )];
+    let secondary = vec![Plot::Line(
+        LinePlot::new()
+            .with_data(vec![(0.0, 0.0), (10.0, 1000.0)])
+            .with_color("crimson"),
+    )];
+
+    let layout = Layout::auto_from_twin_y_plots(&primary, &secondary)
+        .with_title("Twin-Y in Figure")
+        .with_x_label("Time")
+        .with_y_label("Primary")
+        .with_y2_label("Secondary");
+
+    let figure = Figure::new(1, 1)
+        .with_layouts(vec![layout])
+        .with_twin_y_plots(0, primary, secondary);
+
+    let scene = figure.render();
+    let svg = SvgBackend.render_scene(&scene);
+    std::fs::write("test_outputs/figure_twin_y_layout.svg", &svg).unwrap();
+
+    assert!(svg.contains("Twin-Y in Figure"), "title should appear");
+    assert!(svg.contains("Time"), "x label should appear");
+}

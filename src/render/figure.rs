@@ -504,6 +504,9 @@ fn clone_layout(l: &Layout) -> Layout {
     new.legend_height = l.legend_height;
     new.log_x = l.log_x;
     new.log_y = l.log_y;
+    new.annotations = l.annotations.clone();
+    new.reference_lines = l.reference_lines.clone();
+    new.shaded_regions = l.shaded_regions.clone();
     new.suppress_x_ticks = l.suppress_x_ticks;
     new.suppress_y_ticks = l.suppress_y_ticks;
     new.font_family = l.font_family.clone();
@@ -528,6 +531,14 @@ fn clone_layout(l: &Layout) -> Layout {
     new.x_datetime = l.x_datetime.clone();
     new.y_datetime = l.y_datetime.clone();
     new.x_tick_rotate = l.x_tick_rotate;
+    new.clamp_axis = l.clamp_axis;
+    new.clamp_y_axis = l.clamp_y_axis;
+    new.x_bin_width = l.x_bin_width;
+    new.term_rows = l.term_rows;
+    new.x_tick_step = l.x_tick_step;
+    new.y_tick_step = l.y_tick_step;
+    new.minor_ticks = l.minor_ticks;
+    new.show_minor_grid = l.show_minor_grid;
     new.x_label_offset = l.x_label_offset;
     new.y_label_offset = l.y_label_offset;
     new.y2_label_offset = l.y2_label_offset;

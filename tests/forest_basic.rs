@@ -285,3 +285,55 @@ fn test_forest_with_caps() {
     let line_count = svg.matches("<line").count();
     assert!(line_count >= 8, "expected at least 8 lines with caps, got {line_count}");
 }
+
+#[test]
+fn test_forest_colored_rows() {
+    let forest = ForestPlot::new()
+        .with_colored_row("Favours treatment", 0.50, 0.10, 0.90, "seagreen")
+        .with_colored_row("Favours control", -0.30, -0.80, 0.20, "tomato")
+        .with_row("Neutral", 0.05, -0.20, 0.30);
+
+    let plots = vec![Plot::Forest(forest)];
+    let layout = Layout::auto_from_plots(&plots)
+        .with_title("Forest Plot Colored Rows")
+        .with_x_label("Effect Size");
+
+    let scene = render_multiple(plots, layout);
+    let svg = SvgBackend.render_scene(&scene);
+    std::fs::write("test_outputs/forest_colored_rows.svg", svg.clone()).unwrap();
+    assert!(svg.contains("<svg"));
+    // Per-row colors should appear in the SVG.
+    // "seagreen" is not in the named-color table so it stays as a CSS string;
+    // "tomato" is resolved to its Rgb value and emitted as hex.
+    assert!(svg.contains("seagreen"), "SVG should contain seagreen");
+    assert!(svg.contains("#ff6347"), "SVG should contain #ff6347 (tomato)");
+    // Row labels should be present
+    assert!(svg.contains("Favours treatment"));
+    assert!(svg.contains("Favours control"));
+    assert!(svg.contains("Neutral"));
+}
+
+#[test]
+fn test_forest_weighted_colored_rows() {
+    let forest = ForestPlot::new()
+        .with_weighted_colored_row("Large study",  0.60, 0.30, 0.90, 10.0, "steelblue")
+        .with_weighted_colored_row("Small study", -0.20, -0.70, 0.30,  2.0, "orange")
+        .with_weighted_colored_row("Medium study", 0.10, -0.15, 0.35,  5.0, "purple");
+
+    let plots = vec![Plot::Forest(forest)];
+    let layout = Layout::auto_from_plots(&plots)
+        .with_title("Forest Plot Weighted + Colored");
+
+    let scene = render_multiple(plots, layout);
+    let svg = SvgBackend.render_scene(&scene);
+    std::fs::write("test_outputs/forest_weighted_colored.svg", svg.clone()).unwrap();
+    assert!(svg.contains("<svg"));
+    // All three per-row colors should appear.
+    // These names are in the named-color table and are emitted as hex.
+    assert!(svg.contains("#4682b4"), "SVG should contain #4682b4 (steelblue)");
+    assert!(svg.contains("#ffa500"), "SVG should contain #ffa500 (orange)");
+    assert!(svg.contains("#800080"), "SVG should contain #800080 (purple)");
+    // Weighted rows produce rects of different sizes; there should be at least 3 rects
+    let rect_count = svg.matches("<rect").count();
+    assert!(rect_count >= 3, "expected at least 3 rects for weighted markers, got {rect_count}");
+}

@@ -51,6 +51,7 @@ use crate::plot::ridgeline::RidgelinePlot;
 use crate::plot::polar::{PolarPlot, PolarMode};
 use crate::plot::ternary::TernaryPlot;
 use crate::plot::forest::ForestPlot;
+use crate::plot::scatter3d::Scatter3DPlot;
 
 use crate::plot::Legend;
 use crate::plot::legend::{ColorBarInfo, LegendEntry, LegendGroup, LegendPosition, LegendShape};
@@ -1640,6 +1641,543 @@ fn add_strip(strip: &StripPlot, scene: &mut Scene, computed: &ComputedLayout) {
         label_offset += group.values.len();
     }
 }
+
+fn add_scatter3d(s: &Scatter3DPlot, scene: &mut Scene, computed: &ComputedLayout) {
+    use crate::render::projection::{View3D, Projection3D};
+    use crate::render::layout::tick_format_auto;
+
+    if s.data.is_empty() { return; }
+
+    // Compute data ranges
+    let mut x_min = f64::INFINITY;
+    let mut x_max = f64::NEG_INFINITY;
+    let mut y_min = f64::INFINITY;
+    let mut y_max = f64::NEG_INFINITY;
+    let mut z_min = f64::INFINITY;
+    let mut z_max = f64::NEG_INFINITY;
+
+    for p in &s.data {
+        x_min = x_min.min(p.x);
+        x_max = x_max.max(p.x);
+        y_min = y_min.min(p.y);
+        y_max = y_max.max(p.y);
+        z_min = z_min.min(p.z);
+        z_max = z_max.max(p.z);
+    }
+
+    // Pad degenerate ranges
+    if (x_max - x_min).abs() < 1e-12 { x_min -= 0.5; x_max += 0.5; }
+    if (y_max - y_min).abs() < 1e-12 { y_min -= 0.5; y_max += 0.5; }
+    if (z_max - z_min).abs() < 1e-12 { z_min -= 0.5; z_max += 0.5; }
+
+    let plot_w = computed.plot_width();
+    let plot_h = computed.plot_height();
+    let plot_size = plot_w.min(plot_h);
+    let plot_cx = computed.margin_left + plot_w / 2.0;
+    let plot_cy = computed.margin_top + plot_h / 2.0;
+
+    let view = View3D { azimuth: s.azimuth, elevation: s.elevation };
+
+    // Build a temporary projection to find the front corner, then rebuild
+    // with axis ranges flipped so that data-min is always at the open corner.
+    let tmp_proj = Projection3D::new(
+        view, (0.0, 1.0), (0.0, 1.0), (0.0, 1.0),
+        plot_cx, plot_cy, plot_size,
+    );
+    // Front corner = closest bottom corner to viewer
+    let corners_bottom: [[f64; 3]; 4] = [
+        [-0.5, -0.5, -0.5], [0.5, -0.5, -0.5],
+        [0.5, 0.5, -0.5], [-0.5, 0.5, -0.5],
+    ];
+    let mut fc_x_sign = -0.5_f64;
+    let mut fc_y_sign = -0.5_f64;
+    let mut best_d = f64::INFINITY;
+    for c in &corners_bottom {
+        let (_, _, d) = tmp_proj.project_normalized(c[0], c[1], c[2]);
+        if d < best_d { best_d = d; fc_x_sign = c[0]; fc_y_sign = c[1]; }
+    }
+
+    // If front corner is at +0.5 on an axis, flip that range so min→+0.5 (front)
+    let x_range = if fc_x_sign > 0.0 { (x_max, x_min) } else { (x_min, x_max) };
+    let y_range = if fc_y_sign < 0.0 { (y_max, y_min) } else { (y_min, y_max) };
+
+    let proj = Projection3D::new(
+        view, x_range, y_range, (z_min, z_max),
+        plot_cx, plot_cy, plot_size,
+    );
+
+    let view_dir = proj.view_direction();
+    let grid_n = s.grid_lines;
+
+    // ── Box edges ──────────────────────────────────────────────────────
+    // The 12 edges of the unit cube, grouped by the two faces they border.
+    // Each face has an outward normal; an edge is "back" if both adjacent
+    // face normals point away from the viewer.
+    #[derive(Clone, Copy)]
+    struct Edge {
+        a: [f64; 3],
+        b: [f64; 3],
+    }
+
+    // Unit cube corners: (±0.5, ±0.5, ±0.5)
+    let corners: [[f64; 3]; 8] = [
+        [-0.5, -0.5, -0.5], [ 0.5, -0.5, -0.5],
+        [ 0.5,  0.5, -0.5], [-0.5,  0.5, -0.5],
+        [-0.5, -0.5,  0.5], [ 0.5, -0.5,  0.5],
+        [ 0.5,  0.5,  0.5], [-0.5,  0.5,  0.5],
+    ];
+
+    // 12 edges as index pairs
+    let edge_indices: [(usize, usize); 12] = [
+        (0,1),(1,2),(2,3),(3,0), // bottom face (z=-0.5)
+        (4,5),(5,6),(6,7),(7,4), // top face (z=+0.5)
+        (0,4),(1,5),(2,6),(3,7), // vertical
+    ];
+
+    // Face normals and which edges border each face
+    // 6 faces: -z, +z, -x, +x, -y, +y
+    let face_normals: [[f64; 3]; 6] = [
+        [0.0, 0.0, -1.0], [0.0, 0.0, 1.0],
+        [-1.0, 0.0, 0.0], [1.0, 0.0, 0.0],
+        [0.0, -1.0, 0.0], [0.0, 1.0, 0.0],
+    ];
+    // Which edges belong to each face (by edge index)
+    let face_edges: [&[usize]; 6] = [
+        &[0,1,2,3],   // bottom
+        &[4,5,6,7],   // top
+        &[3,7,8,11],  // -x
+        &[1,5,9,10],  // +x
+        &[0,4,8,9],   // -y
+        &[2,6,10,11], // +y
+    ];
+
+    // Classify faces as front-facing (normal · view_dir > 0)
+    let face_front: Vec<bool> = face_normals.iter().map(|n| {
+        n[0]*view_dir[0] + n[1]*view_dir[1] + n[2]*view_dir[2] > 0.0
+    }).collect();
+
+    let edges: Vec<Edge> = edge_indices.iter().map(|&(a, b)| Edge {
+        a: corners[a],
+        b: corners[b],
+    }).collect();
+
+    // Open-box style (like matplotlib): only draw edges that border at least
+    // one back-facing face.  Edges where ALL adjacent faces are front-facing
+    // (the "open corner") are hidden entirely.
+    //
+    // Silhouette edges (boundary: one front + one back face) are drawn solid/dark.
+    // Interior back edges (both faces back-facing) are drawn lighter.
+    let mut edge_has_back = [false; 12];
+    let mut edge_has_front = [false; 12];
+    for (fi, fe) in face_edges.iter().enumerate() {
+        for &ei in *fe {
+            if face_front[fi] {
+                edge_has_front[ei] = true;
+            } else {
+                edge_has_back[ei] = true;
+            }
+        }
+    }
+
+    let silhouette_color = Color::from("#555555");
+    let back_edge_color = Color::from("#999999");
+
+    // Draw back-wall edges (before data)
+    if s.show_box {
+        for (i, edge) in edges.iter().enumerate() {
+            if !edge_has_back[i] { continue; } // skip fully-front edges (open corner)
+            let (x1, y1, _) = proj.project_normalized(edge.a[0], edge.a[1], edge.a[2]);
+            let (x2, y2, _) = proj.project_normalized(edge.b[0], edge.b[1], edge.b[2]);
+            let is_silhouette = edge_has_front[i]; // boundary edge
+            scene.add(Primitive::Line {
+                x1: round2(x1), y1: round2(y1),
+                x2: round2(x2), y2: round2(y2),
+                stroke: if is_silhouette { silhouette_color.clone() } else { back_edge_color.clone() },
+                stroke_width: if is_silhouette { 1.0 } else { 0.5 },
+                stroke_dasharray: None,
+            });
+        }
+    }
+
+    // ── Back-pane fills (light gray wash on 3 back-facing walls) ───────
+    // Each face is defined by 4 corner indices; we draw a filled path for
+    // each back-facing face.
+    let face_corners: [[usize; 4]; 6] = [
+        [0,1,2,3], // -z (bottom)
+        [4,5,6,7], // +z (top)
+        [0,3,7,4], // -x
+        [1,2,6,5], // +x
+        [0,1,5,4], // -y
+        [3,2,6,7], // +y
+    ];
+    let pane_fill = Color::from("#f0f0f0");
+    for (fi, fc) in face_corners.iter().enumerate() {
+        if face_front[fi] { continue; } // only fill back-facing panes
+        let pts: Vec<(f64, f64)> = fc.iter().map(|&ci| {
+            let (sx, sy, _) = proj.project_normalized(corners[ci][0], corners[ci][1], corners[ci][2]);
+            (round2(sx), round2(sy))
+        }).collect();
+        let mut d = String::with_capacity(80);
+        for (j, &(px, py)) in pts.iter().enumerate() {
+            let mut rb = ryu::Buffer::new();
+            if j == 0 { d.push('M'); } else { d.push('L'); }
+            d.push_str(rb.format(px)); d.push(','); d.push_str(rb.format(py));
+        }
+        d.push('Z');
+        scene.add(Primitive::Path(Box::new(PathData {
+            d,
+            fill: Some(pane_fill.clone()),
+            stroke: Color::None,
+            stroke_width: 0.0,
+            opacity: None,
+            stroke_dasharray: None,
+        })));
+    }
+
+    // ── Grid lines on all 3 back-facing walls ──────────────────────────
+    if s.show_grid && grid_n > 0 {
+        let grid_color = Color::from("#cccccc");
+        for i in 0..=grid_n {
+            let t = i as f64 / grid_n as f64 - 0.5;
+
+            // Bottom face (-z): grid if back-facing
+            if !face_front[0] {
+                let (x1, y1, _) = proj.project_normalized(-0.5, t, -0.5);
+                let (x2, y2, _) = proj.project_normalized(0.5, t, -0.5);
+                scene.add(Primitive::Line {
+                    x1: round2(x1), y1: round2(y1), x2: round2(x2), y2: round2(y2),
+                    stroke: grid_color.clone(), stroke_width: 0.5, stroke_dasharray: None,
+                });
+                let (x1, y1, _) = proj.project_normalized(t, -0.5, -0.5);
+                let (x2, y2, _) = proj.project_normalized(t, 0.5, -0.5);
+                scene.add(Primitive::Line {
+                    x1: round2(x1), y1: round2(y1), x2: round2(x2), y2: round2(y2),
+                    stroke: grid_color.clone(), stroke_width: 0.5, stroke_dasharray: None,
+                });
+            }
+
+            // -x wall: grid lines along Y and Z
+            if !face_front[2] {
+                let (x1, y1, _) = proj.project_normalized(-0.5, t, -0.5);
+                let (x2, y2, _) = proj.project_normalized(-0.5, t, 0.5);
+                scene.add(Primitive::Line {
+                    x1: round2(x1), y1: round2(y1), x2: round2(x2), y2: round2(y2),
+                    stroke: grid_color.clone(), stroke_width: 0.5, stroke_dasharray: None,
+                });
+                let (x1, y1, _) = proj.project_normalized(-0.5, -0.5, t);
+                let (x2, y2, _) = proj.project_normalized(-0.5, 0.5, t);
+                scene.add(Primitive::Line {
+                    x1: round2(x1), y1: round2(y1), x2: round2(x2), y2: round2(y2),
+                    stroke: grid_color.clone(), stroke_width: 0.5, stroke_dasharray: None,
+                });
+            }
+
+            // +x wall: grid lines along Y and Z
+            if !face_front[3] {
+                let (x1, y1, _) = proj.project_normalized(0.5, t, -0.5);
+                let (x2, y2, _) = proj.project_normalized(0.5, t, 0.5);
+                scene.add(Primitive::Line {
+                    x1: round2(x1), y1: round2(y1), x2: round2(x2), y2: round2(y2),
+                    stroke: grid_color.clone(), stroke_width: 0.5, stroke_dasharray: None,
+                });
+                let (x1, y1, _) = proj.project_normalized(0.5, -0.5, t);
+                let (x2, y2, _) = proj.project_normalized(0.5, 0.5, t);
+                scene.add(Primitive::Line {
+                    x1: round2(x1), y1: round2(y1), x2: round2(x2), y2: round2(y2),
+                    stroke: grid_color.clone(), stroke_width: 0.5, stroke_dasharray: None,
+                });
+            }
+
+            // -y wall: grid lines along X and Z
+            if !face_front[4] {
+                let (x1, y1, _) = proj.project_normalized(t, -0.5, -0.5);
+                let (x2, y2, _) = proj.project_normalized(t, -0.5, 0.5);
+                scene.add(Primitive::Line {
+                    x1: round2(x1), y1: round2(y1), x2: round2(x2), y2: round2(y2),
+                    stroke: grid_color.clone(), stroke_width: 0.5, stroke_dasharray: None,
+                });
+                let (x1, y1, _) = proj.project_normalized(-0.5, -0.5, t);
+                let (x2, y2, _) = proj.project_normalized(0.5, -0.5, t);
+                scene.add(Primitive::Line {
+                    x1: round2(x1), y1: round2(y1), x2: round2(x2), y2: round2(y2),
+                    stroke: grid_color.clone(), stroke_width: 0.5, stroke_dasharray: None,
+                });
+            }
+
+            // +y wall: grid lines along X and Z
+            if !face_front[5] {
+                let (x1, y1, _) = proj.project_normalized(t, 0.5, -0.5);
+                let (x2, y2, _) = proj.project_normalized(t, 0.5, 0.5);
+                scene.add(Primitive::Line {
+                    x1: round2(x1), y1: round2(y1), x2: round2(x2), y2: round2(y2),
+                    stroke: grid_color.clone(), stroke_width: 0.5, stroke_dasharray: None,
+                });
+                let (x1, y1, _) = proj.project_normalized(-0.5, 0.5, t);
+                let (x2, y2, _) = proj.project_normalized(0.5, 0.5, t);
+                scene.add(Primitive::Line {
+                    x1: round2(x1), y1: round2(y1), x2: round2(x2), y2: round2(y2),
+                    stroke: grid_color.clone(), stroke_width: 0.5, stroke_dasharray: None,
+                });
+            }
+        }
+    }
+
+    // ── Tick marks and labels ──────────────────────────────────────────
+    let tick_color = Color::from("#555555");
+    let body_size = computed.body_size;
+    let tick_size = body_size.saturating_sub(2).max(8) as u32;
+
+    // Screen-space unit vector from point a to point b
+    let screen_dir = |ax: f64, ay: f64, az: f64, bx: f64, by: f64, bz: f64| -> (f64, f64) {
+        let (sx1, sy1, _) = proj.project_normalized(ax, ay, az);
+        let (sx2, sy2, _) = proj.project_normalized(bx, by, bz);
+        let dx = sx2 - sx1;
+        let dy = sy2 - sy1;
+        let len = (dx * dx + dy * dy).sqrt().max(1e-9);
+        (dx / len, dy / len)
+    };
+
+    // Screen-space unit perpendicular pointing outward from box
+    let perp_vec = |ax: f64, ay: f64, az: f64, px: f64, py: f64, pz: f64| -> (f64, f64) {
+        let (sx, sy, _) = proj.project_normalized(ax, ay, az);
+        let (ox, oy, _) = proj.project_normalized(ax + px, ay + py, az + pz);
+        let rdx = ox - sx;
+        let rdy = oy - sy;
+        let len = (rdx * rdx + rdy * rdy).sqrt().max(1e-9);
+        (rdx / len, rdy / len)
+    };
+
+    let anchor_for = |dx: f64| -> TextAnchor {
+        if dx < -0.3 { TextAnchor::End }
+        else if dx > 0.3 { TextAnchor::Start }
+        else { TextAnchor::Middle }
+    };
+
+    // Compute rotation angle from a screen-space direction vector (degrees)
+    // Rotation angle that keeps text readable (never upside-down)
+    let angle_deg = |dx: f64, dy: f64| -> f64 {
+        let a = dy.atan2(dx).to_degrees();
+        if a > 90.0 { a - 180.0 }
+        else if a < -90.0 { a + 180.0 }
+        else { a }
+    };
+
+    let tick_len = 6.0_f64;
+    let label_gap = 10.0_f64;
+    let axis_label_gap = 42.0_f64;
+
+    // Find the open front corner: the bottom corner where all adjacent faces
+    // are front-facing (closest to viewer). X and Y axes emanate from here.
+    let fc_x = fc_x_sign; // ±0.5 — the front corner's X in normalized space
+    let fc_y = fc_y_sign; // ±0.5 — the front corner's Y in normalized space
+
+    // X-axis ticks along bottom edge at Y=fc_y (the front-corner side).
+    // Use the same normalized mapping as the projection: t = (val-min)/span - 0.5
+    let x_ticks = render_utils::generate_ticks(x_min, x_max, grid_n.max(3));
+    {
+        let perp_sign = if fc_y < 0.0 { -0.1 } else { 0.1 };
+        let (ndx, ndy) = perp_vec(0.0, fc_y, -0.5, 0.0, perp_sign, 0.0);
+        let (edx, edy) = screen_dir(-0.5, fc_y, -0.5, 0.5, fc_y, -0.5);
+
+        for &tick_val in &x_ticks {
+            let t = (tick_val - x_range.0) / (x_range.1 - x_range.0) - 0.5;
+            if t.abs() > 0.501 { continue; }
+            let (sx, sy, _) = proj.project_normalized(t, fc_y, -0.5);
+            scene.add(Primitive::Line {
+                x1: round2(sx), y1: round2(sy),
+                x2: round2(sx + ndx * tick_len), y2: round2(sy + ndy * tick_len),
+                stroke: tick_color.clone(), stroke_width: 0.8, stroke_dasharray: None,
+            });
+            let lx = sx + ndx * (tick_len + label_gap);
+            let ly = sy + ndy * (tick_len + label_gap);
+            scene.add(Primitive::Text {
+                x: round2(lx), y: round2(ly + 3.0),
+                content: tick_format_auto(tick_val),
+                size: tick_size, anchor: TextAnchor::Middle,
+                rotate: Some(angle_deg(edx, edy)),
+                bold: false,
+            });
+        }
+        if let Some(ref label) = s.x_label {
+            let (mx, my, _) = proj.project_normalized(0.0, fc_y, -0.5);
+            scene.add(Primitive::Text {
+                x: round2(mx + ndx * axis_label_gap),
+                y: round2(my + ndy * axis_label_gap + 4.0),
+                content: label.clone(),
+                size: body_size as u32, anchor: TextAnchor::Middle,
+                rotate: Some(angle_deg(edx, edy)),
+                bold: true,
+            });
+        }
+    }
+
+    // Y-axis ticks along bottom edge at X=fc_x (the front-corner side).
+    let y_ticks = render_utils::generate_ticks(y_min, y_max, grid_n.max(3));
+    {
+        let perp_sign = if fc_x < 0.0 { -0.1 } else { 0.1 };
+        let (ndx, ndy) = perp_vec(fc_x, 0.0, -0.5, perp_sign, 0.0, 0.0);
+        let (edx, edy) = screen_dir(fc_x, -0.5, -0.5, fc_x, 0.5, -0.5);
+
+        for &tick_val in &y_ticks {
+            let t = (tick_val - y_range.0) / (y_range.1 - y_range.0) - 0.5;
+            if t.abs() > 0.501 { continue; }
+            let (sx, sy, _) = proj.project_normalized(fc_x, t, -0.5);
+            scene.add(Primitive::Line {
+                x1: round2(sx), y1: round2(sy),
+                x2: round2(sx + ndx * tick_len), y2: round2(sy + ndy * tick_len),
+                stroke: tick_color.clone(), stroke_width: 0.8, stroke_dasharray: None,
+            });
+            let lx = sx + ndx * (tick_len + label_gap);
+            let ly = sy + ndy * (tick_len + label_gap);
+            scene.add(Primitive::Text {
+                x: round2(lx), y: round2(ly + 3.0),
+                content: tick_format_auto(tick_val),
+                size: tick_size, anchor: TextAnchor::Middle,
+                rotate: Some(angle_deg(edx, edy)),
+                bold: false,
+            });
+        }
+        if let Some(ref label) = s.y_label {
+            let (mx, my, _) = proj.project_normalized(fc_x, 0.0, -0.5);
+            scene.add(Primitive::Text {
+                x: round2(mx + ndx * axis_label_gap),
+                y: round2(my + ndy * axis_label_gap + 4.0),
+                content: label.clone(),
+                size: body_size as u32, anchor: TextAnchor::Middle,
+                rotate: Some(angle_deg(edx, edy)),
+                bold: true,
+            });
+        }
+    }
+
+    // Z-axis ticks: along a visible vertical edge, on the right or left side
+    let z_ticks = render_utils::generate_ticks(z_min, z_max, grid_n.max(3));
+    {
+        let vert_edges: [(usize, usize, usize); 4] = [
+            (0, 4, 8), (1, 5, 9), (2, 6, 10), (3, 7, 11),
+        ];
+        // Among visible vertical edges, pick the rightmost (largest screen_x)
+        // or leftmost (smallest screen_x) depending on z_axis_right.
+        let mut best_edge = (0usize, 4usize);
+        let mut best_sx = if s.z_axis_right { f64::NEG_INFINITY } else { f64::INFINITY };
+        for &(a, b, ei) in &vert_edges {
+            if !edge_has_back[ei] { continue; }
+            let mid_x = (corners[a][0] + corners[b][0]) / 2.0;
+            let mid_y = (corners[a][1] + corners[b][1]) / 2.0;
+            let mid_z = (corners[a][2] + corners[b][2]) / 2.0;
+            let (sx, _, _) = proj.project_normalized(mid_x, mid_y, mid_z);
+            let better = if s.z_axis_right { sx > best_sx } else { sx < best_sx };
+            if better {
+                best_sx = sx;
+                best_edge = (a, b);
+            }
+        }
+
+        let edge_x = corners[best_edge.0][0];
+        let edge_y = corners[best_edge.0][1];
+        let perp_x = if edge_x < 0.0 { -0.1 } else { 0.1 };
+        let perp_y = if edge_y < 0.0 { -0.1 } else { 0.1 };
+        let (ndx, ndy) = perp_vec(edge_x, edge_y, 0.0, perp_x, perp_y, 0.0);
+
+        for &tick_val in &z_ticks {
+            let t = (tick_val - z_min) / (z_max - z_min) - 0.5;
+            if t < -0.501 || t > 0.501 { continue; }
+            let (sx, sy, _) = proj.project_normalized(edge_x, edge_y, t);
+            scene.add(Primitive::Line {
+                x1: round2(sx), y1: round2(sy),
+                x2: round2(sx + ndx * tick_len), y2: round2(sy + ndy * tick_len),
+                stroke: tick_color.clone(), stroke_width: 0.8, stroke_dasharray: None,
+            });
+            scene.add(Primitive::Text {
+                x: round2(sx + ndx * (tick_len + label_gap)),
+                y: round2(sy + ndy * (tick_len + label_gap) + 4.0),
+                content: tick_format_auto(tick_val),
+                size: tick_size,
+                anchor: anchor_for(ndx),
+                rotate: None,
+                bold: false,
+            });
+        }
+        if let Some(ref label) = s.z_label {
+            // Z label: rotated vertically (90°) along the Z edge
+            let (mx, my, _) = proj.project_normalized(edge_x, edge_y, 0.0);
+            scene.add(Primitive::Text {
+                x: round2(mx + ndx * (axis_label_gap + 6.0)),
+                y: round2(my + ndy * (axis_label_gap + 6.0) + 4.0),
+                content: label.clone(),
+                size: body_size as u32,
+                anchor: TextAnchor::Middle,
+                rotate: Some(-90.0),
+                bold: true,
+            });
+        }
+    }
+
+    // ── Data points (depth-sorted, back to front) ──────────────────────
+    let z_span = z_max - z_min;
+    let has_z_cmap = s.z_colormap.is_some();
+
+    struct ProjectedPoint {
+        sx: f64,
+        sy: f64,
+        depth: f64,
+        idx: usize,
+    }
+
+    let mut projected: Vec<ProjectedPoint> = s.data.iter().enumerate().map(|(i, p)| {
+        let (sx, sy, depth) = proj.project(p.x, p.y, p.z);
+        ProjectedPoint { sx, sy, depth, idx: i }
+    }).collect();
+
+    // Sort back-to-front (largest depth first)
+    projected.sort_by(|a, b| b.depth.partial_cmp(&a.depth).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Compute depth range for shading
+    let (depth_min, depth_max) = if s.depth_shade {
+        let dmin = projected.iter().map(|p| p.depth).fold(f64::INFINITY, f64::min);
+        let dmax = projected.iter().map(|p| p.depth).fold(f64::NEG_INFINITY, f64::max);
+        (dmin, dmax)
+    } else {
+        (0.0, 1.0)
+    };
+    let depth_span = (depth_max - depth_min).max(1e-12);
+
+    for pp in &projected {
+        let i = pp.idx;
+        let point_size = s.sizes.as_ref().and_then(|v| v.get(i).copied()).unwrap_or(s.size);
+
+        let fill_color = if has_z_cmap {
+            let norm = (s.data[i].z - z_min) / (z_span + f64::EPSILON);
+            s.z_colormap.as_ref().unwrap().map(norm.clamp(0.0, 1.0))
+        } else if let Some(ref colors) = s.colors {
+            colors.get(i).cloned().unwrap_or_else(|| s.color.clone())
+        } else {
+            s.color.clone()
+        };
+
+        let opacity = if s.depth_shade {
+            let t = (pp.depth - depth_min) / depth_span; // 0=front, 1=back
+            let alpha = 1.0 - t * 0.7; // front=1.0, back=0.3
+            Some(s.marker_opacity.unwrap_or(1.0) * alpha)
+        } else {
+            s.marker_opacity
+        };
+
+        draw_marker(
+            scene,
+            s.marker,
+            round2(pp.sx),
+            round2(pp.sy),
+            point_size,
+            &fill_color,
+            opacity,
+            s.marker_stroke_width.map(|_| Color::from("#333333")),
+            s.marker_stroke_width,
+        );
+    }
+
+}
+
 
 fn add_forest(forest: &ForestPlot, scene: &mut Scene, computed: &ComputedLayout) {
     let n = forest.rows.len();
@@ -3558,6 +4096,16 @@ pub fn collect_legend_entries(plots: &[Plot]) -> Vec<LegendEntry> {
                     }
                 }
             }
+            Plot::Scatter3D(s) => {
+                if let Some(ref label) = s.legend_label {
+                    entries.push(LegendEntry {
+                        label: label.clone(),
+                        color: s.color.clone(),
+                        shape: LegendShape::Marker(s.marker),
+                        dasharray: None,
+                    });
+                }
+            }
             _ => {}
         }
     }
@@ -4930,7 +5478,7 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
                 Plot::Scatter(_) | Plot::Line(_) | Plot::Series(_) |
                 Plot::Histogram(_) | Plot::Box(_) | Plot::Violin(_) |
                 Plot::Band(_) | Plot::Strip(_) | Plot::Density(_) |
-                Plot::Forest(_) => {
+                Plot::Forest(_) | Plot::Scatter3D(_) => {
                     plot.set_color(&palette[color_idx]);
                     color_idx += 1;
                 }
@@ -4986,7 +5534,7 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
     scene.font_family = computed.font_family.clone();
     apply_theme(&mut scene, &computed.theme);
 
-    let skip_axes = plots.iter().all(|p| matches!(p, Plot::Pie(_) | Plot::UpSet(_) | Plot::Chord(_) | Plot::Sankey(_) | Plot::PhyloTree(_) | Plot::Synteny(_) | Plot::Polar(_) | Plot::Ternary(_)));
+    let skip_axes = plots.iter().all(|p| matches!(p, Plot::Pie(_) | Plot::UpSet(_) | Plot::Chord(_) | Plot::Sankey(_) | Plot::PhyloTree(_) | Plot::Synteny(_) | Plot::Polar(_) | Plot::Ternary(_) | Plot::Scatter3D(_)));
     if !skip_axes {
         add_axes_and_grid(&mut scene, &computed, &layout);
     }
@@ -5085,6 +5633,9 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
             }
             Plot::Forest(f) => {
                 add_forest(f, &mut scene, &computed);
+            }
+            Plot::Scatter3D(s) => {
+                add_scatter3d(s, &mut scene, &computed);
             }
         }
     }

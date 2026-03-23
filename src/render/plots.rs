@@ -28,6 +28,7 @@ use crate::plot::ridgeline::RidgelinePlot;
 use crate::plot::polar::PolarPlot;
 use crate::plot::ternary::TernaryPlot;
 use crate::plot::forest::ForestPlot;
+use crate::plot::scatter3d::Scatter3DPlot;
 use crate::plot::legend::ColorBarInfo;
 use crate::render::render_utils;
 
@@ -63,6 +64,7 @@ pub enum Plot {
     Polar(PolarPlot),
     Ternary(TernaryPlot),
     Forest(ForestPlot),
+    Scatter3D(Scatter3DPlot),
 }
 
 impl From<ScatterPlot>    for Plot { fn from(p: ScatterPlot)    -> Self { Plot::Scatter(p) } }
@@ -95,6 +97,7 @@ impl From<RidgelinePlot> for Plot { fn from(p: RidgelinePlot) -> Self { Plot::Ri
 impl From<PolarPlot>     for Plot { fn from(p: PolarPlot)     -> Self { Plot::Polar(p) } }
 impl From<TernaryPlot>   for Plot { fn from(p: TernaryPlot)   -> Self { Plot::Ternary(p) } }
 impl From<ForestPlot>    for Plot { fn from(p: ForestPlot)    -> Self { Plot::Forest(p) } }
+impl From<Scatter3DPlot> for Plot { fn from(p: Scatter3DPlot) -> Self { Plot::Scatter3D(p) } }
 
 fn bounds_from_2d<I>(points: I) -> Option<((f64, f64), (f64, f64))>
     where
@@ -145,6 +148,7 @@ impl Plot {
             Plot::Strip(s) => s.color = color.into(),
             Plot::Density(d) => d.color = color.into(),
             Plot::Forest(f) => f.color = color.into(),
+            Plot::Scatter3D(s) => s.color = color.into(),
             _ => {}
         }
     }
@@ -599,6 +603,10 @@ impl Plot {
                 if !x_min.is_finite() { return None; }
                 Some(((x_min, x_max), (y_min, y_max)))
             }
+            Plot::Scatter3D(_) => {
+                // Rendered in pixel space with own axes; dummy bounds.
+                Some(((-1.0, 1.0), (-1.0, 1.0)))
+            }
         }
     }
 
@@ -628,6 +636,7 @@ impl Plot {
                 rows * avg_cols + 10
             }
             Plot::Forest(f) => f.rows.len() * 4 + 5,
+            Plot::Scatter3D(s) => s.data.len() + 70,
             _ => 100,
         }
     }
@@ -682,6 +691,24 @@ impl Plot {
                 if !z_min.is_finite() || !z_max.is_finite() { return None; }
                 let cmap = cp.color_map.clone();
                 let label = cp.legend_label.clone();
+                Some(ColorBarInfo {
+                    map_fn: Arc::new(move |t| {
+                        let norm = (t - z_min) / (z_max - z_min + f64::EPSILON);
+                        cmap.map(norm.clamp(0.0, 1.0))
+                    }),
+                    min_value: z_min,
+                    max_value: z_max,
+                    label,
+                })
+            }
+            Plot::Scatter3D(s) => {
+                let cmap = s.z_colormap.as_ref()?;
+                if s.data.is_empty() { return None; }
+                let z_min = s.data.iter().map(|p| p.z).fold(f64::INFINITY, f64::min);
+                let z_max = s.data.iter().map(|p| p.z).fold(f64::NEG_INFINITY, f64::max);
+                if !z_min.is_finite() || !z_max.is_finite() { return None; }
+                let cmap = cmap.clone();
+                let label = s.z_label.clone();
                 Some(ColorBarInfo {
                     map_fn: Arc::new(move |t| {
                         let norm = (t - z_min) / (z_max - z_min + f64::EPSILON);

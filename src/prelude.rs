@@ -69,6 +69,8 @@ pub use crate::plot::{
     TernaryPoint,
     ForestPlot,
     ForestRow,
+    Scatter3DPlot,
+    Scatter3DPoint,
     // Style / config types used when building plots
     MarkerShape,
     LineStyle,

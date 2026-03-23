@@ -67,7 +67,7 @@ fn tick_format_degree(v: f64) -> String {
     }
 }
 
-fn tick_format_auto(v: f64) -> String {
+pub(crate) fn tick_format_auto(v: f64) -> String {
     if v.fract().abs() < 1e-9 {
         format!("{:.0}", v)
     } else if v.abs() >= 10_000.0 || (v != 0.0 && v.abs() < 0.01) {
@@ -557,6 +557,16 @@ impl Layout {
                     for g in tp.unique_groups() {
                         max_label_len = max_label_len.max(g.len());
                     }
+                }
+            }
+
+            if let Plot::Scatter3D(sp) = plot {
+                if let Some(ref label) = sp.legend_label {
+                    has_legend = true;
+                    max_label_len = max_label_len.max(label.len());
+                }
+                if sp.z_colormap.is_some() {
+                    has_colorbar = true;
                 }
             }
         }

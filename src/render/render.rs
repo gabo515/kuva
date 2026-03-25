@@ -52,6 +52,7 @@ use crate::plot::polar::{PolarPlot, PolarMode};
 use crate::plot::ternary::TernaryPlot;
 use crate::plot::forest::ForestPlot;
 use crate::plot::scatter3d::Scatter3DPlot;
+use crate::plot::surface3d::Surface3DPlot;
 
 use crate::plot::Legend;
 use crate::plot::legend::{ColorBarInfo, LegendEntry, LegendGroup, LegendPosition, LegendShape};
@@ -1642,14 +1643,28 @@ fn add_strip(strip: &StripPlot, scene: &mut Scene, computed: &ComputedLayout) {
     }
 }
 
-fn add_scatter3d(s: &Scatter3DPlot, scene: &mut Scene, computed: &ComputedLayout) {
-    use crate::render::projection::Projection3D;
+// ── Shared 3D box / grid / axes infrastructure ─────────────────────────────
+// Used by both Scatter3D and Surface3D.
+
+use crate::render::projection::Projection3D;
+use crate::plot::plot3d::{DataRanges3D, Box3DConfig};
+
+/// Returned by `draw_3d_box` so the caller can project its own data.
+struct Box3DResult {
+    proj: Projection3D,
+}
+
+/// Draw the 3D open-box wireframe, back-pane fills, grid lines, tick marks,
+/// and axis labels. Returns the Projection3D and effective axis ranges so
+/// the caller can project its data consistently.
+fn draw_3d_box(
+    ranges: DataRanges3D,
+    cfg: &Box3DConfig,
+    scene: &mut Scene,
+    computed: &ComputedLayout,
+) -> Box3DResult {
     use crate::render::layout::TickFormat;
 
-    let ranges = match s.data_ranges() {
-        Some(r) => r,
-        None => return,
-    };
     let (x_min, x_max) = ranges.x;
     let (y_min, y_max) = ranges.y;
     let (z_min, z_max) = ranges.z;
@@ -1661,31 +1676,27 @@ fn add_scatter3d(s: &Scatter3DPlot, scene: &mut Scene, computed: &ComputedLayout
     let plot_cy = computed.margin_top + plot_h / 2.0;
 
     // Find the front corner using only the rotation matrix (no full projection needed)
-    let (fc_x, fc_y) = s.view.front_bottom_corner();
+    let (fc_x, fc_y) = cfg.view.front_bottom_corner();
 
     // Flip axis ranges so data-min is always at the open front corner
     let x_range = if fc_x > 0.0 { (x_max, x_min) } else { (x_min, x_max) };
     let y_range = if fc_y < 0.0 { (y_max, y_min) } else { (y_min, y_max) };
 
     let proj = Projection3D::new(
-        s.view, x_range, y_range, (z_min, z_max),
+        cfg.view, x_range, y_range, (z_min, z_max),
         plot_cx, plot_cy, plot_size,
     );
 
     let view_dir = proj.view_direction();
-    let grid_n = s.grid_lines;
+    let grid_n = cfg.grid_lines;
 
     // ── Box edges ──────────────────────────────────────────────────────
-    // The 12 edges of the unit cube, grouped by the two faces they border.
-    // Each face has an outward normal; an edge is "back" if both adjacent
-    // face normals point away from the viewer.
     #[derive(Clone, Copy)]
     struct Edge {
         a: [f64; 3],
         b: [f64; 3],
     }
 
-    // Unit cube corners: (±0.5, ±0.5, ±0.5)
     let corners: [[f64; 3]; 8] = [
         [-0.5, -0.5, -0.5], [ 0.5, -0.5, -0.5],
         [ 0.5,  0.5, -0.5], [-0.5,  0.5, -0.5],
@@ -1693,31 +1704,21 @@ fn add_scatter3d(s: &Scatter3DPlot, scene: &mut Scene, computed: &ComputedLayout
         [ 0.5,  0.5,  0.5], [-0.5,  0.5,  0.5],
     ];
 
-    // 12 edges as index pairs
     let edge_indices: [(usize, usize); 12] = [
-        (0,1),(1,2),(2,3),(3,0), // bottom face (z=-0.5)
-        (4,5),(5,6),(6,7),(7,4), // top face (z=+0.5)
-        (0,4),(1,5),(2,6),(3,7), // vertical
+        (0,1),(1,2),(2,3),(3,0),
+        (4,5),(5,6),(6,7),(7,4),
+        (0,4),(1,5),(2,6),(3,7),
     ];
 
-    // Face normals and which edges border each face
-    // 6 faces: -z, +z, -x, +x, -y, +y
     let face_normals: [[f64; 3]; 6] = [
         [0.0, 0.0, -1.0], [0.0, 0.0, 1.0],
         [-1.0, 0.0, 0.0], [1.0, 0.0, 0.0],
         [0.0, -1.0, 0.0], [0.0, 1.0, 0.0],
     ];
-    // Which edges belong to each face (by edge index)
     let face_edges: [&[usize]; 6] = [
-        &[0,1,2,3],   // bottom
-        &[4,5,6,7],   // top
-        &[3,7,8,11],  // -x
-        &[1,5,9,10],  // +x
-        &[0,4,8,9],   // -y
-        &[2,6,10,11], // +y
+        &[0,1,2,3], &[4,5,6,7], &[3,7,8,11], &[1,5,9,10], &[0,4,8,9], &[2,6,10,11],
     ];
 
-    // Classify faces as front-facing (normal · view_dir > 0)
     let face_front: [bool; 6] = std::array::from_fn(|i| {
         let n = &face_normals[i];
         n[0]*view_dir[0] + n[1]*view_dir[1] + n[2]*view_dir[2] > 0.0
@@ -1728,34 +1729,26 @@ fn add_scatter3d(s: &Scatter3DPlot, scene: &mut Scene, computed: &ComputedLayout
         Edge { a: corners[a], b: corners[b] }
     });
 
-    // Open-box style (like matplotlib): only draw edges that border at least
-    // one back-facing face.  Edges where ALL adjacent faces are front-facing
-    // (the "open corner") are hidden entirely.
-    //
-    // Silhouette edges (boundary: one front + one back face) are drawn solid/dark.
-    // Interior back edges (both faces back-facing) are drawn lighter.
+    // Open-box style (like matplotlib): only draw edges bordering at least
+    // one back-facing face. The "open corner" (all-front faces) is hidden.
     let mut edge_has_back = [false; 12];
     let mut edge_has_front = [false; 12];
     for (fi, fe) in face_edges.iter().enumerate() {
         for &ei in *fe {
-            if face_front[fi] {
-                edge_has_front[ei] = true;
-            } else {
-                edge_has_back[ei] = true;
-            }
+            if face_front[fi] { edge_has_front[ei] = true; }
+            else { edge_has_back[ei] = true; }
         }
     }
 
     let silhouette_color = Color::from("#555555");
     let back_edge_color = Color::from("#999999");
 
-    // Draw back-wall edges (before data)
-    if s.show_box {
+    if cfg.show_box {
         for (i, edge) in edges.iter().enumerate() {
-            if !edge_has_back[i] { continue; } // skip fully-front edges (open corner)
+            if !edge_has_back[i] { continue; }
             let (x1, y1, _) = proj.project_normalized(edge.a[0], edge.a[1], edge.a[2]);
             let (x2, y2, _) = proj.project_normalized(edge.b[0], edge.b[1], edge.b[2]);
-            let is_silhouette = edge_has_front[i]; // boundary edge
+            let is_silhouette = edge_has_front[i];
             scene.add(Primitive::Line {
                 x1: round2(x1), y1: round2(y1),
                 x2: round2(x2), y2: round2(y2),
@@ -1766,20 +1759,13 @@ fn add_scatter3d(s: &Scatter3DPlot, scene: &mut Scene, computed: &ComputedLayout
         }
     }
 
-    // ── Back-pane fills (light gray wash on 3 back-facing walls) ───────
-    // Each face is defined by 4 corner indices; we draw a filled path for
-    // each back-facing face.
+    // ── Back-pane fills ─────────────────────────────────────────────────
     let face_corners: [[usize; 4]; 6] = [
-        [0,1,2,3], // -z (bottom)
-        [4,5,6,7], // +z (top)
-        [0,3,7,4], // -x
-        [1,2,6,5], // +x
-        [0,1,5,4], // -y
-        [3,2,6,7], // +y
+        [0,1,2,3], [4,5,6,7], [0,3,7,4], [1,2,6,5], [0,1,5,4], [3,2,6,7],
     ];
     let pane_fill = Color::from("#f0f0f0");
     for (fi, fc) in face_corners.iter().enumerate() {
-        if face_front[fi] { continue; } // only fill back-facing panes
+        if face_front[fi] { continue; }
         let pts: Vec<(f64, f64)> = fc.iter().map(|&ci| {
             let (sx, sy, _) = proj.project_normalized(corners[ci][0], corners[ci][1], corners[ci][2]);
             (sx, sy)
@@ -1787,35 +1773,23 @@ fn add_scatter3d(s: &Scatter3DPlot, scene: &mut Scene, computed: &ComputedLayout
         let mut d = build_path(&pts);
         d.push('Z');
         scene.add(Primitive::Path(Box::new(PathData {
-            d,
-            fill: Some(pane_fill.clone()),
-            stroke: Color::None,
-            stroke_width: 0.0,
-            opacity: None,
-            stroke_dasharray: None,
+            d, fill: Some(pane_fill.clone()), stroke: Color::None,
+            stroke_width: 0.0, opacity: None, stroke_dasharray: None,
         })));
     }
 
-    // ── Grid lines on all 3 back-facing walls ──────────────────────────
-    if s.show_grid && grid_n > 0 {
+    // ── Grid lines on back-facing walls ────────────────────────────────
+    if cfg.show_grid && grid_n > 0 {
         let grid_color = Color::from("#cccccc");
-        // Table-driven grid: (face_index, line1_endpoints_fn, line2_endpoints_fn).
-        // Top face (+z, index 1) is omitted — it is always front-facing at
-        // positive elevation and would occlude data points.
+        // Top face (+z, index 1) is omitted — always front-facing at positive elevation.
         type EndpointFn = fn(f64) -> ([f64; 3], [f64; 3]);
         let grid_faces: [(usize, EndpointFn, EndpointFn); 5] = [
-            // bottom (-z): vary along x and y
             (0, |t| ([-0.5, t, -0.5], [0.5, t, -0.5]), |t| ([t, -0.5, -0.5], [t, 0.5, -0.5])),
-            // -x wall: vary along y and z
             (2, |t| ([-0.5, t, -0.5], [-0.5, t, 0.5]), |t| ([-0.5, -0.5, t], [-0.5, 0.5, t])),
-            // +x wall
             (3, |t| ([0.5, t, -0.5], [0.5, t, 0.5]), |t| ([0.5, -0.5, t], [0.5, 0.5, t])),
-            // -y wall: vary along x and z
             (4, |t| ([t, -0.5, -0.5], [t, -0.5, 0.5]), |t| ([-0.5, -0.5, t], [0.5, -0.5, t])),
-            // +y wall
             (5, |t| ([t, 0.5, -0.5], [t, 0.5, 0.5]), |t| ([-0.5, 0.5, t], [0.5, 0.5, t])),
         ];
-
         for i in 0..=grid_n {
             let t = i as f64 / grid_n as f64 - 0.5;
             for &(fi, line_a, line_b) in &grid_faces {
@@ -1838,55 +1812,38 @@ fn add_scatter3d(s: &Scatter3DPlot, scene: &mut Scene, computed: &ComputedLayout
     let body_size = computed.body_size;
     let tick_size = body_size.saturating_sub(2).max(8) as u32;
 
-    // Screen-space unit vector from point a to point b
     let screen_dir = |ax: f64, ay: f64, az: f64, bx: f64, by: f64, bz: f64| -> (f64, f64) {
         let (sx1, sy1, _) = proj.project_normalized(ax, ay, az);
         let (sx2, sy2, _) = proj.project_normalized(bx, by, bz);
-        let dx = sx2 - sx1;
-        let dy = sy2 - sy1;
+        let dx = sx2 - sx1; let dy = sy2 - sy1;
         let len = (dx * dx + dy * dy).sqrt().max(1e-9);
         (dx / len, dy / len)
     };
-
-    // Screen-space unit perpendicular pointing outward from box
     let perp_vec = |ax: f64, ay: f64, az: f64, px: f64, py: f64, pz: f64| -> (f64, f64) {
         let (sx, sy, _) = proj.project_normalized(ax, ay, az);
         let (ox, oy, _) = proj.project_normalized(ax + px, ay + py, az + pz);
-        let rdx = ox - sx;
-        let rdy = oy - sy;
+        let rdx = ox - sx; let rdy = oy - sy;
         let len = (rdx * rdx + rdy * rdy).sqrt().max(1e-9);
         (rdx / len, rdy / len)
     };
-
     let anchor_for = |dx: f64| -> TextAnchor {
-        if dx < -0.3 { TextAnchor::End }
-        else if dx > 0.3 { TextAnchor::Start }
-        else { TextAnchor::Middle }
+        if dx < -0.3 { TextAnchor::End } else if dx > 0.3 { TextAnchor::Start } else { TextAnchor::Middle }
     };
-
-    // Compute rotation angle from a screen-space direction vector (degrees)
-    // Rotation angle that keeps text readable (never upside-down)
     let angle_deg = |dx: f64, dy: f64| -> f64 {
         let a = dy.atan2(dx).to_degrees();
-        if a > 90.0 { a - 180.0 }
-        else if a < -90.0 { a + 180.0 }
-        else { a }
+        if a > 90.0 { a - 180.0 } else if a < -90.0 { a + 180.0 } else { a }
     };
 
     let tick_len = 6.0_f64;
     let label_gap = 10.0_f64;
     let axis_label_gap = 42.0_f64;
 
-    // Find the open front corner: the bottom corner where all adjacent faces
-    // are front-facing (closest to viewer). X and Y axes emanate from here.
-    // X-axis ticks along bottom edge at Y=fc_y (the front-corner side).
-    // Use the same normalized mapping as the projection: t = (val-min)/span - 0.5
+    // X-axis ticks
     let x_ticks = render_utils::generate_ticks(x_min, x_max, grid_n.max(3));
     {
         let perp_sign = if fc_y < 0.0 { -0.1 } else { 0.1 };
         let (ndx, ndy) = perp_vec(0.0, fc_y, -0.5, 0.0, perp_sign, 0.0);
         let (edx, edy) = screen_dir(-0.5, fc_y, -0.5, 0.5, fc_y, -0.5);
-
         for &tick_val in &x_ticks {
             let t = (tick_val - x_range.0) / (x_range.1 - x_range.0) - 0.5;
             if t.abs() > 0.501 { continue; }
@@ -1902,30 +1859,25 @@ fn add_scatter3d(s: &Scatter3DPlot, scene: &mut Scene, computed: &ComputedLayout
                 x: round2(lx), y: round2(ly + 3.0),
                 content: TickFormat::Auto.format(tick_val),
                 size: tick_size, anchor: TextAnchor::Middle,
-                rotate: Some(angle_deg(edx, edy)),
-                bold: false,
+                rotate: Some(angle_deg(edx, edy)), bold: false,
             });
         }
-        if let Some(ref label) = s.x_label {
+        if let Some(ref label) = cfg.x_label {
             let (mx, my, _) = proj.project_normalized(0.0, fc_y, -0.5);
             scene.add(Primitive::Text {
-                x: round2(mx + ndx * axis_label_gap),
-                y: round2(my + ndy * axis_label_gap + 4.0),
-                content: label.clone(),
-                size: body_size as u32, anchor: TextAnchor::Middle,
-                rotate: Some(angle_deg(edx, edy)),
-                bold: true,
+                x: round2(mx + ndx * axis_label_gap), y: round2(my + ndy * axis_label_gap + 4.0),
+                content: label.to_string(), size: body_size as u32, anchor: TextAnchor::Middle,
+                rotate: Some(angle_deg(edx, edy)), bold: true,
             });
         }
     }
 
-    // Y-axis ticks along bottom edge at X=fc_x (the front-corner side).
+    // Y-axis ticks
     let y_ticks = render_utils::generate_ticks(y_min, y_max, grid_n.max(3));
     {
         let perp_sign = if fc_x < 0.0 { -0.1 } else { 0.1 };
         let (ndx, ndy) = perp_vec(fc_x, 0.0, -0.5, perp_sign, 0.0, 0.0);
         let (edx, edy) = screen_dir(fc_x, -0.5, -0.5, fc_x, 0.5, -0.5);
-
         for &tick_val in &y_ticks {
             let t = (tick_val - y_range.0) / (y_range.1 - y_range.0) - 0.5;
             if t.abs() > 0.501 { continue; }
@@ -1941,55 +1893,44 @@ fn add_scatter3d(s: &Scatter3DPlot, scene: &mut Scene, computed: &ComputedLayout
                 x: round2(lx), y: round2(ly + 3.0),
                 content: TickFormat::Auto.format(tick_val),
                 size: tick_size, anchor: TextAnchor::Middle,
-                rotate: Some(angle_deg(edx, edy)),
-                bold: false,
+                rotate: Some(angle_deg(edx, edy)), bold: false,
             });
         }
-        if let Some(ref label) = s.y_label {
+        if let Some(ref label) = cfg.y_label {
             let (mx, my, _) = proj.project_normalized(fc_x, 0.0, -0.5);
             scene.add(Primitive::Text {
-                x: round2(mx + ndx * axis_label_gap),
-                y: round2(my + ndy * axis_label_gap + 4.0),
-                content: label.clone(),
-                size: body_size as u32, anchor: TextAnchor::Middle,
-                rotate: Some(angle_deg(edx, edy)),
-                bold: true,
+                x: round2(mx + ndx * axis_label_gap), y: round2(my + ndy * axis_label_gap + 4.0),
+                content: label.to_string(), size: body_size as u32, anchor: TextAnchor::Middle,
+                rotate: Some(angle_deg(edx, edy)), bold: true,
             });
         }
     }
 
-    // Z-axis ticks: along a visible vertical edge, on the right or left side
+    // Z-axis ticks
     let z_ticks = render_utils::generate_ticks(z_min, z_max, grid_n.max(3));
     {
         let vert_edges: [(usize, usize, usize); 4] = [
             (0, 4, 8), (1, 5, 9), (2, 6, 10), (3, 7, 11),
         ];
-        // Among visible vertical edges, pick the rightmost (largest screen_x)
-        // or leftmost (smallest screen_x) depending on z_axis_right.
         let mut best_edge = (0usize, 4usize);
-        let mut best_sx = if s.z_axis_right { f64::NEG_INFINITY } else { f64::INFINITY };
+        let mut best_sx = if cfg.z_axis_right { f64::NEG_INFINITY } else { f64::INFINITY };
         for &(a, b, ei) in &vert_edges {
             if !edge_has_back[ei] { continue; }
             let mid_x = (corners[a][0] + corners[b][0]) / 2.0;
             let mid_y = (corners[a][1] + corners[b][1]) / 2.0;
             let mid_z = (corners[a][2] + corners[b][2]) / 2.0;
             let (sx, _, _) = proj.project_normalized(mid_x, mid_y, mid_z);
-            let better = if s.z_axis_right { sx > best_sx } else { sx < best_sx };
-            if better {
-                best_sx = sx;
-                best_edge = (a, b);
-            }
+            let better = if cfg.z_axis_right { sx > best_sx } else { sx < best_sx };
+            if better { best_sx = sx; best_edge = (a, b); }
         }
-
         let edge_x = corners[best_edge.0][0];
         let edge_y = corners[best_edge.0][1];
         let perp_x = if edge_x < 0.0 { -0.1 } else { 0.1 };
         let perp_y = if edge_y < 0.0 { -0.1 } else { 0.1 };
         let (ndx, ndy) = perp_vec(edge_x, edge_y, 0.0, perp_x, perp_y, 0.0);
-
         for &tick_val in &z_ticks {
             let t = (tick_val - z_min) / (z_max - z_min) - 0.5;
-            if t < -0.501 || t > 0.501 { continue; }
+            if t.abs() > 0.501 { continue; }
             let (sx, sy, _) = proj.project_normalized(edge_x, edge_y, t);
             scene.add(Primitive::Line {
                 x1: round2(sx), y1: round2(sy),
@@ -2000,26 +1941,32 @@ fn add_scatter3d(s: &Scatter3DPlot, scene: &mut Scene, computed: &ComputedLayout
                 x: round2(sx + ndx * (tick_len + label_gap)),
                 y: round2(sy + ndy * (tick_len + label_gap) + 4.0),
                 content: TickFormat::Auto.format(tick_val),
-                size: tick_size,
-                anchor: anchor_for(ndx),
-                rotate: None,
-                bold: false,
+                size: tick_size, anchor: anchor_for(ndx), rotate: None, bold: false,
             });
         }
-        if let Some(ref label) = s.z_label {
-            // Z label: rotated vertically (90°) along the Z edge
+        if let Some(ref label) = cfg.z_label {
             let (mx, my, _) = proj.project_normalized(edge_x, edge_y, 0.0);
             scene.add(Primitive::Text {
                 x: round2(mx + ndx * (axis_label_gap + 6.0)),
                 y: round2(my + ndy * (axis_label_gap + 6.0) + 4.0),
-                content: label.clone(),
-                size: body_size as u32,
-                anchor: TextAnchor::Middle,
-                rotate: Some(-90.0),
-                bold: true,
+                content: label.to_string(), size: body_size as u32,
+                anchor: TextAnchor::Middle, rotate: Some(-90.0), bold: true,
             });
         }
     }
+
+    Box3DResult { proj }
+}
+
+fn add_scatter3d(s: &Scatter3DPlot, scene: &mut Scene, computed: &ComputedLayout) {
+    let ranges = match s.data_ranges() {
+        Some(r) => r,
+        None => return,
+    };
+    let (z_min, z_max) = ranges.z;
+
+    let result = draw_3d_box(ranges, &s.box3d, scene, computed);
+    let proj = result.proj;
 
     // ── Data points (depth-sorted, back to front) ──────────────────────
     let z_span = z_max - z_min;
@@ -2092,6 +2039,101 @@ fn add_scatter3d(s: &Scatter3DPlot, scene: &mut Scene, computed: &ComputedLayout
 
 }
 
+
+fn add_surface3d(s: &Surface3DPlot, scene: &mut Scene, computed: &ComputedLayout) {
+    let ranges = match s.data_ranges() {
+        Some(r) => r,
+        None => return,
+    };
+    let (z_min, z_max) = ranges.z;
+
+    let result = draw_3d_box(ranges, &s.box3d, scene, computed);
+    let proj = result.proj;
+
+    let nrows = s.nrows();
+    let ncols = s.ncols();
+    let z_span = (z_max - z_min).max(f64::EPSILON);
+    let has_cmap = s.z_colormap.is_some();
+
+    // Build quad faces from grid, project, and compute depth + color
+    struct Face {
+        pts: [(f64, f64); 4], // screen coords
+        depth: f64,
+        avg_z: f64,
+    }
+
+    let mut faces: Vec<Face> = Vec::with_capacity((nrows - 1) * (ncols - 1));
+
+    for i in 0..nrows - 1 {
+        for j in 0..ncols - 1 {
+            let corners_data = [
+                (s.x_at(j),   s.y_at(i),   s.z_data[i][j]),
+                (s.x_at(j+1), s.y_at(i),   s.z_data[i][j+1]),
+                (s.x_at(j+1), s.y_at(i+1), s.z_data[i+1][j+1]),
+                (s.x_at(j),   s.y_at(i+1), s.z_data[i+1][j]),
+            ];
+
+            // Skip faces with NaN
+            if corners_data.iter().any(|c| c.2.is_nan()) { continue; }
+
+            let mut total_depth = 0.0;
+            let mut total_z = 0.0;
+            let mut pts = [(0.0, 0.0); 4];
+            for (k, &(x, y, z)) in corners_data.iter().enumerate() {
+                let (sx, sy, d) = proj.project(x, y, z);
+                pts[k] = (round2(sx), round2(sy));
+                total_depth += d;
+                total_z += z;
+            }
+
+            faces.push(Face {
+                pts,
+                depth: total_depth / 4.0,
+                avg_z: total_z / 4.0,
+            });
+        }
+    }
+
+    // Sort back-to-front (painter's algorithm)
+    faces.sort_by(|a, b| b.depth.partial_cmp(&a.depth).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Pre-compute wireframe stroke
+    let wire_stroke = if s.show_wireframe {
+        Color::from(s.wireframe_color.as_str())
+    } else {
+        Color::None
+    };
+    let wire_width = if s.show_wireframe { s.wireframe_width } else { 0.0 };
+    let opacity = if s.alpha < 1.0 { Some(s.alpha) } else { None };
+    // Hoist uniform fill color for the no-cmap path
+    let base_fill = if !has_cmap { Some(Color::from(s.color.as_str())) } else { None };
+
+    for face in &faces {
+        let fill = if has_cmap {
+            let norm = (face.avg_z - z_min) / z_span;
+            let cmap = s.z_colormap.as_ref().unwrap();
+            if let Some((r, g, b)) = cmap.map_rgb(norm.clamp(0.0, 1.0)) {
+                Color::Rgb(r, g, b)
+            } else {
+                Color::from(cmap.map(norm.clamp(0.0, 1.0)).as_str())
+            }
+        } else {
+            base_fill.clone().unwrap()
+        };
+
+        let mut d = build_path(&face.pts);
+        d.push('Z');
+
+        scene.add(Primitive::Path(Box::new(PathData {
+            d,
+            fill: Some(fill),
+            stroke: wire_stroke.clone(),
+            stroke_width: wire_width,
+            opacity,
+            stroke_dasharray: None,
+        })));
+    }
+}
 
 fn add_forest(forest: &ForestPlot, scene: &mut Scene, computed: &ComputedLayout) {
     let n = forest.rows.len();
@@ -4020,6 +4062,16 @@ pub fn collect_legend_entries(plots: &[Plot]) -> Vec<LegendEntry> {
                     });
                 }
             }
+            Plot::Surface3D(s) => {
+                if let Some(ref label) = s.legend_label {
+                    entries.push(LegendEntry {
+                        label: label.clone(),
+                        color: s.color.clone(),
+                        shape: LegendShape::Rect,
+                        dasharray: None,
+                    });
+                }
+            }
             _ => {}
         }
     }
@@ -5392,7 +5444,7 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
                 Plot::Scatter(_) | Plot::Line(_) | Plot::Series(_) |
                 Plot::Histogram(_) | Plot::Box(_) | Plot::Violin(_) |
                 Plot::Band(_) | Plot::Strip(_) | Plot::Density(_) |
-                Plot::Forest(_) | Plot::Scatter3D(_) => {
+                Plot::Forest(_) | Plot::Scatter3D(_) | Plot::Surface3D(_) => {
                     plot.set_color(&palette[color_idx]);
                     color_idx += 1;
                 }
@@ -5448,7 +5500,7 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
     scene.font_family = computed.font_family.clone();
     apply_theme(&mut scene, &computed.theme);
 
-    let skip_axes = plots.iter().all(|p| matches!(p, Plot::Pie(_) | Plot::UpSet(_) | Plot::Chord(_) | Plot::Sankey(_) | Plot::PhyloTree(_) | Plot::Synteny(_) | Plot::Polar(_) | Plot::Ternary(_) | Plot::Scatter3D(_)));
+    let skip_axes = plots.iter().all(|p| matches!(p, Plot::Pie(_) | Plot::UpSet(_) | Plot::Chord(_) | Plot::Sankey(_) | Plot::PhyloTree(_) | Plot::Synteny(_) | Plot::Polar(_) | Plot::Ternary(_) | Plot::Scatter3D(_) | Plot::Surface3D(_)));
     if !skip_axes {
         add_axes_and_grid(&mut scene, &computed, &layout);
     }
@@ -5550,6 +5602,9 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
             }
             Plot::Scatter3D(s) => {
                 add_scatter3d(s, &mut scene, &computed);
+            }
+            Plot::Surface3D(s) => {
+                add_surface3d(s, &mut scene, &computed);
             }
         }
     }

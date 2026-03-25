@@ -29,6 +29,7 @@ mod polar;
 mod ternary;
 mod forest;
 mod scatter3d;
+mod surface3d;
 
 use clap::{CommandFactory, Parser, Subcommand};
 
@@ -76,6 +77,8 @@ enum Commands {
     Forest(forest::ForestArgs),
     #[command(name = "scatter3d")]
     Scatter3D(scatter3d::Scatter3DArgs),
+    #[command(name = "surface3d")]
+    Surface3D(surface3d::Surface3DArgs),
     #[command(hide = true, about = "Print the man page to stdout")]
     Man,
 }
@@ -118,6 +121,7 @@ fn main() {
         Commands::Ternary(args) => ternary::run(args),
         Commands::Forest(args) => forest::run(args),
         Commands::Scatter3D(args) => scatter3d::run(args),
+        Commands::Surface3D(args) => surface3d::run(args),
         Commands::Man => unreachable!(),
     };
 

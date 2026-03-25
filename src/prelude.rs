@@ -71,6 +71,7 @@ pub use crate::plot::{
     ForestRow,
     Scatter3DPlot,
     Scatter3DPoint,
+    Surface3DPlot,
     // Style / config types used when building plots
     MarkerShape,
     LineStyle,

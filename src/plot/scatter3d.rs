@@ -1,5 +1,6 @@
 use crate::plot::heatmap::ColorMap;
 use crate::plot::scatter::MarkerShape;
+use crate::plot::plot3d::{DataRanges3D, Box3DConfig};
 use crate::render::projection::View3D;
 
 /// A single 3D data point.
@@ -8,14 +9,6 @@ pub struct Scatter3DPoint {
     pub x: f64,
     pub y: f64,
     pub z: f64,
-}
-
-/// Axis-aligned bounding box for 3D data.
-#[derive(Debug, Clone, Copy)]
-pub struct DataRanges3D {
-    pub x: (f64, f64),
-    pub y: (f64, f64),
-    pub z: (f64, f64),
 }
 
 /// Builder for a 3D scatter plot.
@@ -63,27 +56,12 @@ pub struct Scatter3DPlot {
     pub marker_opacity: Option<f64>,
     /// Marker stroke width.
     pub marker_stroke_width: Option<f64>,
-    /// Viewing angles (azimuth + elevation).
-    pub view: View3D,
-    /// X-axis label.
-    pub x_label: Option<String>,
-    /// Y-axis label.
-    pub y_label: Option<String>,
-    /// Z-axis label.
-    pub z_label: Option<String>,
-    /// Show grid lines on back walls. Default `true`.
-    pub show_grid: bool,
-    /// Show wireframe bounding box. Default `true`.
-    pub show_box: bool,
-    /// Number of grid/tick divisions per axis. Default `5`.
-    pub grid_lines: usize,
     /// Fade distant points for depth cue. Default `false`.
     pub depth_shade: bool,
     /// Color points by Z value using a colormap.
     pub z_colormap: Option<ColorMap>,
-    /// Place Z-axis on the right side. Default `true`.
-    /// When `false`, the Z-axis is placed on the left visible edge.
-    pub z_axis_right: bool,
+    /// Shared 3D box/grid/axes configuration.
+    pub box3d: Box3DConfig,
 }
 
 impl Default for Scatter3DPlot {
@@ -103,21 +81,13 @@ impl Scatter3DPlot {
             colors: None,
             marker_opacity: None,
             marker_stroke_width: None,
-            view: View3D::default(),
-            x_label: None,
-            y_label: None,
-            z_label: None,
-            show_grid: true,
-            show_box: true,
-            grid_lines: 5,
             depth_shade: false,
             z_colormap: None,
-            z_axis_right: true,
+            box3d: Box3DConfig::default(),
         }
     }
 
     /// Compute axis-aligned data ranges. Returns `None` if data is empty.
-    /// Degenerate ranges (min == max) are padded by ±0.5.
     pub fn data_ranges(&self) -> Option<DataRanges3D> {
         if self.data.is_empty() { return None; }
         let mut x_min = f64::INFINITY;
@@ -134,152 +104,38 @@ impl Scatter3DPlot {
         if (x_max - x_min).abs() < 1e-12 { x_min -= 0.5; x_max += 0.5; }
         if (y_max - y_min).abs() < 1e-12 { y_min -= 0.5; y_max += 0.5; }
         if (z_max - z_min).abs() < 1e-12 { z_min -= 0.5; z_max += 0.5; }
-        Some(DataRanges3D {
-            x: (x_min, x_max),
-            y: (y_min, y_max),
-            z: (z_min, z_max),
-        })
+        Some(DataRanges3D { x: (x_min, x_max), y: (y_min, y_max), z: (z_min, z_max) })
     }
 
-    /// Set data from (x, y, z) tuples.
     pub fn with_data<I>(mut self, data: I) -> Self
-    where
-        I: IntoIterator<Item = (f64, f64, f64)>,
-    {
-        self.data = data
-            .into_iter()
-            .map(|(x, y, z)| Scatter3DPoint { x, y, z })
-            .collect();
+    where I: IntoIterator<Item = (f64, f64, f64)> {
+        self.data = data.into_iter().map(|(x, y, z)| Scatter3DPoint { x, y, z }).collect();
         self
     }
-
-    /// Set data from pre-built points.
-    pub fn with_points(mut self, points: Vec<Scatter3DPoint>) -> Self {
-        self.data = points;
-        self
-    }
-
-    /// Set the uniform point color (CSS color string).
-    pub fn with_color<S: Into<String>>(mut self, color: S) -> Self {
-        self.color = color.into();
-        self
-    }
-
-    /// Set the marker radius in pixels.
-    pub fn with_size(mut self, size: f64) -> Self {
-        self.size = size;
-        self
-    }
-
-    /// Attach a legend label.
-    pub fn with_legend<S: Into<String>>(mut self, label: S) -> Self {
-        self.legend_label = Some(label.into());
-        self
-    }
-
-    /// Set the marker shape.
-    pub fn with_marker(mut self, marker: MarkerShape) -> Self {
-        self.marker = marker;
-        self
-    }
-
-    /// Set per-point sizes.
-    pub fn with_sizes(mut self, sizes: Vec<f64>) -> Self {
-        self.sizes = Some(sizes);
-        self
-    }
-
-    /// Set per-point colors.
+    pub fn with_points(mut self, points: Vec<Scatter3DPoint>) -> Self { self.data = points; self }
+    pub fn with_color<S: Into<String>>(mut self, color: S) -> Self { self.color = color.into(); self }
+    pub fn with_size(mut self, size: f64) -> Self { self.size = size; self }
+    pub fn with_legend<S: Into<String>>(mut self, label: S) -> Self { self.legend_label = Some(label.into()); self }
+    pub fn with_marker(mut self, marker: MarkerShape) -> Self { self.marker = marker; self }
+    pub fn with_sizes(mut self, sizes: Vec<f64>) -> Self { self.sizes = Some(sizes); self }
     pub fn with_colors<I, S>(mut self, colors: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
-        self.colors = Some(colors.into_iter().map(Into::into).collect());
-        self
+    where I: IntoIterator<Item = S>, S: Into<String> {
+        self.colors = Some(colors.into_iter().map(Into::into).collect()); self
     }
+    pub fn with_marker_opacity(mut self, opacity: f64) -> Self { self.marker_opacity = Some(opacity); self }
+    pub fn with_marker_stroke_width(mut self, width: f64) -> Self { self.marker_stroke_width = Some(width); self }
+    pub fn with_depth_shade(mut self, enable: bool) -> Self { self.depth_shade = enable; self }
+    pub fn with_z_colormap(mut self, cmap: ColorMap) -> Self { self.z_colormap = Some(cmap); self }
 
-    /// Set marker fill opacity.
-    pub fn with_marker_opacity(mut self, opacity: f64) -> Self {
-        self.marker_opacity = Some(opacity);
-        self
-    }
-
-    /// Set marker stroke width.
-    pub fn with_marker_stroke_width(mut self, width: f64) -> Self {
-        self.marker_stroke_width = Some(width);
-        self
-    }
-
-    /// Set the azimuth viewing angle in degrees (default -60).
-    pub fn with_azimuth(mut self, deg: f64) -> Self {
-        self.view.azimuth = deg;
-        self
-    }
-
-    /// Set the elevation viewing angle in degrees (default 30).
-    pub fn with_elevation(mut self, deg: f64) -> Self {
-        self.view.elevation = deg;
-        self
-    }
-
-    /// Set both viewing angles at once.
-    pub fn with_view(mut self, view: View3D) -> Self {
-        self.view = view;
-        self
-    }
-
-    /// Set the x-axis label.
-    pub fn with_x_label<S: Into<String>>(mut self, label: S) -> Self {
-        self.x_label = Some(label.into());
-        self
-    }
-
-    /// Set the y-axis label.
-    pub fn with_y_label<S: Into<String>>(mut self, label: S) -> Self {
-        self.y_label = Some(label.into());
-        self
-    }
-
-    /// Set the z-axis label.
-    pub fn with_z_label<S: Into<String>>(mut self, label: S) -> Self {
-        self.z_label = Some(label.into());
-        self
-    }
-
-    /// Toggle grid lines on back walls.
-    pub fn with_show_grid(mut self, show: bool) -> Self {
-        self.show_grid = show;
-        self
-    }
-
-    /// Toggle wireframe bounding box.
-    pub fn with_show_box(mut self, show: bool) -> Self {
-        self.show_box = show;
-        self
-    }
-
-    /// Set the number of grid/tick divisions per axis.
-    pub fn with_grid_lines(mut self, n: usize) -> Self {
-        self.grid_lines = n;
-        self
-    }
-
-    /// Enable depth shading (distant points become more transparent).
-    pub fn with_depth_shade(mut self, enable: bool) -> Self {
-        self.depth_shade = enable;
-        self
-    }
-
-    /// Color points by Z value using a colormap.
-    pub fn with_z_colormap(mut self, cmap: ColorMap) -> Self {
-        self.z_colormap = Some(cmap);
-        self
-    }
-
-    /// Place the Z-axis on the right (`true`, default) or left (`false`) side.
-    pub fn with_z_axis_right(mut self, right: bool) -> Self {
-        self.z_axis_right = right;
-        self
-    }
+    // Delegate 3D box/axes config to Box3DConfig
+    pub fn with_azimuth(mut self, deg: f64) -> Self { self.box3d.view.azimuth = deg; self }
+    pub fn with_elevation(mut self, deg: f64) -> Self { self.box3d.view.elevation = deg; self }
+    pub fn with_view(mut self, v: View3D) -> Self { self.box3d.view = v; self }
+    pub fn with_x_label<S: Into<String>>(mut self, l: S) -> Self { self.box3d.x_label = Some(l.into()); self }
+    pub fn with_y_label<S: Into<String>>(mut self, l: S) -> Self { self.box3d.y_label = Some(l.into()); self }
+    pub fn with_z_label<S: Into<String>>(mut self, l: S) -> Self { self.box3d.z_label = Some(l.into()); self }
+    pub fn with_show_grid(mut self, s: bool) -> Self { self.box3d.show_grid = s; self }
+    pub fn with_show_box(mut self, s: bool) -> Self { self.box3d.show_box = s; self }
+    pub fn with_grid_lines(mut self, n: usize) -> Self { self.box3d.grid_lines = n; self }
+    pub fn with_z_axis_right(mut self, r: bool) -> Self { self.box3d.z_axis_right = r; self }
 }

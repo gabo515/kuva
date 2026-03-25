@@ -11,13 +11,7 @@ use crate::data::{ColSpec, DataTable, InputArgs};
 use crate::layout_args::{BaseArgs, apply_base_args};
 use crate::output::write_output;
 
-fn parse_colormap(name: &str) -> ColorMap {
-    match name {
-        "inferno" => ColorMap::Inferno,
-        "grayscale" | "grey" | "gray" => ColorMap::Grayscale,
-        _ => ColorMap::Viridis,
-    }
-}
+use crate::data::parse_colormap;
 
 /// 3D scatter plot with orthographic projection.
 #[derive(Args, Debug)]

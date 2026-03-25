@@ -28,7 +28,9 @@ pub mod ridgeline;
 pub mod polar;
 pub mod ternary;
 pub mod forest;
+pub mod plot3d;
 pub mod scatter3d;
+pub mod surface3d;
 
 pub mod legend;
 
@@ -64,6 +66,8 @@ pub use ridgeline::{RidgelinePlot, RidgelineGroup};
 pub use polar::{PolarPlot, PolarSeries, PolarMode};
 pub use ternary::{TernaryPlot, TernaryPoint};
 pub use forest::{ForestPlot, ForestRow};
-pub use scatter3d::{Scatter3DPlot, Scatter3DPoint, DataRanges3D};
+pub use plot3d::{DataRanges3D, Box3DConfig};
+pub use scatter3d::{Scatter3DPlot, Scatter3DPoint};
+pub use surface3d::Surface3DPlot;
 
 pub use legend::{Legend, LegendEntry, LegendShape, LegendPosition, LegendGroup};

@@ -84,6 +84,19 @@ impl ColorMap {
             ColorMap::Custom(f) => f(value),
         }
     }
+
+    /// Map a normalized value to `(r, g, b)` bytes, avoiding string allocation.
+    /// Returns `None` for `Custom` colormaps (which must go through `map()`).
+    pub fn map_rgb(&self, value: f64) -> Option<(u8, u8, u8)> {
+        let v = value.clamp(0.0, 1.0);
+        let rgb = match self {
+            ColorMap::Viridis => VIRIDIS.eval_continuous(v),
+            ColorMap::Inferno => INFERNO.eval_continuous(v),
+            ColorMap::Grayscale => GREYS.eval_continuous(v),
+            ColorMap::Custom(_) => return None,
+        };
+        Some((rgb.r, rgb.g, rgb.b))
+    }
 }
 
 /// Builder for a heatmap.

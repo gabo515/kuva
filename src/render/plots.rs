@@ -28,6 +28,8 @@ use crate::plot::ridgeline::RidgelinePlot;
 use crate::plot::polar::PolarPlot;
 use crate::plot::ternary::TernaryPlot;
 use crate::plot::forest::ForestPlot;
+use crate::plot::scatter3d::Scatter3DPlot;
+use crate::plot::surface3d::Surface3DPlot;
 use crate::plot::legend::ColorBarInfo;
 use crate::render::render_utils;
 
@@ -63,6 +65,8 @@ pub enum Plot {
     Polar(PolarPlot),
     Ternary(TernaryPlot),
     Forest(ForestPlot),
+    Scatter3D(Scatter3DPlot),
+    Surface3D(Surface3DPlot),
 }
 
 impl From<ScatterPlot>    for Plot { fn from(p: ScatterPlot)    -> Self { Plot::Scatter(p) } }
@@ -95,6 +99,26 @@ impl From<RidgelinePlot> for Plot { fn from(p: RidgelinePlot) -> Self { Plot::Ri
 impl From<PolarPlot>     for Plot { fn from(p: PolarPlot)     -> Self { Plot::Polar(p) } }
 impl From<TernaryPlot>   for Plot { fn from(p: TernaryPlot)   -> Self { Plot::Ternary(p) } }
 impl From<ForestPlot>    for Plot { fn from(p: ForestPlot)    -> Self { Plot::Forest(p) } }
+impl From<Scatter3DPlot> for Plot { fn from(p: Scatter3DPlot) -> Self { Plot::Scatter3D(p) } }
+impl From<Surface3DPlot> for Plot { fn from(p: Surface3DPlot) -> Self { Plot::Surface3D(p) } }
+
+use crate::plot::plot3d::DataRanges3D;
+use crate::plot::heatmap::ColorMap;
+
+fn colorbar_from_z(cmap: &ColorMap, ranges: DataRanges3D, label: Option<String>) -> Option<ColorBarInfo> {
+    let (z_min, z_max) = ranges.z;
+    if !z_min.is_finite() || !z_max.is_finite() { return None; }
+    let cmap = cmap.clone();
+    Some(ColorBarInfo {
+        map_fn: Arc::new(move |t| {
+            let norm = (t - z_min) / (z_max - z_min + f64::EPSILON);
+            cmap.map(norm.clamp(0.0, 1.0))
+        }),
+        min_value: z_min,
+        max_value: z_max,
+        label,
+    })
+}
 
 fn bounds_from_2d<I>(points: I) -> Option<((f64, f64), (f64, f64))>
     where
@@ -145,6 +169,8 @@ impl Plot {
             Plot::Strip(s) => s.color = color.into(),
             Plot::Density(d) => d.color = color.into(),
             Plot::Forest(f) => f.color = color.into(),
+            Plot::Scatter3D(s) => s.color = color.into(),
+            Plot::Surface3D(s) => s.color = color.into(),
             _ => {}
         }
     }
@@ -599,6 +625,9 @@ impl Plot {
                 if !x_min.is_finite() { return None; }
                 Some(((x_min, x_max), (y_min, y_max)))
             }
+            Plot::Scatter3D(_) | Plot::Surface3D(_) => {
+                Some(((-1.0, 1.0), (-1.0, 1.0)))
+            }
         }
     }
 
@@ -628,6 +657,11 @@ impl Plot {
                 rows * avg_cols + 10
             }
             Plot::Forest(f) => f.rows.len() * 4 + 5,
+            Plot::Scatter3D(s) => s.data.len() + 70,
+            Plot::Surface3D(s) => {
+                let n = s.nrows().saturating_sub(1) * s.ncols().saturating_sub(1);
+                n + 70
+            }
             _ => 100,
         }
     }
@@ -692,6 +726,8 @@ impl Plot {
                     label,
                 })
             }
+            Plot::Surface3D(s) => colorbar_from_z(s.z_colormap.as_ref()?, s.data_ranges()?, s.box3d.z_label.clone()),
+            Plot::Scatter3D(s) => colorbar_from_z(s.z_colormap.as_ref()?, s.data_ranges()?, s.box3d.z_label.clone()),
             _ => None,
         }
     }

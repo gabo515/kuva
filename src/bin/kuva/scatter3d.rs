@@ -72,6 +72,18 @@ pub struct Scatter3DArgs {
     #[arg(long)]
     pub z_axis_left: bool,
 
+    /// Hide grid lines on back walls.
+    #[arg(long)]
+    pub no_grid: bool,
+
+    /// Hide wireframe bounding box.
+    #[arg(long)]
+    pub no_box: bool,
+
+    /// Number of grid/tick divisions per axis (default: 5).
+    #[arg(long)]
+    pub grid_lines: Option<usize>,
+
     #[command(flatten)]
     pub input: InputArgs,
 
@@ -99,6 +111,9 @@ fn apply_options(mut plot: Scatter3DPlot, args: &Scatter3DArgs, z_cmap: &Option<
     if let Some(ref cm) = z_cmap {
         plot = plot.with_z_colormap(cm.clone());
     }
+    if args.no_grid { plot = plot.with_show_grid(false); }
+    if args.no_box { plot = plot.with_show_box(false); }
+    if let Some(n) = args.grid_lines { plot = plot.with_grid_lines(n); }
     plot
 }
 

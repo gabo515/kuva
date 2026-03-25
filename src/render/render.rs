@@ -1740,8 +1740,9 @@ fn draw_3d_box(
         }
     }
 
-    let silhouette_color = Color::from("#555555");
-    let back_edge_color = Color::from("#999999");
+    let theme = &computed.theme;
+    let silhouette_color = Color::from(theme.axis_color.as_str());
+    let back_edge_color = Color::from(theme.grid_color.as_str());
 
     if cfg.show_box {
         for (i, edge) in edges.iter().enumerate() {
@@ -1763,7 +1764,8 @@ fn draw_3d_box(
     let face_corners: [[usize; 4]; 6] = [
         [0,1,2,3], [4,5,6,7], [0,3,7,4], [1,2,6,5], [0,1,5,4], [3,2,6,7],
     ];
-    let pane_fill = Color::from("#f0f0f0");
+    // Derive a subtle pane fill from the grid color with low opacity
+    let pane_fill = Color::from(theme.grid_color.as_str());
     for (fi, fc) in face_corners.iter().enumerate() {
         if face_front[fi] { continue; }
         let pts: Vec<(f64, f64)> = fc.iter().map(|&ci| {
@@ -1774,13 +1776,13 @@ fn draw_3d_box(
         d.push('Z');
         scene.add(Primitive::Path(Box::new(PathData {
             d, fill: Some(pane_fill.clone()), stroke: Color::None,
-            stroke_width: 0.0, opacity: None, stroke_dasharray: None,
+            stroke_width: 0.0, opacity: Some(0.15), stroke_dasharray: None,
         })));
     }
 
     // ── Grid lines on back-facing walls ────────────────────────────────
     if cfg.show_grid && grid_n > 0 {
-        let grid_color = Color::from("#cccccc");
+        let grid_color = Color::from(theme.grid_color.as_str());
         // Top face (+z, index 1) is omitted — always front-facing at positive elevation.
         type EndpointFn = fn(f64) -> ([f64; 3], [f64; 3]);
         let grid_faces: [(usize, EndpointFn, EndpointFn); 5] = [
@@ -1808,7 +1810,7 @@ fn draw_3d_box(
     }
 
     // ── Tick marks and labels ──────────────────────────────────────────
-    let tick_color = Color::from("#555555");
+    let tick_color = Color::from(theme.tick_color.as_str());
     let body_size = computed.body_size;
     let tick_size = body_size.saturating_sub(2).max(8) as u32;
 

@@ -137,7 +137,7 @@ pub fn run(args: Surface3DArgs) -> Result<(), String> {
 
     // Upsample grid with bilinear interpolation if --resolution is set
     if let Some(res) = args.resolution {
-        let res = res.max(2);
+        let res = res.clamp(2, 1000);
         let old_z = &plot.z_data;
         let old_nrows = old_z.len();
         let old_ncols = old_z.first().map_or(0, |r| r.len());

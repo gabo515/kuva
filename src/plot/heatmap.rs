@@ -51,7 +51,7 @@ fn greyscale(value: f64) -> String {
 /// | `Custom` | User-defined | Full control over color encoding |
 #[derive(Clone)]
 pub enum ColorMap {
-    /// Perceptually uniform blue-green-yellow scale (default).
+    /// Black-to-white linear scale; print-friendly.
     Grayscale,
     /// Perceptually uniform blue-green-yellow scale.
     Viridis,

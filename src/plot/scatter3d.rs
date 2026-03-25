@@ -127,15 +127,15 @@ impl Scatter3DPlot {
     pub fn with_depth_shade(mut self, enable: bool) -> Self { self.depth_shade = enable; self }
     pub fn with_z_colormap(mut self, cmap: ColorMap) -> Self { self.z_colormap = Some(cmap); self }
 
-    // Delegate 3D box/axes config to Box3DConfig
-    pub fn with_azimuth(mut self, deg: f64) -> Self { self.box3d.view.azimuth = deg; self }
-    pub fn with_elevation(mut self, deg: f64) -> Self { self.box3d.view.elevation = deg; self }
-    pub fn with_view(mut self, v: View3D) -> Self { self.box3d.view = v; self }
-    pub fn with_x_label<S: Into<String>>(mut self, l: S) -> Self { self.box3d.x_label = Some(l.into()); self }
-    pub fn with_y_label<S: Into<String>>(mut self, l: S) -> Self { self.box3d.y_label = Some(l.into()); self }
-    pub fn with_z_label<S: Into<String>>(mut self, l: S) -> Self { self.box3d.z_label = Some(l.into()); self }
-    pub fn with_show_grid(mut self, s: bool) -> Self { self.box3d.show_grid = s; self }
-    pub fn with_show_box(mut self, s: bool) -> Self { self.box3d.show_box = s; self }
-    pub fn with_grid_lines(mut self, n: usize) -> Self { self.box3d.grid_lines = n; self }
-    pub fn with_z_axis_right(mut self, r: bool) -> Self { self.box3d.z_axis_right = r; self }
+    // Delegate 3D box/axes config through Box3DConfig methods
+    pub fn with_azimuth(mut self, deg: f64) -> Self { self.box3d = self.box3d.with_azimuth(deg); self }
+    pub fn with_elevation(mut self, deg: f64) -> Self { self.box3d = self.box3d.with_elevation(deg); self }
+    pub fn with_view(mut self, v: View3D) -> Self { self.box3d = self.box3d.with_view(v); self }
+    pub fn with_x_label<S: Into<String>>(mut self, l: S) -> Self { self.box3d = self.box3d.with_x_label(l); self }
+    pub fn with_y_label<S: Into<String>>(mut self, l: S) -> Self { self.box3d = self.box3d.with_y_label(l); self }
+    pub fn with_z_label<S: Into<String>>(mut self, l: S) -> Self { self.box3d = self.box3d.with_z_label(l); self }
+    pub fn with_show_grid(mut self, s: bool) -> Self { self.box3d = self.box3d.with_show_grid(s); self }
+    pub fn with_show_box(mut self, s: bool) -> Self { self.box3d = self.box3d.with_show_box(s); self }
+    pub fn with_grid_lines(mut self, n: usize) -> Self { self.box3d = self.box3d.with_grid_lines(n); self }
+    pub fn with_z_axis_right(mut self, r: bool) -> Self { self.box3d = self.box3d.with_z_axis_right(r); self }
 }

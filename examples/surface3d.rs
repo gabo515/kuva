@@ -20,8 +20,8 @@ fn main() {
     let plots = vec![Plot::Surface3D(surface)];
     let layout = Layout::auto_from_plots(&plots).with_title("Surface3D — Paraboloid");
     let svg = render_to_svg(plots, layout);
-    std::fs::write("docs/assets/surface3d_paraboloid.svg", &svg).unwrap();
-    println!("wrote docs/assets/surface3d_paraboloid.svg");
+    std::fs::write("docs/src/assets/surface3d_paraboloid.svg", &svg).unwrap();
+    println!("wrote docs/src/assets/surface3d_paraboloid.svg");
 
     // Sin/cos wave
     let n = 30;
@@ -40,6 +40,6 @@ fn main() {
     let plots = vec![Plot::Surface3D(surface)];
     let layout = Layout::auto_from_plots(&plots).with_title("Surface3D — Wave");
     let svg = render_to_svg(plots, layout);
-    std::fs::write("docs/assets/surface3d_wave.svg", &svg).unwrap();
-    println!("wrote docs/assets/surface3d_wave.svg");
+    std::fs::write("docs/src/assets/surface3d_wave.svg", &svg).unwrap();
+    println!("wrote docs/src/assets/surface3d_wave.svg");
 }

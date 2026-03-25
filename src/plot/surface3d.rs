@@ -116,10 +116,14 @@ impl Surface3DPlot {
     }
 
     pub fn x_at(&self, j: usize) -> f64 {
-        self.x_coords.as_ref().map_or(j as f64, |xc| xc[j])
+        self.x_coords.as_ref().map_or(j as f64, |xc| {
+            xc.get(j).copied().unwrap_or(j as f64)
+        })
     }
     pub fn y_at(&self, i: usize) -> f64 {
-        self.y_coords.as_ref().map_or(i as f64, |yc| yc[i])
+        self.y_coords.as_ref().map_or(i as f64, |yc| {
+            yc.get(i).copied().unwrap_or(i as f64)
+        })
     }
 
     /// Generate a surface from a function `f(x, y) -> z` over the given ranges.
@@ -153,15 +157,15 @@ impl Surface3DPlot {
     pub fn with_alpha(mut self, a: f64) -> Self { self.alpha = a; self }
     pub fn with_legend<S: Into<String>>(mut self, l: S) -> Self { self.legend_label = Some(l.into()); self }
 
-    // Delegate 3D box/axes config to Box3DConfig
-    pub fn with_azimuth(mut self, deg: f64) -> Self { self.box3d.view.azimuth = deg; self }
-    pub fn with_elevation(mut self, deg: f64) -> Self { self.box3d.view.elevation = deg; self }
-    pub fn with_view(mut self, v: View3D) -> Self { self.box3d.view = v; self }
-    pub fn with_x_label<S: Into<String>>(mut self, l: S) -> Self { self.box3d.x_label = Some(l.into()); self }
-    pub fn with_y_label<S: Into<String>>(mut self, l: S) -> Self { self.box3d.y_label = Some(l.into()); self }
-    pub fn with_z_label<S: Into<String>>(mut self, l: S) -> Self { self.box3d.z_label = Some(l.into()); self }
-    pub fn with_show_grid(mut self, s: bool) -> Self { self.box3d.show_grid = s; self }
-    pub fn with_show_box(mut self, s: bool) -> Self { self.box3d.show_box = s; self }
-    pub fn with_grid_lines(mut self, n: usize) -> Self { self.box3d.grid_lines = n; self }
-    pub fn with_z_axis_right(mut self, r: bool) -> Self { self.box3d.z_axis_right = r; self }
+    // Delegate 3D box/axes config through Box3DConfig methods
+    pub fn with_azimuth(mut self, deg: f64) -> Self { self.box3d = self.box3d.with_azimuth(deg); self }
+    pub fn with_elevation(mut self, deg: f64) -> Self { self.box3d = self.box3d.with_elevation(deg); self }
+    pub fn with_view(mut self, v: View3D) -> Self { self.box3d = self.box3d.with_view(v); self }
+    pub fn with_x_label<S: Into<String>>(mut self, l: S) -> Self { self.box3d = self.box3d.with_x_label(l); self }
+    pub fn with_y_label<S: Into<String>>(mut self, l: S) -> Self { self.box3d = self.box3d.with_y_label(l); self }
+    pub fn with_z_label<S: Into<String>>(mut self, l: S) -> Self { self.box3d = self.box3d.with_z_label(l); self }
+    pub fn with_show_grid(mut self, s: bool) -> Self { self.box3d = self.box3d.with_show_grid(s); self }
+    pub fn with_show_box(mut self, s: bool) -> Self { self.box3d = self.box3d.with_show_box(s); self }
+    pub fn with_grid_lines(mut self, n: usize) -> Self { self.box3d = self.box3d.with_grid_lines(n); self }
+    pub fn with_z_axis_right(mut self, r: bool) -> Self { self.box3d = self.box3d.with_z_axis_right(r); self }
 }

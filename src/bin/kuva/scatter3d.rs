@@ -112,34 +112,54 @@ pub fn run(args: Scatter3DArgs) -> Result<(), String> {
     let z_cmap = args.z_color.as_deref().map(parse_colormap);
 
     if let Some(ref cb) = args.color_by {
+        // Merge all groups into a single plot with per-point colors so they
+        // share one coordinate system and one set of axes.
         let pal = Palette::category10();
         let groups = table.group_by(cb)?;
-        let mut plots: Vec<Plot> = Vec::new();
+        let mut all_data: Vec<(f64, f64, f64)> = Vec::new();
+        let mut all_colors: Vec<String> = Vec::new();
+        let mut group_names: Vec<String> = Vec::new();
 
         for (i, (name, subtable)) in groups.into_iter().enumerate() {
+            group_names.push(name);
             let x_vals = subtable.col_f64(&args.x)?;
             let y_vals = subtable.col_f64(&args.y)?;
             let z_vals = subtable.col_f64(&args.z)?;
-
-            let data: Vec<(f64, f64, f64)> = x_vals.into_iter()
-                .zip(y_vals)
-                .zip(z_vals)
-                .map(|((x, y), z)| (x, y, z))
-                .collect();
-
-            let plot = Scatter3DPlot::new()
-                .with_data(data)
-                .with_color(&pal[i % pal.len()])
-                .with_azimuth(args.azimuth)
-                .with_elevation(args.elevation)
-                .with_legend(name)
-                .with_depth_shade(args.depth_shade)
-                .with_z_axis_right(!args.z_axis_left);
-
-            plots.push(Plot::Scatter3D(apply_options(plot, &args, &z_cmap)));
+            let color = pal[i % pal.len()].to_string();
+            for ((x, y), z) in x_vals.into_iter().zip(y_vals).zip(z_vals) {
+                all_data.push((x, y, z));
+                all_colors.push(color.clone());
+            }
         }
 
-        let layout = Layout::auto_from_plots(&plots);
+        let mut plot = Scatter3DPlot::new()
+            .with_data(all_data)
+            .with_colors(all_colors)
+            .with_azimuth(args.azimuth)
+            .with_elevation(args.elevation)
+            .with_depth_shade(args.depth_shade)
+            .with_z_axis_right(!args.z_axis_left);
+        plot = apply_options(plot, &args, &z_cmap);
+
+        let plots = vec![Plot::Scatter3D(plot)];
+        let mut layout = Layout::auto_from_plots(&plots);
+
+        // Build legend entries from group names
+        let entries: Vec<kuva::plot::legend::LegendEntry> = group_names.iter().enumerate().map(|(i, name)| {
+            kuva::plot::legend::LegendEntry {
+                label: name.clone(),
+                color: pal[i % pal.len()].to_string(),
+                shape: kuva::plot::legend::LegendShape::Circle,
+                dasharray: None,
+            }
+        }).collect();
+        if !entries.is_empty() {
+            let max_len = entries.iter().map(|e| e.label.len()).max().unwrap_or(0);
+            layout.show_legend = true;
+            layout.legend_width = (max_len as f64 * 8.5 + 35.0).max(80.0);
+            layout.legend_entries = Some(entries);
+        }
+
         let layout = apply_base_args(layout, &args.base);
         let scene = render_multiple(plots, layout);
         write_output(scene, &args.base)

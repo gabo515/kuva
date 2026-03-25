@@ -19,8 +19,8 @@ fn main() {
     let plots = vec![Plot::Scatter3D(plot)];
     let layout = Layout::auto_from_plots(&plots).with_title("3D Scatter — Helix");
     let svg = render_to_svg(plots, layout);
-    std::fs::write("docs/assets/scatter3d_basic.svg", &svg).unwrap();
-    println!("wrote docs/assets/scatter3d_basic.svg");
+    std::fs::write("docs/src/assets/scatter3d_basic.svg", &svg).unwrap();
+    println!("wrote docs/src/assets/scatter3d_basic.svg");
 
     // Z-colored scatter
     let data: Vec<(f64, f64, f64)> = (0..100)
@@ -43,8 +43,8 @@ fn main() {
     let plots = vec![Plot::Scatter3D(plot)];
     let layout = Layout::auto_from_plots(&plots).with_title("3D Scatter — Z Colormap");
     let svg = render_to_svg(plots, layout);
-    std::fs::write("docs/assets/scatter3d_zcolor.svg", &svg).unwrap();
-    println!("wrote docs/assets/scatter3d_zcolor.svg");
+    std::fs::write("docs/src/assets/scatter3d_zcolor.svg", &svg).unwrap();
+    println!("wrote docs/src/assets/scatter3d_zcolor.svg");
 
     // Different view angles
     let data: Vec<(f64, f64, f64)> = (0..30)
@@ -67,6 +67,6 @@ fn main() {
     let plots = vec![Plot::Scatter3D(plot)];
     let layout = Layout::auto_from_plots(&plots).with_title("3D Scatter — Custom View");
     let svg = render_to_svg(plots, layout);
-    std::fs::write("docs/assets/scatter3d_view.svg", &svg).unwrap();
-    println!("wrote docs/assets/scatter3d_view.svg");
+    std::fs::write("docs/src/assets/scatter3d_view.svg", &svg).unwrap();
+    println!("wrote docs/src/assets/scatter3d_view.svg");
 }

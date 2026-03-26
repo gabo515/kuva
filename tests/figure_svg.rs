@@ -37,8 +37,8 @@ fn figure_basic_2x2() {
     assert!(svg.contains("<svg"));
     assert!(svg.contains("<g"));
     assert!(svg.contains("</g>"));
-    // Should have 4 subplot groups
-    assert_eq!(svg.matches("<g ").count(), 4);
+    // Each panel has a translate group + a clip group → 2 × 4 = 8
+    assert_eq!(svg.matches("<g ").count(), 8);
 }
 
 #[test]
@@ -61,7 +61,8 @@ fn figure_merged_cells() {
     std::fs::write("test_outputs/figure_merged_cells.svg", &svg).unwrap();
 
     assert!(svg.contains("<svg"));
-    assert_eq!(svg.matches("<g ").count(), 4);
+    // Each panel has a translate group + a clip group → 2 × 4 = 8
+    assert_eq!(svg.matches("<g ").count(), 8);
 }
 
 #[test]
@@ -84,7 +85,8 @@ fn figure_vertical_span() {
     std::fs::write("test_outputs/figure_vertical_span.svg", &svg).unwrap();
 
     assert!(svg.contains("<svg"));
-    assert_eq!(svg.matches("<g ").count(), 3);
+    // Each panel has a translate group + a clip group → 2 × 3 = 6
+    assert_eq!(svg.matches("<g ").count(), 6);
 }
 
 #[test]
@@ -164,8 +166,8 @@ fn figure_fewer_plots_than_slots() {
     std::fs::write("test_outputs/figure_fewer_plots.svg", &svg).unwrap();
 
     assert!(svg.contains("<svg"));
-    // Only 3 subplot groups (the 4th cell is blank)
-    assert_eq!(svg.matches("<g ").count(), 3);
+    // 3 panels × (translate group + clip group) = 6; 4th cell is blank
+    assert_eq!(svg.matches("<g ").count(), 6);
 }
 
 #[test]

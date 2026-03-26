@@ -1,11 +1,23 @@
 use crate::render::render_utils::{self, percentile, linear_regression, pearson_corr};
 use std::collections::HashMap;
 use std::fmt::Write;
+use std::sync::atomic::{AtomicU64, Ordering};
 use crate::render::layout::{Layout, ComputedLayout};
 use crate::render::plots::Plot;
 use crate::render::axis::{add_axes_and_grid, add_labels_and_title, add_y2_axis};
 use crate::render::annotations::{add_shaded_regions, add_reference_lines, add_text_annotations};
 use crate::render::theme::Theme;
+
+/// Monotonically increasing counter used to generate unique `<clipPath>` IDs.
+/// Each call to `render_multiple` / `render_twin_y` grabs one ID so that
+/// Figure panels — which merge many Scenes into a single SVG — never share an ID.
+static PLOT_CLIP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+#[inline]
+fn next_clip_id() -> String {
+    let n = PLOT_CLIP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("kuva-clip-{n}")
+}
 
 /// Round to 2 decimal places for compact SVG output.
 #[inline(always)]
@@ -139,6 +151,19 @@ pub enum Primitive {
         title: Option<String>,
     },
     GroupEnd,
+    /// Opens a clipped region. All primitives until the matching `ClipEnd` are
+    /// clipped to the given rectangle. The SVG backend emits an inline
+    /// `<clipPath>` definition and a `<g clip-path="url(#id)">` wrapper;
+    /// terminal and raster backends ignore this primitive entirely.
+    ClipStart {
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        id: String,
+    },
+    /// Closes a clipped region opened by `ClipStart`.
+    ClipEnd,
 }
 
 #[derive(Debug)]
@@ -4997,6 +5022,32 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
         add_axes_and_grid(&mut scene, &computed, &layout);
     }
     add_labels_and_title(&mut scene, &computed, &layout);
+
+    if !skip_axes {
+        let clip_id = next_clip_id();
+        // Push the <clipPath> definition into the scene's <defs> block.
+        // The data elements are then wrapped in <g clip-path="url(#id)">.
+        // Using scene.defs rather than an inline <defs> keeps the first <rect>
+        // in the element stream as a real data rect (not the clip rect), which
+        // preserves compatibility with tests that scan for rect elements.
+        let clip_def = format!(
+            r#"<clipPath id="{id}"><rect x="{x}" y="{y}" width="{w}" height="{h}"/></clipPath>"#,
+            id = clip_id,
+            x = round2(computed.margin_left),
+            y = round2(computed.margin_top),
+            w = round2(computed.plot_width()),
+            h = round2(computed.plot_height()),
+        );
+        scene.defs.push(clip_def);
+        scene.elements.push(Primitive::ClipStart {
+            x: computed.margin_left,
+            y: computed.margin_top,
+            width: computed.plot_width(),
+            height: computed.plot_height(),
+            id: clip_id,
+        });
+    }
+
     add_shaded_regions(&layout.shaded_regions, &mut scene, &computed);
 
     // for each plot, plot it
@@ -5098,6 +5149,10 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
     add_reference_lines(&layout.reference_lines, &mut scene, &computed);
     add_text_annotations(&layout.annotations, &mut scene, &computed);
 
+    if !skip_axes {
+        scene.elements.push(Primitive::ClipEnd);
+    }
+
     // Check for DotPlot stacked legend (size legend + colorbar in one column)
     let dot_stacked = plots.iter().find_map(|p| {
         if let Plot::DotPlot(dp) = p {
@@ -5182,6 +5237,25 @@ pub fn render_twin_y(primary: Vec<Plot>, secondary: Vec<Plot>, layout: Layout) -
     add_axes_and_grid(&mut scene, &computed, &layout);
     add_y2_axis(&mut scene, &computed, &layout);
     add_labels_and_title(&mut scene, &computed, &layout);
+
+    let clip_id_twin = next_clip_id();
+    let clip_def_twin = format!(
+        r#"<clipPath id="{id}"><rect x="{x}" y="{y}" width="{w}" height="{h}"/></clipPath>"#,
+        id = clip_id_twin,
+        x = round2(computed.margin_left),
+        y = round2(computed.margin_top),
+        w = round2(computed.plot_width()),
+        h = round2(computed.plot_height()),
+    );
+    scene.defs.push(clip_def_twin);
+    scene.elements.push(Primitive::ClipStart {
+        x: computed.margin_left,
+        y: computed.margin_top,
+        width: computed.plot_width(),
+        height: computed.plot_height(),
+        id: clip_id_twin,
+    });
+
     add_shaded_regions(&layout.shaded_regions, &mut scene, &computed);
 
     for plot in primary.iter() {
@@ -5223,6 +5297,8 @@ pub fn render_twin_y(primary: Vec<Plot>, secondary: Vec<Plot>, layout: Layout) -
 
     add_reference_lines(&layout.reference_lines, &mut scene, &computed);
     add_text_annotations(&layout.annotations, &mut scene, &computed);
+
+    scene.elements.push(Primitive::ClipEnd);
 
     let mut all_plots_for_legend: Vec<Plot> = primary;
     all_plots_for_legend.extend(secondary);

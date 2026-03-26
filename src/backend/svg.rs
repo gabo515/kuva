@@ -266,6 +266,23 @@ impl SvgBackend {
                     svg.push_str("</g>");
                     write_newline(&mut svg, p);
                 }
+                Primitive::ClipStart { id, .. } => {
+                    // The <clipPath> definition was pushed to scene.defs and is
+                    // already emitted in the <defs> block at the top of the SVG.
+                    // Here we only open the clipping group.
+                    write_indent(&mut svg, depth, p);
+                    svg.push_str(r#"<g clip-path="url(#"#);
+                    svg.push_str(id);
+                    svg.push_str(r#")">"#);
+                    write_newline(&mut svg, p);
+                    depth += 1;
+                }
+                Primitive::ClipEnd => {
+                    depth -= 1;
+                    write_indent(&mut svg, depth, p);
+                    svg.push_str("</g>");
+                    write_newline(&mut svg, p);
+                }
                 Primitive::Rect { x, y, width, height, fill, stroke, stroke_width, opacity } => {
                     write_indent(&mut svg, depth, p);
                     svg.push_str(r#"<rect x=""#);

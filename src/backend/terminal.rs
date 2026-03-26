@@ -788,6 +788,8 @@ impl Canvas {
                 }
             }
 
+            Primitive::ClipStart { .. } | Primitive::ClipEnd => {}
+
             Primitive::GroupStart { transform, .. } => {
                 let offset = transform
                     .as_ref()

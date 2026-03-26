@@ -137,6 +137,44 @@ fn test_histogram_from_bins_normalize() {
         "normalized precomputed histogram y-axis must not exceed 1.0");
 }
 
+// Issue #51: zero-count bins must not produce <rect height="0">.
+// Bimodal data with a gap in the middle — several bins will have count == 0.
+// The fix skips those bins entirely instead of emitting a zero-height rect.
+#[test]
+fn test_histogram_zero_count_bins_skipped() {
+    // Two clusters far apart with a gap in the middle → zero-count bins guaranteed.
+    let mut data: Vec<f64> = (0..20).map(|i| i as f64 * 0.1).collect();       // 0.0 – 1.9
+    data.extend((80..100).map(|i| i as f64 * 0.1));                            // 8.0 – 9.9
+    let hist = Histogram::new()
+        .with_data(data)
+        .with_bins(20)
+        .with_range((0.0, 10.0));
+
+    let plots = vec![Plot::Histogram(hist)];
+    let layout = Layout::auto_from_plots(&plots);
+    let svg = SvgBackend.render_scene(&render_multiple(plots, layout));
+    std::fs::write("test_outputs/hist_zero_count_gap.svg", &svg).unwrap();
+
+    assert!(svg.contains("<rect"), "bimodal histogram must still draw bars");
+    assert!(!svg.contains("height=\"0\""), "zero-count bins must not emit height=0 rects");
+}
+
+// Issue #51: same check for Histogram::from_bins with explicit zeros in the middle.
+#[test]
+fn test_histogram_from_bins_zero_counts_skipped() {
+    let edges = vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0];
+    let counts = vec![10.0, 0.0, 0.0, 0.0, 8.0]; // zeros in the middle
+    let hist = Histogram::from_bins(edges, counts).with_color("steelblue");
+
+    let plots = vec![Plot::Histogram(hist)];
+    let layout = Layout::auto_from_plots(&plots);
+    let svg = SvgBackend.render_scene(&render_multiple(plots, layout));
+    std::fs::write("test_outputs/hist_from_bins_zero_gap.svg", &svg).unwrap();
+
+    assert!(svg.contains("<rect"), "from_bins histogram must still draw non-zero bars");
+    assert!(!svg.contains("height=\"0\""), "zero-count bins must not emit height=0 rects");
+}
+
 // Regression test for issue #46: last x-axis tick label was truncated when
 // the tick value is a wide number (e.g. "15000").  The fix estimates the
 // half-pixel-width of that label and ensures margin_right >= that estimate.

@@ -104,6 +104,18 @@ check "bar count-by" \
     "$BIN" bar "$DATA/scatter.tsv" --count-by group \
         --title "Points per Group" --x-label "Group" --y-label "Count"
 
+check "bar agg sum" \
+    "$BIN" bar "$DATA/stacked_area.tsv" --label-col species --value-col abundance --agg sum \
+        --title "Total Abundance per Species" --x-label "Species" --y-label "Total Abundance"
+
+check "bar agg mean" \
+    "$BIN" bar "$DATA/stacked_area.tsv" --label-col species --value-col abundance --agg mean \
+        --title "Mean Abundance per Species" --x-label "Species" --y-label "Mean Abundance"
+
+check "bar agg median" \
+    "$BIN" bar "$DATA/stacked_area.tsv" --label-col species --value-col abundance --agg median \
+        --title "Median Abundance per Species" --x-label "Species" --y-label "Median Abundance"
+
 # ── histogram ─────────────────────────────────────────────────────────────────
 check "histogram basic" \
     "$BIN" histogram "$DATA/histogram.tsv" --value-col value \
@@ -262,6 +274,11 @@ check "heatmap basic" \
 check "heatmap values inferno" \
     "$BIN" heatmap "$DATA/heatmap.tsv" --values --colormap inferno --legend "z-score" --height 800 \
         --title "Gene Expression Heatmap" --x-label "Sample" --y-label "Gene"
+
+check "heatmap long-format" \
+    "$BIN" heatmap "$DATA/stacked_area.tsv" --long-format \
+        --row-col species --col-col week --value-col abundance \
+        --title "Abundance by Species and Week" --x-label "Week" --y-label "Species"
 
 # ── hist2d ────────────────────────────────────────────────────────────────────
 check "hist2d basic" \

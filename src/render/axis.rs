@@ -70,10 +70,17 @@ pub fn add_axes_and_grid(scene: &mut Scene, computed: &ComputedLayout, layout: &
     if layout.show_grid {
         // Vertical grid lines (skip for category x-axes like boxplot, bar, violin)
         if layout.x_categories.is_none() && layout.y_categories.is_none() {
-            for (i, tx) in x_ticks.iter().enumerate() {
-                // Skip first tick on linear axes (it sits on the axis line).
-                // Datetime ticks are calendar-snapped and don't land on the axis edge.
-                if i == 0 && !layout.log_x && layout.x_datetime.is_none() { continue; }
+            let x_axis_edge = computed.margin_left;
+            for tx in x_ticks.iter() {
+                // Skip gridlines that land on (or within 1 px of) the y-axis line —
+                // they would be invisible under the axis stroke.  Use pixel proximity
+                // instead of `i == 0` so that equal_aspect-expanded ranges still draw
+                // all interior ticks correctly.
+                if !layout.log_x && layout.x_datetime.is_none()
+                    && (map_x(*tx) - x_axis_edge).abs() < 1.0
+                {
+                    continue;
+                }
                 let x = map_x(*tx);
                 scene.add(Primitive::Line {
                     x1: x,
@@ -88,8 +95,14 @@ pub fn add_axes_and_grid(scene: &mut Scene, computed: &ComputedLayout, layout: &
         }
         // Horizontal grid lines (draw when y-axis is numeric)
         if layout.y_categories.is_none() {
-            for (i, ty) in y_ticks.iter().enumerate() {
-                if i == 0 && !layout.log_y && layout.y_datetime.is_none() { continue; }
+            let y_axis_edge = computed.height - computed.margin_bottom;
+            for ty in y_ticks.iter() {
+                // Same proximity check for the x-axis edge.
+                if !layout.log_y && layout.y_datetime.is_none()
+                    && (map_y(*ty) - y_axis_edge).abs() < 1.0
+                {
+                    continue;
+                }
                 let y = map_y(*ty);
                 scene.add(Primitive::Line {
                     x1: computed.margin_left,

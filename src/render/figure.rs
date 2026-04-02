@@ -595,6 +595,7 @@ fn clone_layout(l: &Layout) -> Layout {
     new.scale = l.scale;
     new.polar_r_label_angle = l.polar_r_label_angle;
     new.interactive = l.interactive;
+    new.equal_aspect = l.equal_aspect;
     new
 }
 

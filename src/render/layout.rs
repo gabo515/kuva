@@ -242,6 +242,11 @@ pub struct Layout {
     /// When `true`, the SVG backend injects interactive CSS, JavaScript, and
     /// `data-*` attributes so the chart responds to hover, click, and search.
     pub interactive: bool,
+    /// When `true`, enforce equal scaling on both axes so that one data unit
+    /// spans the same number of pixels horizontally and vertically.  Circles
+    /// rendered with equal aspect look circular; without it they look like
+    /// ellipses whenever the x and y data ranges differ.
+    pub equal_aspect: bool,
 }
 
 impl Layout {
@@ -317,6 +322,7 @@ impl Layout {
             scale: 1.0,
             polar_r_label_angle: None,
             interactive: false,
+            equal_aspect: false,
         }
     }
 
@@ -914,6 +920,15 @@ impl Layout {
         self
     }
 
+    /// Enforce equal x/y scaling so that one data unit spans the same number of
+    /// pixels on both axes.  Circles look circular; squares look square.  The
+    /// axis with the smaller data-to-pixel ratio is expanded symmetrically around
+    /// its midpoint until both ratios match.  Has no effect on log-scale axes.
+    pub fn with_equal_aspect(mut self) -> Self {
+        self.equal_aspect = true;
+        self
+    }
+
     pub fn with_log_x(mut self) -> Self {
         self.log_x = true;
         self
@@ -1254,6 +1269,8 @@ pub struct ComputedLayout {
     y_offset: f64,
     /// Mirror of `Layout::interactive` — propagated so renderers can access it.
     pub interactive: bool,
+    /// Mirror of `Layout::equal_aspect` — read by `recompute_transforms`.
+    pub equal_aspect: bool,
 }
 
 impl ComputedLayout {
@@ -1558,6 +1575,7 @@ impl ComputedLayout {
             y_scale: 0.0,
             y_offset: 0.0,
             interactive: layout.interactive,
+            equal_aspect: layout.equal_aspect,
         };
         s.recompute_transforms();
         s
@@ -1589,6 +1607,30 @@ impl ComputedLayout {
             let span = self.y_range.1 - self.y_range.0;
             self.y_scale = if span.abs() > f64::EPSILON { ph / span } else { 0.0 };
             self.y_offset = self.height - self.margin_bottom + self.y_range.0 * self.y_scale;
+        }
+
+        // Equal-aspect: expand the tighter axis so 1 data unit = same pixels on both axes.
+        // Only applies to linear (non-log) axes; ignored when either scale is zero.
+        if self.equal_aspect && !self.log_x && !self.log_y
+            && self.x_scale > f64::EPSILON
+            && self.y_scale > f64::EPSILON
+        {
+            let s = self.x_scale.min(self.y_scale);
+            if self.x_scale > s {
+                // x is more zoomed in — expand x range to match y scale
+                let x_mid = (self.x_range.0 + self.x_range.1) / 2.0;
+                let new_half = self.plot_width() / (2.0 * s);
+                self.x_range = (x_mid - new_half, x_mid + new_half);
+                self.x_scale = s;
+                self.x_offset = self.margin_left - self.x_range.0 * self.x_scale;
+            } else {
+                // y is more zoomed in — expand y range to match x scale
+                let y_mid = (self.y_range.0 + self.y_range.1) / 2.0;
+                let new_half = self.plot_height() / (2.0 * s);
+                self.y_range = (y_mid - new_half, y_mid + new_half);
+                self.y_scale = s;
+                self.y_offset = self.height - self.margin_bottom + self.y_range.0 * self.y_scale;
+            }
         }
     }
 

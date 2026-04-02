@@ -2280,12 +2280,16 @@ fn add_legend(legend: &Legend, scene: &mut Scene, computed: &ComputedLayout) {
     }
 }
 
-fn add_colorbar(info: &ColorBarInfo, scene: &mut Scene, computed: &ComputedLayout) {
+fn add_colorbar_at(
+    info: &ColorBarInfo,
+    scene: &mut Scene,
+    computed: &ComputedLayout,
+    bar_x: f64,
+    bar_y: f64,
+    bar_height: f64,
+) {
     let theme = &computed.theme;
     let bar_width = computed.colorbar_bar_width;
-    let bar_height = computed.plot_height() * 0.8;
-    let bar_x = computed.width - computed.colorbar_x_inset; // rightmost area
-    let bar_y = computed.margin_top + computed.plot_height() * 0.1; // vertically centered
 
     let num_slices = 50;
     let slice_height = bar_height / num_slices as f64;
@@ -2379,6 +2383,13 @@ fn add_colorbar(info: &ColorBarInfo, scene: &mut Scene, computed: &ComputedLayou
             bold: false,
         });
     }
+}
+
+fn add_colorbar(info: &ColorBarInfo, scene: &mut Scene, computed: &ComputedLayout) {
+    let bar_x = computed.width - computed.colorbar_x_inset;
+    let bar_y = computed.margin_top + computed.plot_height() * 0.1;
+    let bar_height = computed.plot_height() * 0.8;
+    add_colorbar_at(info, scene, computed, bar_x, bar_y, bar_height);
 }
 
 
@@ -3281,19 +3292,11 @@ fn add_diceplot(dp: &DicePlot, scene: &mut Scene, computed: &ComputedLayout) {
     let n_y = dp.y_categories.len();
     if n_x == 0 || n_y == 0 { return; }
 
-    let cell_w = computed.plot_width()  / n_x as f64;
-    let cell_h = computed.plot_height() / n_y as f64;
-    let tile_w = cell_w * dp.cell_width;
-    let tile_h = cell_h * dp.cell_height;
-    let offsets = dp.dot_offsets();
-
     // Detect which input modes are present across all points.
     let categorical_mode = dp.points.iter().any(|p| !p.dot_colors.is_empty());
     let per_dot_mode     = dp.points.iter().any(|p| !p.dot_fills.is_empty() || !p.dot_sizes.is_empty());
     let tile_mode        = dp.points.iter().any(|p| !p.present.is_empty() || p.fill.is_some() || p.size.is_some());
 
-    // Warn in debug builds if multiple modes are mixed — the renderer only
-    // handles one at a time and will silently prefer categorical > per_dot > tile.
     debug_assert!(
         [categorical_mode, per_dot_mode, tile_mode].iter().filter(|&&v| v).count() <= 1,
         "DicePlot: mixing with_records / with_dot_data / with_points on the same plot \
@@ -3301,73 +3304,88 @@ fn add_diceplot(dp: &DicePlot, scene: &mut Scene, computed: &ComputedLayout) {
     );
 
     let per_dot_mode = !categorical_mode && per_dot_mode;
-    let pip_scale = 0.75_f64;
 
-    // ggdiceplot 1.2.0 pip sizing: compute max radius from inter-pip distance
-    // and border clearance, then apply pip_scale.
-    let min_half_tile = (tile_w / 2.0).min(tile_h / 2.0);
-
-    // Offsets are fractional (-0.3..+0.3 range), scale to pixel space
-    let px_offsets: Vec<(f64, f64)> = offsets.iter()
-        .map(|&(dx, dy)| (dx * cell_w, dy * cell_h))
-        .collect();
-
-    let (min_inter_pip, max_abs_offset) = if px_offsets.len() > 1 {
-        let mut min_dist = f64::INFINITY;
-        for i in 0..px_offsets.len() {
-            for j in (i + 1)..px_offsets.len() {
-                let d = ((px_offsets[i].0 - px_offsets[j].0).powi(2)
-                       + (px_offsets[i].1 - px_offsets[j].1).powi(2)).sqrt();
-                min_dist = min_dist.min(d);
-            }
-        }
-        let max_off = px_offsets.iter()
-            .map(|(dx, dy)| dx.abs().max(dy.abs()))
-            .fold(0.0_f64, f64::max);
-        (min_dist, max_off)
-    } else {
-        (f64::INFINITY, 0.0)
+    // ── Square grid with equal spacing ──────────────────────────────────────────
+    // cell_sq = min(cell_w, cell_h) so both horizontal and vertical gaps are equal.
+    // The grid is then centred within the plot area.
+    let cell_sq = {
+        let cw = computed.plot_width()  / n_x as f64;
+        let ch = computed.plot_height() / n_y as f64;
+        cw.min(ch)
     };
+    let tile_sq = cell_sq * dp.cell_width.min(dp.cell_height); // square tile
 
-    let s_tight = if min_inter_pip.is_finite() && max_abs_offset > 0.0 {
-        (min_half_tile / (max_abs_offset + min_inter_pip / 2.0)).min(1.0)
-    } else {
-        1.0
-    };
+    let grid_total_w = n_x as f64 * cell_sq;
+    let grid_total_h = n_y as f64 * cell_sq;
+    let grid_x0 = computed.margin_left + (computed.plot_width()  - grid_total_w) / 2.0;
+    let grid_y0 = computed.margin_top  + (computed.plot_height() - grid_total_h) / 2.0;
 
-    let pip_radius_tight = {
-        let border_r = min_half_tile - max_abs_offset * s_tight;
-        let inter_r = if min_inter_pip.is_finite() {
-            min_inter_pip * s_tight / 2.0
-        } else {
-            min_half_tile
-        };
-        border_r.min(inter_r)
-    };
+    // ── Pip geometry ────────────────────────────────────────────────────────────
+    // Each tile is divided into a 3×3 sub-grid. Pips are centred in their sub-cell.
+    // Radius is capped so the pip never crosses the sub-cell boundary.
+    let sub = tile_sq / 3.0;                   // sub-cell side length
+    let pip_scale = 0.85_f64;
+    let max_pip_r = sub * 0.5 * pip_scale;     // fits inside sub-cell with a margin
+    let base_r = if dp.dot_radius > 0.0 { dp.dot_radius } else { max_pip_r };
 
-    let offset_scale = if s_tight < 1.0 {
-        1.0 - pip_scale * (1.0 - s_tight)
-    } else {
-        1.0
-    };
+    let grid_positions = dp.dot_grid_positions();
 
     let has_size = dp.points.iter().any(|p| p.size.is_some())
         || dp.points.iter().any(|p| p.dot_sizes.iter().any(|v| v.is_some()));
-
-    let base_r = if dp.dot_radius > 0.0 {
-        dp.dot_radius
-    } else if has_size {
-        // Variable size: max radius is pip_scale fraction of tight radius
-        pip_radius_tight * pip_scale
-    } else {
-        // Constant size: all pips at pip_scale fraction of tight radius
-        pip_radius_tight * pip_scale
-    };
-
     let has_fill = dp.points.iter().any(|p| p.fill.is_some());
     let (fill_min, fill_max) = dp.fill_range.unwrap_or_else(|| dp.fill_extent());
     let (size_min, size_max) = dp.size_range.unwrap_or_else(|| dp.size_extent());
 
+    // ── Category axis drawing (add_axes_and_grid is skipped for DicePlot) ───────
+    {
+        let theme = &computed.theme;
+        let ax  = Color::from(&theme.axis_color);
+        let aw  = computed.axis_stroke_width;
+        let tl  = computed.tick_mark_major;
+        let tlm = computed.tick_label_margin;
+        let ts  = computed.tick_size;
+
+        // Bottom and left axis lines
+        scene.add(Primitive::Line {
+            x1: grid_x0, y1: grid_y0 + grid_total_h,
+            x2: grid_x0 + grid_total_w, y2: grid_y0 + grid_total_h,
+            stroke: ax.clone(), stroke_width: aw, stroke_dasharray: None,
+        });
+        scene.add(Primitive::Line {
+            x1: grid_x0, y1: grid_y0,
+            x2: grid_x0, y2: grid_y0 + grid_total_h,
+            stroke: ax.clone(), stroke_width: aw, stroke_dasharray: None,
+        });
+
+        for (xi, label) in dp.x_categories.iter().enumerate() {
+            let tx = grid_x0 + (xi as f64 + 0.5) * cell_sq;
+            let ty = grid_y0 + grid_total_h;
+            scene.add(Primitive::Line {
+                x1: tx, y1: ty, x2: tx, y2: ty + tl,
+                stroke: ax.clone(), stroke_width: aw, stroke_dasharray: None,
+            });
+            scene.add(Primitive::Text {
+                x: tx, y: ty + tl + tlm + ts as f64 * 0.7,
+                content: label.clone(), size: ts,
+                anchor: TextAnchor::Middle, rotate: None, bold: false,
+            });
+        }
+
+        for (yi, label) in dp.y_categories.iter().enumerate() {
+            let ty = grid_y0 + (yi as f64 + 0.5) * cell_sq;
+            scene.add(Primitive::Line {
+                x1: grid_x0 - tl, y1: ty, x2: grid_x0, y2: ty,
+                stroke: ax.clone(), stroke_width: aw, stroke_dasharray: None,
+            });
+            scene.add(Primitive::Text {
+                x: grid_x0 - tl - tlm, y: ty + ts as f64 * 0.35,
+                content: label.clone(), size: ts,
+                anchor: TextAnchor::End, rotate: None, bold: false,
+            });
+        }
+    }
+
+    // ── Tiles and pips ───────────────────────────────────────────────────────────
     for pt in &dp.points {
         let xi = dp.x_categories.iter().position(|c| c == &pt.x_cat);
         let yi = dp.y_categories.iter().position(|c| c == &pt.y_cat);
@@ -3376,33 +3394,54 @@ fn add_diceplot(dp: &DicePlot, scene: &mut Scene, computed: &ComputedLayout) {
             _ => continue,
         };
 
-        let cx = computed.map_x(xi as f64 + 1.0);
-        let cy = computed.map_y((n_y - yi) as f64);
+        // Tile centre — yi=0 maps to the top row of the grid
+        let cx = grid_x0 + (xi as f64 + 0.5) * cell_sq;
+        let cy = grid_y0 + (yi as f64 + 0.5) * cell_sq;
 
-        let (tile_fill, tile_stroke, tile_stroke_w): (Color, Option<Color>, Option<f64>) = if categorical_mode || per_dot_mode {
-            ("#ffffff".into(), Some("#000000".into()), Some(0.8_f64))
-        } else if has_fill {
-            let color: Color = if let Some(v) = pt.fill {
-                let norm = (v - fill_min) / (fill_max - fill_min + EPSILON);
-                dp.color_map.map(norm.clamp(0.0, 1.0)).into()
+        let theme = &computed.theme;
+        let (tile_fill, tile_stroke, tile_stroke_w): (Color, Option<Color>, Option<f64>) =
+            if categorical_mode || per_dot_mode {
+                (Color::from(&theme.legend_bg), Some(Color::from(&theme.axis_color)), Some(0.8_f64))
+            } else if has_fill {
+                let color: Color = if let Some(v) = pt.fill {
+                    let norm = (v - fill_min) / (fill_max - fill_min + EPSILON);
+                    dp.color_map.map(norm.clamp(0.0, 1.0)).into()
+                } else {
+                    "#e8e8e8".into()
+                };
+                (color, Some("#cccccc".into()), Some(0.5_f64))
             } else {
-                "#e8e8e8".into()
+                ("#e8e8e8".into(), Some("#cccccc".into()), Some(0.5_f64))
             };
-            (color, Some("#cccccc".into()), Some(0.5_f64))
-        } else {
-            ("#e8e8e8".into(), Some("#cccccc".into()), Some(0.5_f64))
-        };
 
         scene.add(Primitive::Rect {
-            x: cx - tile_w / 2.0,
-            y: cy - tile_h / 2.0,
-            width: tile_w,
-            height: tile_h,
+            x: cx - tile_sq / 2.0,
+            y: cy - tile_sq / 2.0,
+            width: tile_sq,
+            height: tile_sq,
             fill: tile_fill,
             stroke: tile_stroke,
             stroke_width: tile_stroke_w,
             opacity: None,
         });
+
+        // Optional 3×3 sub-grid lines inside each tile
+        if dp.grid_lines {
+            let gl: Color = "#aaaaaa".into();
+            for i in 1..3_usize {
+                let frac = i as f64 / 3.0;
+                scene.add(Primitive::Line {
+                    x1: cx - tile_sq / 2.0 + frac * tile_sq, y1: cy - tile_sq / 2.0,
+                    x2: cx - tile_sq / 2.0 + frac * tile_sq, y2: cy + tile_sq / 2.0,
+                    stroke: gl.clone(), stroke_width: 0.4, stroke_dasharray: None,
+                });
+                scene.add(Primitive::Line {
+                    x1: cx - tile_sq / 2.0, y1: cy - tile_sq / 2.0 + frac * tile_sq,
+                    x2: cx + tile_sq / 2.0, y2: cy - tile_sq / 2.0 + frac * tile_sq,
+                    stroke: gl.clone(), stroke_width: 0.4, stroke_dasharray: None,
+                });
+            }
+        }
 
         let cell_dot_r = if has_size && !categorical_mode && !per_dot_mode {
             if let Some(s) = pt.size {
@@ -3416,22 +3455,20 @@ fn add_diceplot(dp: &DicePlot, scene: &mut Scene, computed: &ComputedLayout) {
         };
 
         for k in 0..dp.ndots {
-            let (dx, dy) = match offsets.get(k) {
-                Some(&o) => o,
+            // Pip centre: centred within its 3×3 sub-cell
+            let (h_idx, v_idx) = match grid_positions.get(k) {
+                Some(&p) => p,
                 None => continue,
             };
-            // Apply offset_scale: shift pips toward tile center so they don't clip
-            let dot_cx = cx + dx * cell_w * offset_scale;
-            let dot_cy = cy + dy * cell_h * offset_scale;
+            let dot_cx = cx + (h_idx as f64 - 1.0) * sub;
+            let dot_cy = cy + (v_idx as f64 - 1.0) * sub;
 
             if categorical_mode {
                 if let Some(color) = pt.dot_colors.get(k).and_then(|c| c.as_deref()) {
                     scene.add(Primitive::Circle {
                         cx: dot_cx, cy: dot_cy, r: cell_dot_r,
-                        fill: color.into(),
-                        fill_opacity: None,
-                        stroke: None,
-                        stroke_width: None,
+                        fill: color.into(), fill_opacity: None,
+                        stroke: None, stroke_width: None,
                     });
                 }
             } else if per_dot_mode {
@@ -3446,35 +3483,27 @@ fn add_diceplot(dp: &DicePlot, scene: &mut Scene, computed: &ComputedLayout) {
                     };
                     scene.add(Primitive::Circle {
                         cx: dot_cx, cy: dot_cy, r: dot_r,
-                        fill: fill_color,
-                        fill_opacity: None,
-                        stroke: None,
-                        stroke_width: None,
+                        fill: fill_color, fill_opacity: None,
+                        stroke: None, stroke_width: None,
                     });
                 }
             } else if pt.present.contains(&k) {
                 scene.add(Primitive::Circle {
                     cx: dot_cx, cy: dot_cy, r: cell_dot_r,
-                    fill: "#222222".into(),
-                    fill_opacity: None,
-                    stroke: None,
-                    stroke_width: None,
+                    fill: "#222222".into(), fill_opacity: None,
+                    stroke: None, stroke_width: None,
                 });
             } else {
                 let r = cell_dot_r * 0.6;
                 let d = format!(
                     "M {},{} A {},{} 0 1,0 {},{} A {},{} 0 1,0 {},{} Z",
-                    dot_cx - r, dot_cy,
-                    r, r, dot_cx + r, dot_cy,
+                    dot_cx - r, dot_cy, r, r, dot_cx + r, dot_cy,
                     r, r, dot_cx - r, dot_cy,
                 );
                 scene.add(Primitive::Path(Box::new(PathData {
-                    d,
-                    fill: Some("none".into()),
-                    stroke: "#999999".into(),
-                    stroke_width: 0.8,
-                    opacity: Some(0.6),
-                    stroke_dasharray: None,
+                    d, fill: Some("none".into()),
+                    stroke: "#999999".into(), stroke_width: 0.8,
+                    opacity: Some(0.6), stroke_dasharray: None,
                 })));
             }
         }
@@ -3487,20 +3516,25 @@ fn add_dice_position_legend(
 ) -> f64 {
     let theme = &computed.theme;
     let legend_padding = 10.0;
-    let line_height = computed.legend_line_height;
     let legend_width = computed.legend_width;
     let legend_x = computed.width - computed.margin_right + computed.y2_axis_width + 10.0;
 
-    let mini_w = 18.0_f64;
-    let mini_h = 18.0_f64;
-    let scale_x = mini_w / dp.cell_width.max(0.01);
-    let scale_y = mini_h / dp.cell_height.max(0.01);
-    let mini_r = (dp.pad * mini_w / dp.cell_width * 0.8).clamp(1.5, 4.0);
-    let offsets = dp.dot_offsets();
+    // Big-die layout: a 3×3 grid where each cell has a pip area + label area.
+    // die_cell_w scales with the longest category label so text is never clipped.
+    let max_cat_len = dp.category_labels.iter().map(|l| l.len()).max().unwrap_or(3);
+    let die_cell_w = (max_cat_len as f64 * 5.5 + 10.0).max(24.0_f64);
+    let die_cell_pip_h = 18.0_f64;   // height reserved for the pip
+    let label_area_h = 14.0_f64;     // height reserved for the label below each pip
+    let row_h = die_cell_pip_h + label_area_h;
+    let die_w = 3.0 * die_cell_w;
+    let die_h = 3.0 * row_h;
+    let pip_r = 4.5_f64;
+    let label_size = (computed.body_size as i32 - 1).max(9) as u32;
 
-    let title_rows = 1_usize;
-    let box_height = (title_rows + dp.ndots) as f64 * line_height + legend_padding * 2.0;
+    let title_h = computed.body_size as f64 + 8.0;
+    let box_height = legend_padding * 2.0 + title_h + die_h;
 
+    // Background + border
     scene.add(Primitive::Rect {
         x: legend_x - legend_padding + 5.0, y: y_start - legend_padding,
         width: legend_width, height: box_height,
@@ -3512,46 +3546,67 @@ fn add_dice_position_legend(
         fill: "none".into(), stroke: Some(Color::from(&theme.legend_border)),
         stroke_width: Some(1.0), opacity: None,
     });
+
+    // Title
     scene.add(Primitive::Text {
         x: legend_x + legend_width * 0.5 - legend_padding,
-        y: y_start + computed.body_size as f64 * 0.8,
+        y: y_start + computed.body_size as f64 * 0.85,
         content: title.to_string(), size: computed.body_size,
         anchor: TextAnchor::Middle, rotate: None, bold: true,
     });
 
-    let mut row_y = y_start + line_height;
-    for k in 0..dp.ndots {
-        let mini_cx = legend_x + 5.0 + mini_w * 0.5 + 2.0;
-        let mini_cy = row_y + line_height * 0.5 - 2.0;
+    // Centre the die face horizontally within the legend box
+    let die_x = legend_x + (legend_width - legend_padding * 2.0 - die_w) / 2.0;
+    let die_y = y_start + title_h;
 
-        scene.add(Primitive::Rect {
-            x: mini_cx - mini_w * 0.5, y: mini_cy - mini_h * 0.5,
-            width: mini_w, height: mini_h,
-            fill: Color::from(&theme.legend_bg),
-            stroke: Some(Color::from(&theme.axis_color)),
-            stroke_width: Some(0.5), opacity: None,
+    // Die face border — encompasses all pip + label rows
+    scene.add(Primitive::Rect {
+        x: die_x, y: die_y,
+        width: die_w, height: die_h,
+        fill: Color::from(&theme.legend_bg),
+        stroke: Some(Color::from(&theme.axis_color)),
+        stroke_width: Some(0.8), opacity: None,
+    });
+
+    // Internal 3×3 grid lines inside the die face
+    let grid_color: Color = Color::from(&theme.axis_color);
+    for i in 1..3_usize {
+        // Vertical lines
+        scene.add(Primitive::Line {
+            x1: die_x + i as f64 * die_cell_w, y1: die_y,
+            x2: die_x + i as f64 * die_cell_w, y2: die_y + die_h,
+            stroke: grid_color.clone(), stroke_width: 0.4,
+            stroke_dasharray: Some("3,3".to_string()),
         });
+        // Horizontal lines
+        scene.add(Primitive::Line {
+            x1: die_x, y1: die_y + i as f64 * row_h,
+            x2: die_x + die_w, y2: die_y + i as f64 * row_h,
+            stroke: grid_color.clone(), stroke_width: 0.4,
+            stroke_dasharray: Some("3,3".to_string()),
+        });
+    }
 
-        for j in 0..dp.ndots {
-            let (dx, dy) = match offsets.get(j) { Some(&o) => o, None => continue };
-            let dot_cx = mini_cx + dx * scale_x;
-            let dot_cy = mini_cy + dy * scale_y;
-            if j == k {
-                scene.add(Primitive::Circle { cx: dot_cx, cy: dot_cy, r: mini_r, fill: Color::from(&theme.text_color), fill_opacity: None, stroke: None, stroke_width: None });
-            } else {
-                scene.add(Primitive::Circle { cx: dot_cx, cy: dot_cy, r: mini_r * 0.65, fill: Color::from(&theme.grid_color), fill_opacity: None, stroke: None, stroke_width: None });
-            }
-        }
+    // Pips + labels: each pip occupies the upper portion of its cell; label below it
+    for (k, (grid_row, grid_col)) in dp.dot_grid_positions().iter().enumerate() {
+        let pip_cx = die_x + *grid_col as f64 * die_cell_w + die_cell_w / 2.0;
+        let pip_cy = die_y + *grid_row as f64 * row_h + die_cell_pip_h / 2.0;
+
+        scene.add(Primitive::Circle {
+            cx: pip_cx, cy: pip_cy, r: pip_r,
+            fill: Color::from(&theme.text_color),
+            fill_opacity: None, stroke: None, stroke_width: None,
+        });
 
         let label = dp.category_labels.get(k).map(|s| s.as_str()).unwrap_or("");
         scene.add(Primitive::Text {
-            x: legend_x + 5.0 + mini_w + 7.0,
-            y: mini_cy + computed.body_size as f64 / 3.0,
-            content: label.to_string(), size: computed.body_size,
-            anchor: TextAnchor::Start, rotate: None, bold: false,
+            x: pip_cx,
+            y: pip_cy + die_cell_pip_h / 2.0 + label_area_h * 0.8,
+            content: label.to_string(), size: label_size,
+            anchor: TextAnchor::Middle, rotate: None, bold: false,
         });
-        row_y += line_height;
     }
+
     y_start + box_height
 }
 
@@ -3588,32 +3643,14 @@ fn add_dice_size_legend_section(
         anchor: TextAnchor::Middle, rotate: None, bold: true,
     });
 
-    let cell_w = computed.plot_width()  / dp.x_categories.len().max(1) as f64;
-    let cell_h = computed.plot_height() / dp.y_categories.len().max(1) as f64;
-    let tile_w  = cell_w * dp.cell_width;
-    let tile_h  = cell_h * dp.cell_height;
-    let pip_scale = 0.75_f64;
-    let min_half_tile = (tile_w / 2.0).min(tile_h / 2.0);
-    let px_offsets: Vec<(f64, f64)> = dp.dot_offsets().iter()
-        .map(|&(dx, dy)| (dx * cell_w, dy * cell_h)).collect();
-    let (min_inter_pip, max_abs_offset) = if px_offsets.len() > 1 {
-        let mut min_d = f64::INFINITY;
-        for i in 0..px_offsets.len() {
-            for j in (i+1)..px_offsets.len() {
-                let d = ((px_offsets[i].0 - px_offsets[j].0).powi(2)
-                       + (px_offsets[i].1 - px_offsets[j].1).powi(2)).sqrt();
-                min_d = min_d.min(d);
-            }
-        }
-        let max_off = px_offsets.iter().map(|(dx, dy)| dx.abs().max(dy.abs())).fold(0.0_f64, f64::max);
-        (min_d, max_off)
-    } else { (f64::INFINITY, 0.0) };
-    let s_tight = if min_inter_pip.is_finite() && max_abs_offset > 0.0 {
-        (min_half_tile / (max_abs_offset + min_inter_pip / 2.0)).min(1.0)
-    } else { 1.0 };
-    let pip_r_tight = (min_half_tile - max_abs_offset * s_tight)
-        .min(if min_inter_pip.is_finite() { min_inter_pip * s_tight / 2.0 } else { min_half_tile });
-    let base_r = if dp.dot_radius > 0.0 { dp.dot_radius } else { pip_r_tight * pip_scale };
+    // base_r must match the actual plot pip radius (tile_sq/6 * pip_scale)
+    let cell_sq = {
+        let cw = computed.plot_width()  / dp.x_categories.len().max(1) as f64;
+        let ch = computed.plot_height() / dp.y_categories.len().max(1) as f64;
+        cw.min(ch)
+    };
+    let tile_sq = cell_sq * dp.cell_width.min(dp.cell_height);
+    let base_r = if dp.dot_radius > 0.0 { dp.dot_radius } else { tile_sq / 6.0 * 0.85 };
 
     let swatch_cx = legend_x + 5.0 + 10.0;
     let mut row_y = y_start + line_height;
@@ -3632,7 +3669,8 @@ fn add_dice_size_legend_section(
     y_start + box_height
 }
 
-fn add_dice_legends(dp: &DicePlot, scene: &mut Scene, computed: &ComputedLayout) {
+/// Returns true if a colorbar was drawn (so the caller can skip the generic add_colorbar).
+fn add_dice_legends(dp: &DicePlot, scene: &mut Scene, computed: &ComputedLayout) -> bool {
     let mut y = computed.margin_top;
 
     if let Some(ref title) = dp.position_legend_label {
@@ -3661,8 +3699,31 @@ fn add_dice_legends(dp: &DicePlot, scene: &mut Scene, computed: &ComputedLayout)
     }
 
     if let Some(ref title) = dp.size_legend_label {
-        add_dice_size_legend_section(dp, title, scene, computed, y);
+        y = add_dice_size_legend_section(dp, title, scene, computed, y);
+        y += 8.0;
     }
+
+    // Colorbar (fill legend) — drawn below the other dice legends
+    if dp.fill_legend_label.is_some() {
+        let (fill_min, fill_max) = dp.fill_range.unwrap_or_else(|| dp.fill_extent());
+        let cmap = dp.color_map.clone();
+        let info = ColorBarInfo {
+            map_fn: std::sync::Arc::new(move |t| {
+                let norm = (t - fill_min) / (fill_max - fill_min + f64::EPSILON);
+                cmap.map(norm.clamp(0.0, 1.0))
+            }),
+            min_value: fill_min,
+            max_value: fill_max,
+            label: dp.fill_legend_label.clone(),
+            tick_labels: None,
+        };
+        let bar_x = computed.width - computed.colorbar_x_inset;
+        let bar_height = (computed.height - y - 8.0 - 20.0).max(60.0);
+        add_colorbar_at(&info, scene, computed, bar_x, y + 8.0, bar_height);
+        return true;
+    }
+
+    false
 }
 
 /// Draw DotPlot size legend (top) and colorbar (bottom) stacked in the same right-margin column.
@@ -5698,6 +5759,25 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
         }
     }
 
+    // Auto-shrink canvas width for height-limited DicePlot (before scene is created).
+    // When cell_sq is determined by height, the grid is narrower than the full plot
+    // area.  The ideal canvas width is margin_left + grid_width + gap + right_margin.
+    if let Some(Plot::DicePlot(dp)) = plots.iter().find(|p| matches!(p, Plot::DicePlot(_))) {
+        let nx = dp.x_categories.len().max(1);
+        let ny = dp.y_categories.len().max(1);
+        let cw0 = computed.plot_width()  / nx as f64;
+        let ch0 = computed.plot_height() / ny as f64;
+        if ch0 < cw0 {
+            let cell_sq = ch0;
+            let gw = nx as f64 * cell_sq;
+            let ideal_width = computed.margin_left + gw + 12.0 + computed.margin_right;
+            if ideal_width < computed.width {
+                computed.width = ideal_width;
+                computed.recompute_transforms();
+            }
+        }
+    }
+
     let capacity_hint: usize = plots.iter().map(|p| p.estimated_primitives()).sum::<usize>() + 64;
     let mut scene = Scene::with_capacity(computed.width, computed.height, capacity_hint);
     scene.font_family = computed.font_family.clone();
@@ -5726,10 +5806,70 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
         }
     }
 
-    let skip_axes = plots.iter().all(|p| matches!(p, Plot::Pie(_) | Plot::UpSet(_) | Plot::Chord(_) | Plot::Sankey(_) | Plot::PhyloTree(_) | Plot::Synteny(_) | Plot::Polar(_) | Plot::Ternary(_)));
+    let skip_axes = plots.iter().all(|p| matches!(p, Plot::Pie(_) | Plot::UpSet(_) | Plot::Chord(_) | Plot::Sankey(_) | Plot::PhyloTree(_) | Plot::Synteny(_) | Plot::Polar(_) | Plot::Ternary(_) | Plot::DicePlot(_)));
     if !skip_axes {
         add_axes_and_grid(&mut scene, &computed, &layout);
     }
+
+    // For DicePlot: precompute the actual grid extents so that axis labels and
+    // the right-margin legend start flush with the grid rather than the full
+    // canvas margin.
+    if let Some(Plot::DicePlot(dp)) = plots.iter().find(|p| matches!(p, Plot::DicePlot(_))) {
+        let nx = dp.x_categories.len().max(1);
+        let ny = dp.y_categories.len().max(1);
+        let cw0 = computed.plot_width()  / nx as f64;
+        let ch0 = computed.plot_height() / ny as f64;
+        let cell_sq = cw0.min(ch0);
+        let gw = nx as f64 * cell_sq;
+        let gh = ny as f64 * cell_sq;
+
+        // ── Canvas auto-shrink + legend flush with grid right edge ───────────────
+        // When height-limited there is unused horizontal space.  Shrink the canvas
+        // to exactly fit (margin_left + grid + gap + right-content), then solve
+        // analytically for margin_right so the legend lands gap px right of grid.
+        //
+        // Derivation (height-limited, gw constant):
+        //   legend_x  = W - R + y2w + 10
+        //   grid_right = margin_left + (plot_w - gw)/2 + gw
+        //              = margin_left + (W - margin_left - R + gw)/2
+        //   Set legend_x = grid_right + gap, solve for R:
+        //   R = W - margin_left - gw + 2·y2w + 20 - 2·gap
+        if ch0 < cw0 {
+            let gap = 12.0_f64;
+            let new_mr = (computed.width - computed.margin_left - gw
+                          + 2.0 * computed.y2_axis_width + 20.0 - 2.0 * gap)
+                         .max(computed.legend_width + 10.0); // ensure box stays on canvas
+            computed.margin_right = new_mr;
+        }
+
+        // Recompute grid origin with the (possibly updated) margin_right
+        let gx0 = computed.margin_left + (computed.plot_width() - gw) / 2.0;
+        let gy0 = computed.margin_top  + (computed.plot_height() - gh) / 2.0;
+        let grid_bottom = gy0 + gh;
+
+        // ── Colorbar flush with grid right edge (height-limited only) ────────────
+        // bar_x = width - colorbar_x_inset; solve for x_inset that puts bar at gx0+gw+gap
+        if ch0 < cw0 {
+            let gap = 12.0_f64;
+            computed.colorbar_x_inset = (computed.width - gx0 - gw - gap).max(0.0);
+        }
+
+        // ── Axis label positions relative to grid ────────────────────────────────
+        let tl  = computed.tick_mark_major;
+        let tlm = computed.tick_label_margin;
+        let ts  = computed.tick_size as f64;
+        let ls  = computed.label_size as f64;
+
+        // x-label: centred on grid width, just below the tick labels
+        let x_label_y = grid_bottom + tl + tlm + ts * 0.85 + 6.0 + ls * 0.5;
+        computed.dice_x_label_pos = Some((gx0 + gw / 2.0, x_label_y));
+
+        // y-label: centred on grid height, just left of the tick labels
+        let max_y_px = dp.y_categories.iter().map(|s| s.len()).max().unwrap_or(4) as f64 * ts * 0.6;
+        let y_label_x = (gx0 - tl - tlm - max_y_px - 6.0 - ls * 0.5).max(ls * 0.5 + 4.0);
+        computed.dice_y_label_pos = Some((y_label_x, gy0 + gh / 2.0));
+    }
+
     add_labels_and_title(&mut scene, &computed, &layout);
 
     if !skip_axes {
@@ -5909,6 +6049,7 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
             }
         });
 
+        let mut dice_colorbar_drawn = false;
         if dice_has_legend {
             if layout.show_legend {
                 for plot in plots.iter() {
@@ -5917,7 +6058,7 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
                             || !dp.dot_legend.is_empty()
                             || dp.size_legend_label.is_some()
                         {
-                            add_dice_legends(dp, &mut scene, &computed);
+                            dice_colorbar_drawn = add_dice_legends(dp, &mut scene, &computed);
                             break;
                         }
                     }
@@ -5943,7 +6084,7 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
             }
         }
 
-        if layout.show_colorbar {
+        if layout.show_colorbar && !dice_colorbar_drawn {
             for plot in plots.iter() {
                 if let Some(info) = plot.colorbar_info() {
                     add_colorbar(&info, &mut scene, &computed);

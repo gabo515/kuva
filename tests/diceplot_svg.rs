@@ -393,6 +393,144 @@ fn test_dice_long_legend_title_fits_box() {
     // only happen if we manually clipped, which we don't, so presence is sufficient).
 }
 
+/// Recreates a ggdiceplot-style large grid (8 compounds × 5 miRNAs, 4 organs/dots).
+/// Also exercises: position legend with big-die layout, grid_lines on, and dark theme.
+#[test]
+fn test_dice_large_grid_with_position_legend() {
+    // Position (which pip) = organ affected (Lung/Liver/Brain/Kidney)
+    // Pip colour          = direction of effect (Upregulated/Downregulated/Not sig.)
+    // These are two genuinely different dimensions, so both legends carry distinct information.
+    let organs: Vec<String> = vec!["Lung".into(), "Liver".into(), "Brain".into(), "Kidney".into()];
+
+    const UP: &str = "#d73027";   // upregulated   – red
+    const DN: &str = "#4575b4";   // downregulated – blue
+    const NS: &str = "#aaaaaa";   // not significant – grey
+
+    // (miRNA, Compound, Organ, significance_colour)
+    // miR-1: predominantly upregulated in Lung/Liver
+    // miR-2: downregulated in Kidney, mixed elsewhere
+    // miR-3: upregulated in Brain across many compounds
+    // miR-4: downregulated in Lung, mixed
+    // miR-5: mostly not significant
+    let combos: &[(&str, &str, &str, &str)] = &[
+        ("miR-1", "CpdA", "Lung",   UP),
+        ("miR-1", "CpdA", "Liver",  UP),
+        ("miR-1", "CpdA", "Brain",  NS),
+        ("miR-1", "CpdB", "Lung",   UP),
+        ("miR-1", "CpdB", "Kidney", NS),
+        ("miR-1", "CpdC", "Lung",   UP),
+        ("miR-1", "CpdC", "Liver",  UP),
+        ("miR-1", "CpdD", "Liver",  UP),
+        ("miR-1", "CpdD", "Brain",  NS),
+        ("miR-1", "CpdE", "Lung",   UP),
+        ("miR-1", "CpdF", "Liver",  UP),
+        ("miR-1", "CpdF", "Brain",  DN),
+        ("miR-1", "CpdG", "Lung",   UP),
+        ("miR-1", "CpdG", "Liver",  NS),
+        ("miR-1", "CpdH", "Lung",   UP),
+        ("miR-1", "CpdH", "Liver",  UP),
+        ("miR-2", "CpdA", "Brain",  DN),
+        ("miR-2", "CpdA", "Kidney", DN),
+        ("miR-2", "CpdB", "Lung",   NS),
+        ("miR-2", "CpdB", "Kidney", DN),
+        ("miR-2", "CpdC", "Kidney", DN),
+        ("miR-2", "CpdD", "Lung",   NS),
+        ("miR-2", "CpdD", "Kidney", DN),
+        ("miR-2", "CpdE", "Liver",  NS),
+        ("miR-2", "CpdE", "Kidney", DN),
+        ("miR-2", "CpdF", "Brain",  DN),
+        ("miR-2", "CpdG", "Liver",  UP),
+        ("miR-2", "CpdG", "Kidney", DN),
+        ("miR-2", "CpdH", "Brain",  NS),
+        ("miR-2", "CpdH", "Kidney", DN),
+        ("miR-3", "CpdA", "Brain",  UP),
+        ("miR-3", "CpdA", "Lung",   NS),
+        ("miR-3", "CpdB", "Brain",  UP),
+        ("miR-3", "CpdB", "Liver",  NS),
+        ("miR-3", "CpdC", "Brain",  UP),
+        ("miR-3", "CpdD", "Brain",  UP),
+        ("miR-3", "CpdD", "Lung",   NS),
+        ("miR-3", "CpdE", "Brain",  UP),
+        ("miR-3", "CpdE", "Kidney", NS),
+        ("miR-3", "CpdF", "Brain",  UP),
+        ("miR-3", "CpdG", "Brain",  UP),
+        ("miR-3", "CpdG", "Liver",  DN),
+        ("miR-3", "CpdH", "Brain",  UP),
+        ("miR-4", "CpdA", "Lung",   DN),
+        ("miR-4", "CpdA", "Liver",  NS),
+        ("miR-4", "CpdB", "Lung",   DN),
+        ("miR-4", "CpdC", "Lung",   DN),
+        ("miR-4", "CpdC", "Kidney", UP),
+        ("miR-4", "CpdD", "Lung",   DN),
+        ("miR-4", "CpdE", "Lung",   DN),
+        ("miR-4", "CpdE", "Brain",  NS),
+        ("miR-4", "CpdF", "Lung",   DN),
+        ("miR-4", "CpdF", "Liver",  UP),
+        ("miR-4", "CpdG", "Lung",   DN),
+        ("miR-4", "CpdH", "Lung",   DN),
+        ("miR-4", "CpdH", "Kidney", NS),
+        ("miR-5", "CpdA", "Lung",   NS),
+        ("miR-5", "CpdB", "Brain",  NS),
+        ("miR-5", "CpdC", "Liver",  NS),
+        ("miR-5", "CpdC", "Lung",   NS),
+        ("miR-5", "CpdD", "Kidney", NS),
+        ("miR-5", "CpdE", "Brain",  NS),
+        ("miR-5", "CpdF", "Lung",   NS),
+        ("miR-5", "CpdG", "Liver",  NS),
+        ("miR-5", "CpdH", "Kidney", NS),
+    ];
+
+    let dice = DicePlot::new(4)
+        .with_category_labels(organs)
+        .with_records(combos.iter().copied())
+        .with_position_legend("Organ")
+        .with_dot_legend(vec![
+            ("Upregulated",     UP),
+            ("Downregulated",   DN),
+            ("Not significant", NS),
+        ])
+        .with_grid_lines(true);
+
+    let plots = vec![Plot::DicePlot(dice)];
+    let layout = Layout::auto_from_plots(&plots)
+        .with_title("miRNA dysregulation by organ and direction")
+        .with_x_label("miRNA")
+        .with_y_label("Compound")
+        .with_height(520.0);
+
+    let scene = render_multiple(plots, layout);
+    let svg = SvgBackend.render_scene(&scene);
+    std::fs::write("test_outputs/dice_large_grid.svg", svg.clone()).unwrap();
+
+    assert!(svg.contains("<svg"));
+    assert!(svg.contains("<rect"));
+    assert!(svg.contains("Organ"));
+    assert!(svg.contains("Lung"));
+    assert!(svg.contains("Liver"));
+    assert!(svg.contains("Brain"));
+    assert!(svg.contains("Kidney"));
+    assert!(svg.contains("Upregulated"));
+    assert!(svg.contains("Downregulated"));
+    assert!(svg.contains("<line"));
+}
+
+#[test]
+fn test_dice_grid_lines_off_by_default() {
+    let organs = vec!["A".into(), "B".into(), "C".into()];
+    let data = vec![("X1", "Y1", "A", "#ff0000")];
+    let dice = DicePlot::new(3)
+        .with_category_labels(organs)
+        .with_records(data);
+
+    let plots = vec![Plot::DicePlot(dice)];
+    let layout = Layout::auto_from_plots(&plots);
+    let scene = render_multiple(plots, layout);
+    let svg = SvgBackend.render_scene(&scene);
+
+    // Grid lines should be absent when not enabled
+    assert!(!svg.contains("stroke-dasharray"));
+}
+
 #[test]
 fn test_dice_fill_colorbar_range() {
     // Explicit fill_range should be respected — colorbar min/max derived from it.

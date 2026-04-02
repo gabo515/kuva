@@ -685,6 +685,17 @@ impl Layout {
             layout = layout.with_show_legend();
             let dynamic_width = max_label_len as f64 * 8.5 + 35.0;
             layout.legend_width = dynamic_width.max(80.0);
+
+            // Position legend die face needs 3 cells wide — ensure legend_width fits.
+            for plot in plots.iter() {
+                if let crate::render::plots::Plot::DicePlot(dp) = plot {
+                    if dp.position_legend_label.is_some() {
+                        let max_cat = dp.category_labels.iter().map(|l| l.len()).max().unwrap_or(3);
+                        let die_cell_w = (max_cat as f64 * 5.5 + 10.0).max(24.0);
+                        layout.legend_width = layout.legend_width.max(3.0 * die_cell_w + 20.0);
+                    }
+                }
+            }
         }
 
         if has_dot_stacked {
@@ -1301,6 +1312,11 @@ pub struct ComputedLayout {
     pub interactive: bool,
     /// Mirror of `Layout::equal_aspect` — read by `recompute_transforms`.
     pub equal_aspect: bool,
+    /// Override x-axis label position (x_centre, y) used by DicePlot to place
+    /// the label relative to the actual grid rather than the canvas margin.
+    pub dice_x_label_pos: Option<(f64, f64)>,
+    /// Override y-axis label position (x, y_centre, rotated) for DicePlot.
+    pub dice_y_label_pos: Option<(f64, f64)>,
 }
 
 impl ComputedLayout {
@@ -1606,6 +1622,8 @@ impl ComputedLayout {
             y_offset: 0.0,
             interactive: layout.interactive,
             equal_aspect: layout.equal_aspect,
+            dice_x_label_pos: None,
+            dice_y_label_pos: None,
         };
         s.recompute_transforms();
         s

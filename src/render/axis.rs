@@ -474,9 +474,11 @@ pub fn add_labels_and_title(scene: &mut Scene, computed: &ComputedLayout, layout
     if !layout.suppress_x_ticks {
         if let Some(label) = &layout.x_label {
             let (dx, dy) = layout.x_label_offset;
+            let default_x = computed.margin_left + computed.plot_width() / 2.0;
+            let default_y = computed.height - computed.label_size as f64 * 0.5;
+            let (lx, ly) = computed.dice_x_label_pos.unwrap_or((default_x, default_y));
             scene.add(Primitive::Text {
-                x: computed.margin_left + computed.plot_width() / 2.0 + dx,
-                y: computed.height - computed.label_size as f64 * 0.5 + dy,
+                x: lx + dx, y: ly + dy,
                 content: label.clone(),
                 size: computed.label_size,
                 anchor: TextAnchor::Middle,
@@ -490,15 +492,13 @@ pub fn add_labels_and_title(scene: &mut Scene, computed: &ComputedLayout, layout
     if !layout.suppress_y_ticks {
         if let Some(label) = &layout.y_label {
             let (dx, dy) = layout.y_label_offset;
+            let default_x = (computed.margin_left - 8.0 - computed.y_tick_label_px - 5.0
+                - computed.label_size as f64 * 0.5)
+                .max(computed.label_size as f64 * 0.5 + 8.0);
+            let default_y = computed.height / 2.0;
+            let (lx, ly) = computed.dice_y_label_pos.unwrap_or((default_x, default_y));
             scene.add(Primitive::Text {
-                // Place the Y label just left of the tick labels with a 5 px gap.
-                // Layout: [3px edge][Y-label][5px gap][tick-labels][8px gap][axis]
-                // y_label_center = margin_left - 8 - y_tick_label_px - 5 - label_size/2
-                // Clamped so the label never goes closer than 8px to the canvas left edge.
-                x: (computed.margin_left - 8.0 - computed.y_tick_label_px - 5.0
-                    - computed.label_size as f64 * 0.5 + dx)
-                    .max(computed.label_size as f64 * 0.5 + 8.0),
-                y: computed.height / 2.0 + dy,
+                x: lx + dx, y: ly + dy,
                 content: label.clone(),
                 size: computed.label_size,
                 anchor: TextAnchor::Middle,

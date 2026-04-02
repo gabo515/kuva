@@ -58,6 +58,8 @@ pub struct DicePlot {
     pub size_legend_label:  Option<String>,
     pub dot_legend:         Vec<(String, String)>,
     pub position_legend_label: Option<String>,
+    /// Draw a 3×3 sub-grid inside each die tile, showing the pip slot boundaries.
+    pub grid_lines: bool,
 }
 
 impl Default for DicePlot {
@@ -84,6 +86,7 @@ impl DicePlot {
             size_legend_label: None,
             dot_legend: Vec::new(),
             position_legend_label: None,
+            grid_lines: false,
         }
     }
 
@@ -232,6 +235,9 @@ impl DicePlot {
     pub fn with_position_legend<S: Into<String>>(mut self, label: S) -> Self {
         self.position_legend_label = Some(label.into()); self
     }
+    pub fn with_grid_lines(mut self, v: bool) -> Self {
+        self.grid_lines = v; self
+    }
     pub fn with_dot_radius(mut self, r: f64) -> Self {
         self.dot_radius = r; self
     }
@@ -240,6 +246,13 @@ impl DicePlot {
     }
     pub fn with_pad(mut self, pad: f64) -> Self {
         self.pad = pad; self
+    }
+
+    /// Returns (grid_row, grid_col) for each pip position in order, 0-indexed, row-major.
+    /// grid_row: 0=top, 1=middle, 2=bottom; grid_col: 0=left, 1=center, 2=right.
+    pub fn dot_grid_positions(&self) -> Vec<(usize, usize)> {
+        let positions = DICE_POSITIONS.get(self.ndots).copied().unwrap_or(&[]);
+        positions.iter().map(|&p| ((p - 1) / 3, (p - 1) % 3)).collect()
     }
 
     pub fn dot_offsets(&self) -> Vec<(f64, f64)> {

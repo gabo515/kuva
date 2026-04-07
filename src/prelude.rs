@@ -71,6 +71,9 @@ pub use crate::plot::{
     DicePoint,
     ForestPlot,
     ForestRow,
+    Clustermap,
+    ClustermapNorm,
+    AnnotationTrack,
     // Style / config types used when building plots
     MarkerShape,
     LineStyle,

@@ -29,6 +29,7 @@ use crate::plot::polar::PolarPlot;
 use crate::plot::ternary::TernaryPlot;
 use crate::plot::diceplot::DicePlot;
 use crate::plot::forest::ForestPlot;
+use crate::plot::clustermap::Clustermap;
 use crate::plot::legend::ColorBarInfo;
 use crate::render::render_utils;
 
@@ -65,6 +66,7 @@ pub enum Plot {
     Ternary(TernaryPlot),
     DicePlot(DicePlot),
     Forest(ForestPlot),
+    Clustermap(Clustermap),
 }
 
 impl From<ScatterPlot>    for Plot { fn from(p: ScatterPlot)    -> Self { Plot::Scatter(p) } }
@@ -98,6 +100,7 @@ impl From<PolarPlot>     for Plot { fn from(p: PolarPlot)     -> Self { Plot::Po
 impl From<TernaryPlot>   for Plot { fn from(p: TernaryPlot)   -> Self { Plot::Ternary(p) } }
 impl From<DicePlot>      for Plot { fn from(p: DicePlot)      -> Self { Plot::DicePlot(p) } }
 impl From<ForestPlot>    for Plot { fn from(p: ForestPlot)    -> Self { Plot::Forest(p) } }
+impl From<Clustermap>   for Plot { fn from(p: Clustermap)   -> Self { Plot::Clustermap(p) } }
 
 fn bounds_from_2d<I>(points: I) -> Option<((f64, f64), (f64, f64))>
     where
@@ -622,6 +625,8 @@ impl Plot {
                 if !x_min.is_finite() { return None; }
                 Some(((x_min, x_max), (y_min, y_max)))
             }
+            // Pixel-space plot — returns dummy bounds so Layout gets a valid range.
+            Plot::Clustermap(_) => Some(((0.0, 1.0), (0.0, 1.0))),
         }
     }
 
@@ -651,6 +656,10 @@ impl Plot {
                 rows * avg_cols + 10
             }
             Plot::Forest(f) => f.rows.len() * 4 + 5,
+            Plot::Clustermap(c) => {
+                let cells: usize = c.data.iter().map(|r| r.len()).sum();
+                cells + 500
+            }
             _ => 100,
         }
     }
@@ -762,6 +771,23 @@ impl Plot {
                     min_value: z_min,
                     max_value: z_max,
                     label,
+                    tick_labels: None,
+                })
+            }
+            Plot::Clustermap(cm) => {
+                let flat: Vec<f64> = cm.data.iter().flatten().cloned().collect();
+                if flat.is_empty() { return None; }
+                let min = flat.iter().cloned().fold(f64::INFINITY, f64::min);
+                let max = flat.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+                let cmap = cm.color_map.clone();
+                Some(ColorBarInfo {
+                    map_fn: Arc::new(move |t| {
+                        let norm = (t - min) / (max - min + f64::EPSILON);
+                        cmap.map(norm.clamp(0.0, 1.0))
+                    }),
+                    min_value: min,
+                    max_value: max,
+                    label: cm.legend_label.clone(),
                     tick_labels: None,
                 })
             }

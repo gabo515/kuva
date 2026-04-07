@@ -64,6 +64,7 @@ use crate::plot::polar::{PolarPlot, PolarMode};
 use crate::plot::ternary::TernaryPlot;
 use crate::plot::diceplot::DicePlot;
 use crate::plot::forest::ForestPlot;
+use crate::plot::clustermap::{Clustermap, ClustermapNorm};
 
 use crate::plot::Legend;
 use crate::plot::legend::{ColorBarInfo, LegendEntry, LegendGroup, LegendPosition, LegendShape};
@@ -1877,6 +1878,552 @@ pub fn render_forest(forest: &ForestPlot, layout: &Layout) -> Scene {
     add_reference_lines(&layout.reference_lines, &mut scene, &computed);
     add_text_annotations(&layout.annotations, &mut scene, &computed);
     scene
+}
+
+// ── Clustermap ────────────────────────────────────────────────────────────────
+
+fn euclidean_dist_matrix(data: &[Vec<f64>]) -> Vec<Vec<f64>> {
+    let n = data.len();
+    let mut dm = vec![vec![0.0f64; n]; n];
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let d = data[i].iter().zip(&data[j])
+                .map(|(&a, &b)| (a - b) * (a - b))
+                .sum::<f64>()
+                .sqrt();
+            dm[i][j] = d;
+            dm[j][i] = d;
+        }
+    }
+    dm
+}
+
+fn apply_normalization(data: Vec<Vec<f64>>, norm: &ClustermapNorm) -> Vec<Vec<f64>> {
+    match norm {
+        ClustermapNorm::None => data,
+        ClustermapNorm::RowZScore => {
+            data.into_iter().map(|row| {
+                let n = row.len() as f64;
+                if n == 0.0 { return row; }
+                let mean = row.iter().sum::<f64>() / n;
+                let std = (row.iter().map(|&v| (v - mean).powi(2)).sum::<f64>() / n).sqrt();
+                if std < f64::EPSILON {
+                    row.iter().map(|_| 0.0).collect()
+                } else {
+                    row.iter().map(|&v| (v - mean) / std).collect()
+                }
+            }).collect()
+        }
+        ClustermapNorm::ColZScore => {
+            if data.is_empty() { return data; }
+            let n_cols = data[0].len();
+            let n_rows = data.len();
+            let mut result = data.clone();
+            for c in 0..n_cols {
+                let col: Vec<f64> = data.iter().map(|r| r[c]).collect();
+                let mean = col.iter().sum::<f64>() / n_rows as f64;
+                let std = (col.iter().map(|&v| (v - mean).powi(2)).sum::<f64>() / n_rows as f64).sqrt();
+                for r in 0..n_rows {
+                    result[r][c] = if std < f64::EPSILON { 0.0 } else { (data[r][c] - mean) / std };
+                }
+            }
+            result
+        }
+    }
+}
+
+/// Draw a rectangular-style cladogram dendrogram hanging leftward from the
+/// heatmap (row dendrogram). Root is at the far left, leaves touch the heatmap.
+#[allow(clippy::too_many_arguments)]
+fn draw_row_dendrogram(
+    nodes: &[crate::plot::phylo::PhyloNode],
+    root: usize,
+    scene: &mut Scene,
+    _ml: f64,
+    hm_x: f64,
+    hm_y: f64,
+    row_dend_w: f64,
+    cell_h: f64,
+    branch_color: &str,
+) {
+    use crate::plot::phylo::post_order_dfs;
+
+    let n_nodes = nodes.len();
+    if n_nodes == 0 { return; }
+    let post_order = post_order_dfs(root, nodes);
+
+    // Assign leaf positions (0 = top)
+    let mut pos = vec![0.0f64; n_nodes];
+    let mut leaf_counter = 0usize;
+    for &id in &post_order {
+        if nodes[id].children.is_empty() {
+            pos[id] = leaf_counter as f64;
+            leaf_counter += 1;
+        } else {
+            let sum: f64 = nodes[id].children.iter().map(|&c| pos[c]).sum();
+            pos[id] = sum / nodes[id].children.len() as f64;
+        }
+    }
+    let n_leaves = leaf_counter;
+    if n_leaves == 0 { return; }
+
+    // Cladogram depth (0 at root, max at leaves)
+    let mut subtree_depth = vec![0usize; n_nodes];
+    for &id in &post_order {
+        if nodes[id].children.is_empty() {
+            subtree_depth[id] = 0;
+        } else {
+            subtree_depth[id] = nodes[id].children.iter()
+                .map(|&c| subtree_depth[c] + 1)
+                .max().unwrap_or(0);
+        }
+    }
+    let max_depth = subtree_depth[root];
+    if max_depth == 0 { return; }
+    let max_depth_f = max_depth as f64;
+
+    let row_dend_draw_w = (row_dend_w - 10.0).max(1.0);
+    let color = Color::from(branch_color);
+
+    // px: root at left (ml), leaves at right (hm_x)
+    // depth[i] = max_depth - subtree_depth[i]  →  leaf=max_depth, root=0
+    // px[i] = ml + d_frac * row_dend_draw_w + (hm_x - ml - row_dend_draw_w)
+    //       = hm_x - row_dend_draw_w + d_frac * row_dend_draw_w
+    let px = |id: usize| -> f64 {
+        let depth_i = (max_depth - subtree_depth[id]) as f64;
+        let d_frac = depth_i / max_depth_f;
+        hm_x - row_dend_draw_w + d_frac * row_dend_draw_w
+    };
+    let py = |id: usize| -> f64 {
+        hm_y + (pos[id] + 0.5) * cell_h
+    };
+
+    for &id in &post_order {
+        if nodes[id].children.is_empty() { continue; }
+        let children = &nodes[id].children;
+
+        let py_self = py(id);
+        let px_self = px(id);
+
+        let py_min = children.iter().map(|&c| py(c)).fold(f64::INFINITY, f64::min);
+        let py_max = children.iter().map(|&c| py(c)).fold(f64::NEG_INFINITY, f64::max);
+
+        // Vertical connector at px_self spanning all children
+        scene.add(Primitive::Line {
+            x1: px_self, y1: py_min, x2: px_self, y2: py_max,
+            stroke: color.clone(), stroke_width: 1.0, stroke_dasharray: None,
+        });
+
+        // Horizontal elbow to each child
+        for &c in children {
+            let px_c = px(c);
+            let py_c = py(c);
+            scene.add(Primitive::Line {
+                x1: px_self, y1: py_c, x2: px_c, y2: py_c,
+                stroke: color.clone(), stroke_width: 1.0, stroke_dasharray: None,
+            });
+        }
+        let _ = py_self; // pos of internal node not directly drawn in rectangular style
+    }
+}
+
+/// Draw a rectangular-style cladogram dendrogram hanging downward from the
+/// top margin (column dendrogram). Root is at top, leaves touch the heatmap.
+#[allow(clippy::too_many_arguments)]
+fn draw_col_dendrogram(
+    nodes: &[crate::plot::phylo::PhyloNode],
+    root: usize,
+    scene: &mut Scene,
+    hm_x: f64,
+    mt: f64,
+    col_dend_h: f64,
+    cell_w: f64,
+    branch_color: &str,
+) {
+    use crate::plot::phylo::post_order_dfs;
+
+    let n_nodes = nodes.len();
+    if n_nodes == 0 { return; }
+    let post_order = post_order_dfs(root, nodes);
+
+    // Assign leaf positions (0 = leftmost column)
+    let mut pos = vec![0.0f64; n_nodes];
+    let mut leaf_counter = 0usize;
+    for &id in &post_order {
+        if nodes[id].children.is_empty() {
+            pos[id] = leaf_counter as f64;
+            leaf_counter += 1;
+        } else {
+            let sum: f64 = nodes[id].children.iter().map(|&c| pos[c]).sum();
+            pos[id] = sum / nodes[id].children.len() as f64;
+        }
+    }
+    let n_leaves = leaf_counter;
+    if n_leaves == 0 { return; }
+
+    // Cladogram depth
+    let mut subtree_depth = vec![0usize; n_nodes];
+    for &id in &post_order {
+        if nodes[id].children.is_empty() {
+            subtree_depth[id] = 0;
+        } else {
+            subtree_depth[id] = nodes[id].children.iter()
+                .map(|&c| subtree_depth[c] + 1)
+                .max().unwrap_or(0);
+        }
+    }
+    let max_depth = subtree_depth[root];
+    if max_depth == 0 { return; }
+    let max_depth_f = max_depth as f64;
+
+    let col_dend_draw_h = (col_dend_h - 5.0).max(1.0);
+    let color = Color::from(branch_color);
+
+    // py: root at top (mt + 5), leaves at bottom (mt + col_dend_h).
+    // depth_i = max_depth for leaves (d_frac=1 → py = mt + col_dend_h)
+    // depth_i = 0       for root  (d_frac=0 → py = mt + 5)
+    let py = |id: usize| -> f64 {
+        let depth_i = (max_depth - subtree_depth[id]) as f64;
+        let d_frac = depth_i / max_depth_f;
+        mt + 5.0 + d_frac * col_dend_draw_h
+    };
+    let px = |id: usize| -> f64 {
+        hm_x + (pos[id] + 0.5) * cell_w
+    };
+
+    for &id in &post_order {
+        if nodes[id].children.is_empty() { continue; }
+        let children = &nodes[id].children;
+
+        let py_self = py(id);
+
+        let px_min = children.iter().map(|&c| px(c)).fold(f64::INFINITY, f64::min);
+        let px_max = children.iter().map(|&c| px(c)).fold(f64::NEG_INFINITY, f64::max);
+
+        // Horizontal connector at py_self spanning all children
+        scene.add(Primitive::Line {
+            x1: px_min, y1: py_self, x2: px_max, y2: py_self,
+            stroke: color.clone(), stroke_width: 1.0, stroke_dasharray: None,
+        });
+
+        // Vertical elbow to each child
+        for &c in children {
+            let px_c = px(c);
+            let py_c = py(c);
+            scene.add(Primitive::Line {
+                x1: px_c, y1: py_self, x2: px_c, y2: py_c,
+                stroke: color.clone(), stroke_width: 1.0, stroke_dasharray: None,
+            });
+        }
+    }
+}
+
+fn add_clustermap(cm: &Clustermap, scene: &mut Scene, computed: &ComputedLayout) {
+    use crate::plot::phylo::post_order_dfs;
+
+    let n_rows = cm.data.len();
+    let n_cols = cm.data.first().map_or(0, |r| r.len());
+    if n_rows == 0 || n_cols == 0 { return; }
+
+    // ── Step 1: Build / obtain trees ─────────────────────────────────────────
+
+    // Generate default labels if none provided
+    let default_row_labels: Vec<String> = (0..n_rows).map(|i| i.to_string()).collect();
+    let default_col_labels: Vec<String> = (0..n_cols).map(|i| i.to_string()).collect();
+    let row_label_strs: Vec<&str> = cm.row_labels.as_ref()
+        .unwrap_or(&default_row_labels).iter().map(|s| s.as_str()).collect();
+    let col_label_strs: Vec<&str> = cm.col_labels.as_ref()
+        .unwrap_or(&default_col_labels).iter().map(|s| s.as_str()).collect();
+
+    let row_tree: Option<(Vec<crate::plot::phylo::PhyloNode>, usize)> =
+        if let Some(ref tree) = cm.row_tree {
+            Some((tree.nodes.clone(), tree.root))
+        } else if cm.cluster_rows && n_rows >= 2 {
+            let dist = euclidean_dist_matrix(&cm.data);
+            Some(render_utils::upgma(&row_label_strs, &dist))
+        } else {
+            None
+        };
+
+    let col_tree: Option<(Vec<crate::plot::phylo::PhyloNode>, usize)> =
+        if let Some(ref tree) = cm.col_tree {
+            Some((tree.nodes.clone(), tree.root))
+        } else if cm.cluster_cols && n_cols >= 2 {
+            let transposed: Vec<Vec<f64>> = (0..n_cols)
+                .map(|j| (0..n_rows).map(|i| cm.data[i][j]).collect())
+                .collect();
+            let dist = euclidean_dist_matrix(&transposed);
+            Some(render_utils::upgma(&col_label_strs, &dist))
+        } else {
+            None
+        };
+
+    // ── Step 2: Leaf order → data permutation ────────────────────────────────
+
+    let row_perm: Vec<usize> = if let Some((ref nodes, root)) = row_tree {
+        let labels = cm.row_labels.as_ref().unwrap_or(&default_row_labels);
+        let label_to_idx: HashMap<&str, usize> = labels.iter().enumerate()
+            .map(|(i, s)| (s.as_str(), i)).collect();
+        post_order_dfs(root, nodes).into_iter()
+            .filter(|&id| nodes[id].children.is_empty())
+            .filter_map(|id| nodes[id].label.as_deref().and_then(|l| label_to_idx.get(l).copied()))
+            .collect()
+    } else {
+        (0..n_rows).collect()
+    };
+
+    let col_perm: Vec<usize> = if let Some((ref nodes, root)) = col_tree {
+        let labels = cm.col_labels.as_ref().unwrap_or(&default_col_labels);
+        let label_to_idx: HashMap<&str, usize> = labels.iter().enumerate()
+            .map(|(i, s)| (s.as_str(), i)).collect();
+        post_order_dfs(root, nodes).into_iter()
+            .filter(|&id| nodes[id].children.is_empty())
+            .filter_map(|id| nodes[id].label.as_deref().and_then(|l| label_to_idx.get(l).copied()))
+            .collect()
+    } else {
+        (0..n_cols).collect()
+    };
+
+    // Reorder data matrix
+    let data: Vec<Vec<f64>> = row_perm.iter().map(|&r| {
+        col_perm.iter().map(|&c| cm.data[r][c]).collect()
+    }).collect();
+
+    // Reorder labels
+    let row_labels_ord: Option<Vec<String>> = cm.row_labels.as_ref().map(|l| {
+        row_perm.iter().map(|&i| l[i].clone()).collect()
+    });
+    let col_labels_ord: Option<Vec<String>> = cm.col_labels.as_ref().map(|l| {
+        col_perm.iter().map(|&i| l[i].clone()).collect()
+    });
+
+    // ── Step 3: Normalization ─────────────────────────────────────────────────
+    let data = apply_normalization(data, &cm.normalization);
+
+    let mut v_min = f64::INFINITY;
+    let mut v_max = f64::NEG_INFINITY;
+    for &v in data.iter().flatten() {
+        if v < v_min { v_min = v; }
+        if v > v_max { v_max = v; }
+    }
+    let norm_val = |v: f64| -> f64 {
+        ((v - v_min) / (v_max - v_min + f64::EPSILON)).clamp(0.0, 1.0)
+    };
+
+    // ── Step 4: Pixel layout ──────────────────────────────────────────────────
+    let ml = computed.margin_left;
+    let mt = computed.margin_top;
+    let pw = computed.plot_width();
+    let ph = computed.plot_height();
+
+    let row_dend_w = if row_tree.is_some() { cm.row_dendrogram_width } else { 0.0 };
+    let col_dend_h = if col_tree.is_some() { cm.col_dendrogram_height } else { 0.0 };
+    let row_annot_w: f64 = cm.row_annotations.iter().map(|t| t.width + 4.0).sum();
+    let col_annot_h: f64 = cm.col_annotations.iter().map(|t| t.width + 4.0).sum();
+
+    let row_label_w = row_labels_ord.as_ref().map(|l| {
+        let max_chars = l.iter().map(|s| s.len()).max().unwrap_or(4);
+        (max_chars as f64 * 7.0 + 10.0).clamp(30.0, 200.0)
+    }).unwrap_or(0.0);
+    let col_label_h = if col_labels_ord.is_some() { 80.0 } else { 0.0 };
+
+    let hm_x = ml + row_dend_w + row_annot_w;
+    let hm_y = mt + col_dend_h + col_annot_h;
+    let hm_w = (pw - row_dend_w - row_annot_w - row_label_w).max(10.0);
+    let hm_h = (ph - col_dend_h - col_annot_h - col_label_h).max(10.0);
+
+    let n_rows_ord = row_perm.len().max(1);
+    let n_cols_ord = col_perm.len().max(1);
+    let cell_w = hm_w / n_cols_ord as f64;
+    let cell_h = hm_h / n_rows_ord as f64;
+
+    // ── Step 5: Row dendrogram ────────────────────────────────────────────────
+    if let Some((ref nodes, root)) = row_tree {
+        // Pass ml + row_dend_w (right edge of dendrogram panel) not hm_x
+        // (which includes annotation width). This keeps all elbow lines
+        // strictly within the dendrogram panel — none enter the annotation boxes.
+        draw_row_dendrogram(
+            nodes, root, scene,
+            ml, ml + row_dend_w, hm_y, row_dend_w, cell_h,
+            &cm.branch_color,
+        );
+    }
+
+    // ── Step 6: Column dendrogram ─────────────────────────────────────────────
+    if let Some((ref nodes, root)) = col_tree {
+        draw_col_dendrogram(
+            nodes, root, scene,
+            hm_x, mt, col_dend_h, cell_w,
+            &cm.branch_color,
+        );
+    }
+
+    // ── Step 7: Annotation tracks ─────────────────────────────────────────────
+
+    // Row annotations (between row dendrogram and heatmap body)
+    let mut x_cursor = ml + row_dend_w;
+    for track in &cm.row_annotations {
+        if let Some(ref label) = track.label {
+            // anchor End + rotate(-90°): the text's "end" (anchor) is the
+            // *top* of the downward-rendering text. Placing y just below
+            // hm_y + hm_h keeps 4 px of padding from the last annotation
+            // cell and the label hangs down into the col-label margin, clear
+            // of the dendrogram and all annotation boxes above.
+            scene.add(Primitive::Text {
+                x: x_cursor + track.width / 2.0,
+                y: hm_y + hm_h + 4.0,
+                content: label.clone(),
+                size: computed.body_size,
+                anchor: TextAnchor::End,
+                rotate: Some(-90.0),
+                bold: false,
+            });
+        }
+        for (k, &orig_row) in row_perm.iter().enumerate() {
+            let color_str = track.colors.get(orig_row).map(|s| s.as_str()).unwrap_or("#cccccc");
+            let y = hm_y + k as f64 * cell_h;
+            scene.add(Primitive::Rect {
+                x: x_cursor,
+                y,
+                width: track.width,
+                height: cell_h * 0.99,
+                fill: Color::from(color_str),
+                stroke: None,
+                stroke_width: None,
+                opacity: None,
+            });
+        }
+        x_cursor += track.width + 4.0;
+    }
+
+    // Col annotations (between col dendrogram and heatmap body)
+    let mut y_cursor = mt + col_dend_h;
+    for track in &cm.col_annotations {
+        if let Some(ref label) = track.label {
+            scene.add(Primitive::Text {
+                x: hm_x - 4.0,
+                y: y_cursor + track.width / 2.0,
+                content: label.clone(),
+                size: computed.body_size,
+                anchor: TextAnchor::End,
+                rotate: None,
+                bold: false,
+            });
+        }
+        for (k, &orig_col) in col_perm.iter().enumerate() {
+            let color_str = track.colors.get(orig_col).map(|s| s.as_str()).unwrap_or("#cccccc");
+            let x = hm_x + k as f64 * cell_w;
+            scene.add(Primitive::Rect {
+                x,
+                y: y_cursor,
+                width: cell_w * 0.99,
+                height: track.width,
+                fill: Color::from(color_str),
+                stroke: None,
+                stroke_width: None,
+                opacity: None,
+            });
+        }
+        y_cursor += track.width + 4.0;
+    }
+
+    // ── Step 8: Heatmap body ──────────────────────────────────────────────────
+    let n_cells = data.iter().map(|r| r.len()).sum::<usize>();
+    let use_batch = !cm.show_tooltips;
+
+    if use_batch {
+        let mut xs = Vec::with_capacity(n_cells);
+        let mut ys = Vec::with_capacity(n_cells);
+        let mut ws = Vec::with_capacity(n_cells);
+        let mut hs = Vec::with_capacity(n_cells);
+        let mut fills = Vec::with_capacity(n_cells);
+        for (row_k, row) in data.iter().enumerate() {
+            for (col_k, &value) in row.iter().enumerate() {
+                xs.push(hm_x + col_k as f64 * cell_w);
+                ys.push(hm_y + row_k as f64 * cell_h);
+                ws.push(cell_w * 0.99);
+                hs.push(cell_h * 0.99);
+                fills.push(Color::from(cm.color_map.map(norm_val(value))));
+            }
+        }
+        scene.add(Primitive::RectBatch { x: xs, y: ys, w: ws, h: hs, fills });
+    } else {
+        for (row_k, row) in data.iter().enumerate() {
+            for (col_k, &value) in row.iter().enumerate() {
+                let x = hm_x + col_k as f64 * cell_w;
+                let y = hm_y + row_k as f64 * cell_h;
+                let orig_row = row_perm.get(row_k).copied().unwrap_or(row_k);
+                let orig_col = col_perm.get(col_k).copied().unwrap_or(col_k);
+                let row_lbl = row_labels_ord.as_ref().and_then(|l| l.get(row_k)).map(|s| s.as_str()).unwrap_or("");
+                let col_lbl = col_labels_ord.as_ref().and_then(|l| l.get(col_k)).map(|s| s.as_str()).unwrap_or("");
+                let tip = if cm.show_tooltips {
+                    Some(format!("{}, {}: {:.2}", row_lbl, col_lbl, cm.data[orig_row][orig_col]))
+                } else {
+                    None
+                };
+                if let Some(ref t) = tip {
+                    scene.add(Primitive::GroupStart { transform: None, title: Some(t.clone()), extra_attrs: None });
+                }
+                scene.add(Primitive::Rect {
+                    x, y,
+                    width: cell_w * 0.99,
+                    height: cell_h * 0.99,
+                    fill: Color::from(cm.color_map.map(norm_val(value))),
+                    stroke: None,
+                    stroke_width: None,
+                    opacity: None,
+                });
+                if tip.is_some() { scene.add(Primitive::GroupEnd); }
+            }
+        }
+    }
+
+    if cm.show_values {
+        for (row_k, row) in data.iter().enumerate() {
+            for (col_k, &value) in row.iter().enumerate() {
+                scene.add(Primitive::Text {
+                    x: hm_x + (col_k as f64 + 0.5) * cell_w,
+                    y: hm_y + (row_k as f64 + 0.5) * cell_h + computed.body_size as f64 * 0.35,
+                    content: format!("{:.2}", value),
+                    size: computed.body_size,
+                    anchor: TextAnchor::Middle,
+                    rotate: None,
+                    bold: false,
+                });
+            }
+        }
+    }
+
+    // ── Step 9: Axis labels ───────────────────────────────────────────────────
+    let ts = computed.body_size;
+
+    if let Some(ref labels) = row_labels_ord {
+        for (k, label) in labels.iter().enumerate() {
+            scene.add(Primitive::Text {
+                x: hm_x + hm_w + 6.0,
+                y: hm_y + (k as f64 + 0.5) * cell_h + ts as f64 * 0.35,
+                content: label.clone(),
+                size: ts,
+                anchor: TextAnchor::Start,
+                rotate: None,
+                bold: false,
+            });
+        }
+    }
+
+    if let Some(ref labels) = col_labels_ord {
+        for (k, label) in labels.iter().enumerate() {
+            scene.add(Primitive::Text {
+                x: hm_x + (k as f64 + 0.5) * cell_w,
+                y: hm_y + hm_h + 6.0,
+                content: label.clone(),
+                size: ts,
+                anchor: TextAnchor::End,
+                rotate: Some(-45.0),
+                bold: false,
+            });
+        }
+    }
 }
 
 fn add_waterfall(waterfall: &WaterfallPlot, scene: &mut Scene, computed: &ComputedLayout) {
@@ -5789,7 +6336,8 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
     if computed.interactive {
         let skip_axes_for_meta = plots.iter().all(|p| matches!(p,
             Plot::Pie(_) | Plot::UpSet(_) | Plot::Chord(_) | Plot::Sankey(_)
-            | Plot::PhyloTree(_) | Plot::Synteny(_) | Plot::Polar(_) | Plot::Ternary(_)));
+            | Plot::PhyloTree(_) | Plot::Synteny(_) | Plot::Polar(_) | Plot::Ternary(_)
+            | Plot::Clustermap(_)));
         if !skip_axes_for_meta {
             scene.axis_meta = Some(AxisMeta {
                 x_min: computed.x_range.0,
@@ -5806,7 +6354,7 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
         }
     }
 
-    let skip_axes = plots.iter().all(|p| matches!(p, Plot::Pie(_) | Plot::UpSet(_) | Plot::Chord(_) | Plot::Sankey(_) | Plot::PhyloTree(_) | Plot::Synteny(_) | Plot::Polar(_) | Plot::Ternary(_) | Plot::DicePlot(_)));
+    let skip_axes = plots.iter().all(|p| matches!(p, Plot::Pie(_) | Plot::UpSet(_) | Plot::Chord(_) | Plot::Sankey(_) | Plot::PhyloTree(_) | Plot::Synteny(_) | Plot::Polar(_) | Plot::Ternary(_) | Plot::DicePlot(_) | Plot::Clustermap(_)));
     if !skip_axes {
         add_axes_and_grid(&mut scene, &computed, &layout);
     }
@@ -5994,6 +6542,9 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
             }
             Plot::Forest(f) => {
                 add_forest(f, &mut scene, &computed);
+            }
+            Plot::Clustermap(c) => {
+                add_clustermap(c, &mut scene, &computed);
             }
         }
     }

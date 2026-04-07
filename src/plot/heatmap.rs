@@ -122,7 +122,8 @@ impl ColorMap {
 ///     vec![1.0, 1.0, 1.0, 1.0, 0.0],
 /// ];
 ///
-/// let tree = PhyloTree::from_distance_matrix(&labels, &data);
+/// let label_refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
+/// let tree = PhyloTree::from_distance_matrix(&label_refs, &data);
 /// let leaf_order = tree.leaf_labels_top_to_bottom();
 ///
 /// let heatmap = Heatmap::new()

@@ -79,6 +79,11 @@ pub use crate::plot::{
     MarginalType,
     RaincloudPlot,
     RaincloudGroup,
+    LollipopPlot,
+    LollipopPoint,
+    LollipopDomain,
+    SurvivalPlot,
+    KMGroup,
     // Style / config types used when building plots
     MarkerShape,
     LineStyle,
@@ -104,6 +109,8 @@ pub use crate::render::render::{
     render_phylo_tree,
     render_synteny,
     render_forest,
+    render_lollipop,
+    render_survival,
     render_jointplot,
 };
 

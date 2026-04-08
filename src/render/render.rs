@@ -1881,6 +1881,273 @@ pub fn render_forest(forest: &ForestPlot, layout: &Layout) -> Scene {
     scene
 }
 
+// ── LollipopPlot ──────────────────────────────────────────────────────────────
+
+fn add_lollipop(lp: &crate::plot::lollipop::LollipopPlot, scene: &mut Scene, computed: &ComputedLayout) {
+    if lp.points.is_empty() { return; }
+
+    // Compute data x extents (points + domains) for the baseline line span.
+    let mut x_min = f64::INFINITY;
+    let mut x_max = f64::NEG_INFINITY;
+    for p in &lp.points {
+        x_min = x_min.min(p.x);
+        x_max = x_max.max(p.x);
+    }
+    for d in &lp.domains {
+        x_min = x_min.min(d.x_start);
+        x_max = x_max.max(d.x_end);
+    }
+
+    // 1. Domain rectangles (drawn first, behind everything).
+    for domain in &lp.domains {
+        let x_left  = computed.map_x(domain.x_start).min(computed.map_x(domain.x_end));
+        let x_right = computed.map_x(domain.x_start).max(computed.map_x(domain.x_end));
+        let y_top   = computed.map_y(lp.baseline).min(computed.map_y(lp.baseline - lp.domain_height));
+        let y_bot   = computed.map_y(lp.baseline).max(computed.map_y(lp.baseline - lp.domain_height));
+        let width   = x_right - x_left;
+        let height  = y_bot - y_top;
+
+        scene.add(Primitive::Rect {
+            x: x_left,
+            y: y_top,
+            width,
+            height,
+            fill: Color::from(domain.color.as_str()),
+            stroke: None,
+            stroke_width: None,
+            opacity: Some(domain.opacity),
+        });
+
+        if let Some(ref label) = domain.label {
+            scene.add(Primitive::Text {
+                x: x_left + width / 2.0,
+                y: y_top + height / 2.0 + computed.body_size as f64 * 0.35,
+                content: label.clone(),
+                size: (computed.body_size as f64 * 0.75) as u32,
+                anchor: TextAnchor::Middle,
+                bold: false,
+                rotate: None,
+            });
+        }
+    }
+
+    // 2. Baseline horizontal line.
+    if lp.show_baseline && x_min.is_finite() {
+        let baseline_px = computed.map_y(lp.baseline);
+        scene.add(Primitive::Line {
+            x1: computed.map_x(x_min),
+            y1: baseline_px,
+            x2: computed.map_x(x_max),
+            y2: baseline_px,
+            stroke: Color::from(lp.baseline_color.as_str()),
+            stroke_width: lp.baseline_width,
+            stroke_dasharray: lp.baseline_dash.clone(),
+        });
+    }
+
+    // 3. Stems and dots.
+    for point in &lp.points {
+        let x_px      = computed.map_x(point.x);
+        let y_px      = computed.map_y(point.y);
+        let base_px   = computed.map_y(lp.baseline);
+        let color_str = point.color.as_deref().unwrap_or(&lp.color);
+        let color     = Color::from(color_str);
+
+        // Stem.
+        scene.add(Primitive::Line {
+            x1: x_px, y1: base_px,
+            x2: x_px, y2: y_px,
+            stroke: color.clone(),
+            stroke_width: lp.stem_width,
+            stroke_dasharray: None,
+        });
+
+        // Dot.
+        let stroke_color = lp.dot_stroke.as_deref()
+            .map(Color::from)
+            .unwrap_or_else(|| color.clone());
+        scene.add(Primitive::Circle {
+            cx: x_px,
+            cy: y_px,
+            r: lp.dot_radius,
+            fill: color,
+            fill_opacity: None,
+            stroke: Some(stroke_color),
+            stroke_width: Some(lp.dot_stroke_width),
+        });
+
+        // Per-point label.
+        if let Some(ref label) = point.label {
+            let label_offset = lp.dot_radius + 4.0;
+            let label_y = if point.y >= lp.baseline {
+                y_px - label_offset
+            } else {
+                y_px + label_offset + computed.body_size as f64
+            };
+            scene.add(Primitive::Text {
+                x: x_px,
+                y: label_y,
+                content: label.clone(),
+                size: (computed.body_size as f64 * 0.80) as u32,
+                anchor: TextAnchor::Middle,
+                bold: false,
+                rotate: None,
+            });
+        }
+    }
+}
+
+/// Render a single lollipop plot with the given layout.
+pub fn render_lollipop(lp: &crate::plot::lollipop::LollipopPlot, layout: &Layout) -> Scene {
+    let computed = ComputedLayout::from_layout(layout);
+    let mut scene = Scene::new(computed.width, computed.height);
+    scene.font_family = computed.font_family.clone();
+    apply_theme(&mut scene, &computed.theme);
+    add_axes_and_grid(&mut scene, &computed, layout);
+    add_labels_and_title(&mut scene, &computed, layout);
+    add_shaded_regions(&layout.shaded_regions, &mut scene, &computed);
+    add_lollipop(lp, &mut scene, &computed);
+    add_reference_lines(&layout.reference_lines, &mut scene, &computed);
+    add_text_annotations(&layout.annotations, &mut scene, &computed);
+    scene
+}
+
+// ── SurvivalPlot (Kaplan-Meier) ───────────────────────────────────────────────
+
+fn add_survival(sp: &crate::plot::survival::SurvivalPlot, scene: &mut Scene, computed: &ComputedLayout) {
+    use crate::plot::survival::{km_curve, censoring_levels};
+    use crate::render::palette::Palette;
+
+    if sp.groups.is_empty() { return; }
+
+    let cat10 = Palette::category10();
+    let t_max = sp.groups.iter()
+        .flat_map(|g| g.times.iter().copied())
+        .fold(0.0_f64, f64::max);
+    if t_max <= 0.0 { return; }
+
+    let x_end_px = computed.map_x(t_max);
+
+    for (i, group) in sp.groups.iter().enumerate() {
+        if group.times.is_empty() { continue; }
+
+        let color_str: &str = group.color.as_deref()
+            .or_else(|| sp.group_colors.as_ref().and_then(|c| c.get(i).map(|s| s.as_str())))
+            .unwrap_or_else(|| {
+                if sp.groups.len() > 1 { &cat10[i] } else { &sp.color }
+            });
+        let color = Color::from(color_str);
+
+        let km = km_curve(&group.times, &group.events);
+
+        // ── Confidence band ───────────────────────────────────────────────
+        if sp.show_ci && km.len() > 1 {
+            // Trace upper boundary forward, lower backward, close.
+            let mut upper: Vec<(f64, f64)> = vec![(computed.map_x(0.0), computed.map_y(1.0))];
+            for pt in km.iter().skip(1) {
+                let prev_y = upper.last().unwrap().1;
+                upper.push((computed.map_x(pt.t), prev_y));
+                upper.push((computed.map_x(pt.t), computed.map_y(pt.hi)));
+            }
+            upper.push((x_end_px, upper.last().unwrap().1));
+
+            let mut lower: Vec<(f64, f64)> = vec![(computed.map_x(0.0), computed.map_y(1.0))];
+            for pt in km.iter().skip(1) {
+                let prev_y = lower.last().unwrap().1;
+                lower.push((computed.map_x(pt.t), prev_y));
+                lower.push((computed.map_x(pt.t), computed.map_y(pt.lo)));
+            }
+            lower.push((x_end_px, lower.last().unwrap().1));
+
+            let mut d = format!("M {},{}", round2(upper[0].0), round2(upper[0].1));
+            for &(x, y) in upper.iter().skip(1) {
+                d.push_str(&format!(" L {},{}", round2(x), round2(y)));
+            }
+            for &(x, y) in lower.iter().rev() {
+                d.push_str(&format!(" L {},{}", round2(x), round2(y)));
+            }
+            d.push_str(" Z");
+
+            scene.add(Primitive::Path(Box::new(PathData {
+                d,
+                fill: Some(color.clone()),
+                stroke: color.clone(),
+                stroke_width: 0.0,
+                opacity: Some(sp.ci_alpha),
+                stroke_dasharray: None,
+            })));
+        }
+
+        // ── Step function line ────────────────────────────────────────────
+        let mut d = format!("M {},{}", round2(computed.map_x(0.0)), round2(computed.map_y(1.0)));
+        let mut prev_s = 1.0_f64;
+        for pt in km.iter().skip(1) {
+            d.push_str(&format!(" H {} V {}",
+                round2(computed.map_x(pt.t)),
+                round2(computed.map_y(prev_s))));
+            d.push_str(&format!(" V {}", round2(computed.map_y(pt.s))));
+            prev_s = pt.s;
+        }
+        d.push_str(&format!(" H {}", round2(x_end_px)));
+
+        scene.add(Primitive::Path(Box::new(PathData {
+            d,
+            fill: None,
+            stroke: color.clone(),
+            stroke_width: sp.line_width,
+            opacity: None,
+            stroke_dasharray: None,
+        })));
+
+        // ── Censoring tick marks ──────────────────────────────────────────
+        if sp.show_censoring {
+            let ticks = censoring_levels(&group.times, &group.events, &km);
+            let half = sp.censoring_size;
+            for (t, s) in ticks {
+                let cx = computed.map_x(t);
+                let cy = computed.map_y(s);
+                scene.add(Primitive::Line {
+                    x1: cx, y1: cy - half,
+                    x2: cx, y2: cy + half,
+                    stroke: color.clone(),
+                    stroke_width: sp.line_width,
+                    stroke_dasharray: None,
+                });
+            }
+        }
+    }
+
+    // ── p-value annotation ────────────────────────────────────────────────
+    if let Some(ref txt) = sp.pvalue_text {
+        let x = computed.margin_left + computed.plot_width() - 8.0;
+        let y = computed.margin_top + computed.body_size as f64 * 1.5;
+        scene.add(Primitive::Text {
+            x,
+            y,
+            content: txt.clone(),
+            size: computed.body_size,
+            anchor: TextAnchor::End,
+            bold: false,
+            rotate: None,
+        });
+    }
+}
+
+/// Render a single Kaplan-Meier survival plot.
+pub fn render_survival(sp: &crate::plot::survival::SurvivalPlot, layout: &Layout) -> Scene {
+    let computed = ComputedLayout::from_layout(layout);
+    let mut scene = Scene::new(computed.width, computed.height);
+    scene.font_family = computed.font_family.clone();
+    apply_theme(&mut scene, &computed.theme);
+    add_axes_and_grid(&mut scene, &computed, layout);
+    add_labels_and_title(&mut scene, &computed, layout);
+    add_shaded_regions(&layout.shaded_regions, &mut scene, &computed);
+    add_survival(sp, &mut scene, &computed);
+    add_reference_lines(&layout.reference_lines, &mut scene, &computed);
+    add_text_annotations(&layout.annotations, &mut scene, &computed);
+    scene
+}
+
 // ── RaincloudPlot ─────────────────────────────────────────────────────────────
 
 fn add_raincloud(rp: &RaincloudPlot, scene: &mut Scene, computed: &ComputedLayout) {
@@ -4822,6 +5089,39 @@ pub fn collect_legend_entries(plots: &[Plot]) -> Vec<LegendEntry> {
                     }
                 }
             }
+            Plot::Lollipop(lp) => {
+                if let Some(ref label) = lp.legend_label {
+                    entries.push(LegendEntry {
+                        label: label.clone(),
+                        color: lp.color.clone(),
+                        shape: LegendShape::Circle,
+                        dasharray: None,
+                    });
+                }
+            }
+            Plot::Survival(sp) => {
+                if sp.legend_label.is_some() {
+                    use crate::render::palette::Palette;
+                    let cat10 = Palette::category10();
+                    for (i, group) in sp.groups.iter().enumerate() {
+                        let color = group.color.clone()
+                            .or_else(|| sp.group_colors.as_ref().and_then(|c| c.get(i).cloned()))
+                            .unwrap_or_else(|| {
+                                if sp.groups.len() > 1 {
+                                    cat10[i].to_string()
+                                } else {
+                                    sp.color.clone()
+                                }
+                            });
+                        entries.push(LegendEntry {
+                            label: group.label.clone(),
+                            color,
+                            shape: LegendShape::Line,
+                            dasharray: None,
+                        });
+                    }
+                }
+            }
             Plot::Heatmap(heatmap) => {
                 if let Some(label) = &heatmap.legend_label {
                     entries.push(LegendEntry {
@@ -6508,7 +6808,7 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
                 Plot::Scatter(_) | Plot::Line(_) | Plot::Series(_) |
                 Plot::Histogram(_) | Plot::Box(_) | Plot::Violin(_) |
                 Plot::Band(_) | Plot::Strip(_) | Plot::Density(_) |
-                Plot::Forest(_) | Plot::Raincloud(_) => {
+                Plot::Forest(_) | Plot::Raincloud(_) | Plot::Lollipop(_) | Plot::Survival(_) => {
                     plot.set_color(&palette[color_idx]);
                     color_idx += 1;
                 }
@@ -6802,6 +7102,12 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
             Plot::Raincloud(r) => {
                 add_raincloud(r, &mut scene, &computed);
             }
+            Plot::Lollipop(lp) => {
+                add_lollipop(lp, &mut scene, &computed);
+            }
+            Plot::Survival(sp) => {
+                add_survival(sp, &mut scene, &computed);
+            }
         }
     }
 
@@ -6969,6 +7275,8 @@ pub fn render_twin_y(primary: Vec<Plot>, secondary: Vec<Plot>, layout: Layout) -
             Plot::Waterfall(w)   => add_waterfall(w, &mut scene, &computed),
             Plot::Candlestick(c) => add_candlestick(c, &mut scene, &computed),
             Plot::Raincloud(r)   => add_raincloud(r, &mut scene, &computed),
+            Plot::Lollipop(lp)   => add_lollipop(lp, &mut scene, &computed),
+            Plot::Survival(sp)   => add_survival(sp, &mut scene, &computed),
             _ => {}
         }
     }
@@ -6988,6 +7296,8 @@ pub fn render_twin_y(primary: Vec<Plot>, secondary: Vec<Plot>, layout: Layout) -
             Plot::Waterfall(w)   => add_waterfall(w, &mut scene, &computed_y2),
             Plot::Candlestick(c) => add_candlestick(c, &mut scene, &computed_y2),
             Plot::Raincloud(r)   => add_raincloud(r, &mut scene, &computed_y2),
+            Plot::Lollipop(lp)   => add_lollipop(lp, &mut scene, &computed_y2),
+            Plot::Survival(sp)   => add_survival(sp, &mut scene, &computed_y2),
             _ => {}
         }
     }

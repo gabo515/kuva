@@ -26,6 +26,7 @@ EXAMPLES=(
     layout
     legends
     line
+    lollipop
     manhattan
     phylo
     pie
@@ -35,6 +36,7 @@ EXAMPLES=(
     series
     stacked_area
     strip
+    survival
     synteny
     upset
     violin

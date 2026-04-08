@@ -32,6 +32,8 @@ pub mod forest;
 pub mod clustermap;
 pub mod jointplot;
 pub mod raincloud;
+pub mod lollipop;
+pub mod survival;
 
 pub mod legend;
 
@@ -71,5 +73,7 @@ pub use forest::{ForestPlot, ForestRow};
 pub use clustermap::{Clustermap, ClustermapNorm, AnnotationTrack};
 pub use jointplot::{JointPlot, JointGroup, MarginalType};
 pub use raincloud::{RaincloudPlot, RaincloudGroup};
+pub use lollipop::{LollipopPlot, LollipopPoint, LollipopDomain};
+pub use survival::{SurvivalPlot, KMGroup};
 
 pub use legend::{Legend, LegendEntry, LegendShape, LegendPosition, LegendGroup};

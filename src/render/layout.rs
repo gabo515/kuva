@@ -587,6 +587,22 @@ impl Layout {
                 }
             }
 
+            if let Plot::Lollipop(lp) = plot {
+                if let Some(ref label) = lp.legend_label {
+                    has_legend = true;
+                    max_label_len = max_label_len.max(label.len());
+                }
+            }
+
+            if let Plot::Survival(sp) = plot {
+                if sp.legend_label.is_some() {
+                    has_legend = true;
+                    for g in &sp.groups {
+                        max_label_len = max_label_len.max(g.label.len());
+                    }
+                }
+            }
+
             if let Plot::Forest(fp) = plot {
                 // Reversed: row[0] at top, map_y maps larger values to top
                 y_labels = Some(fp.rows.iter().rev().map(|r| r.label.clone()).collect());

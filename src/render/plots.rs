@@ -31,6 +31,8 @@ use crate::plot::diceplot::DicePlot;
 use crate::plot::forest::ForestPlot;
 use crate::plot::clustermap::Clustermap;
 use crate::plot::raincloud::RaincloudPlot;
+use crate::plot::lollipop::LollipopPlot;
+use crate::plot::survival::SurvivalPlot;
 use crate::plot::legend::ColorBarInfo;
 use crate::render::render_utils;
 
@@ -69,6 +71,8 @@ pub enum Plot {
     Forest(ForestPlot),
     Clustermap(Clustermap),
     Raincloud(RaincloudPlot),
+    Lollipop(LollipopPlot),
+    Survival(SurvivalPlot),
 }
 
 impl From<ScatterPlot>    for Plot { fn from(p: ScatterPlot)    -> Self { Plot::Scatter(p) } }
@@ -104,6 +108,8 @@ impl From<DicePlot>      for Plot { fn from(p: DicePlot)      -> Self { Plot::Di
 impl From<ForestPlot>    for Plot { fn from(p: ForestPlot)    -> Self { Plot::Forest(p) } }
 impl From<Clustermap>   for Plot { fn from(p: Clustermap)   -> Self { Plot::Clustermap(p) } }
 impl From<RaincloudPlot> for Plot { fn from(p: RaincloudPlot) -> Self { Plot::Raincloud(p) } }
+impl From<LollipopPlot>  for Plot { fn from(p: LollipopPlot)  -> Self { Plot::Lollipop(p) } }
+impl From<SurvivalPlot>  for Plot { fn from(p: SurvivalPlot)  -> Self { Plot::Survival(p) } }
 
 fn bounds_from_2d<I>(points: I) -> Option<((f64, f64), (f64, f64))>
     where
@@ -155,6 +161,8 @@ impl Plot {
             Plot::Density(d) => d.color = color.into(),
             Plot::Forest(f) => f.color = color.into(),
             Plot::Raincloud(r) => r.color = color.into(),
+            Plot::Lollipop(l) => l.color = color.into(),
+            Plot::Survival(s) => s.color = color.into(),
             _ => {}
         }
     }
@@ -643,6 +651,37 @@ impl Plot {
                 let pad = (y_max - y_min) * 0.05 + 0.5;
                 Some(((0.5, n as f64 + 0.5), (y_min - pad, y_max + pad)))
             }
+            Plot::Survival(sp) => {
+                if sp.groups.is_empty() { return None; }
+                let t_max = sp.groups.iter()
+                    .flat_map(|g| g.times.iter().copied())
+                    .fold(0.0_f64, f64::max);
+                if t_max <= 0.0 { return None; }
+                // y from 0 to 1 with small padding; x from 0 to t_max with padding
+                Some(((0.0, t_max), (0.0, 1.0)))
+            }
+            Plot::Lollipop(lp) => {
+                if lp.points.is_empty() { return None; }
+                let mut x_min = f64::INFINITY;
+                let mut x_max = f64::NEG_INFINITY;
+                let mut y_min = lp.baseline;
+                let mut y_max = lp.baseline;
+                for p in &lp.points {
+                    x_min = x_min.min(p.x);
+                    x_max = x_max.max(p.x);
+                    y_min = y_min.min(p.y);
+                    y_max = y_max.max(p.y);
+                }
+                for d in &lp.domains {
+                    x_min = x_min.min(d.x_start);
+                    x_max = x_max.max(d.x_end);
+                }
+                if !lp.domains.is_empty() {
+                    y_min = y_min.min(lp.baseline - lp.domain_height);
+                }
+                if !x_min.is_finite() { return None; }
+                Some(((x_min, x_max), (y_min, y_max)))
+            }
         }
     }
 
@@ -680,6 +719,8 @@ impl Plot {
                 let total_pts: usize = r.groups.iter().map(|g| g.values.len()).sum();
                 r.groups.len() * 30 + total_pts + 10
             }
+            Plot::Survival(sp) => sp.groups.iter().map(|g| g.times.len() * 3 + 20).sum(),
+            Plot::Lollipop(lp) => lp.points.len() * 2 + lp.domains.len() * 2 + 5,
             _ => 100,
         }
     }

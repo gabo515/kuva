@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use crate::plot::heatmap::ColorMap;
 
 /// Dice face positions (1-indexed in a 3×3 grid) for 1–6 dots.
@@ -123,7 +123,7 @@ impl DicePlot {
         Sd: Into<String>,
         Sc: Into<String>,
     {
-        let mut cell_map: HashMap<(String, String), Vec<(usize, String)>> = HashMap::new();
+        let mut cell_map: BTreeMap<(String, String), Vec<(usize, String)>> = BTreeMap::new();
         for (x_cat, y_cat, dot_cat, color) in iter {
             let x_cat: String = x_cat.into();
             let y_cat: String = y_cat.into();
@@ -165,7 +165,7 @@ impl DicePlot {
         Sy: Into<String>,
     {
         type DotEntry = (usize, Option<f64>, Option<f64>);
-        let mut cell_map: HashMap<(String, String), Vec<DotEntry>> = HashMap::new();
+        let mut cell_map: BTreeMap<(String, String), Vec<DotEntry>> = BTreeMap::new();
         for (x_cat, y_cat, dot_idx, fill, size) in iter {
             let x_cat: String = x_cat.into();
             let y_cat: String = y_cat.into();

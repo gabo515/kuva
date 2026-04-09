@@ -225,6 +225,7 @@ pub fn add_reference_lines(lines: &[ReferenceLine], scene: &mut Scene, computed:
                 anchor,
                 rotate: None,
                 bold: false,
+                color: None,
             });
         }
     }
@@ -310,6 +311,7 @@ pub fn add_text_annotations(annotations: &[TextAnnotation], scene: &mut Scene, c
             anchor: TextAnchor::Middle,
             rotate: None,
             bold: false,
+            color: None,
         });
     }
 }

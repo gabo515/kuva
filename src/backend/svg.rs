@@ -187,7 +187,7 @@ impl SvgBackend {
                     svg.push_str(" />");
                     write_newline(&mut svg, p);
                 }
-                Primitive::Text { x, y, content, size, anchor, rotate, bold } => {
+                Primitive::Text { x, y, content, size, anchor, rotate, bold, color } => {
                     let anchor_str = match anchor {
                         TextAnchor::Start => "start",
                         TextAnchor::Middle => "middle",
@@ -205,6 +205,11 @@ impl SvgBackend {
                     svg.push('"');
                     if *bold {
                         svg.push_str(r#" font-weight="bold""#);
+                    }
+                    if let Some(c) = color {
+                        svg.push_str(r#" fill=""#);
+                        c.write_svg(&mut svg);
+                        svg.push('"');
                     }
                     if let Some(angle) = rotate {
                         svg.push_str(r#" transform="rotate("#);

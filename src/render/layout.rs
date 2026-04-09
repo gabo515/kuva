@@ -695,6 +695,15 @@ impl Layout {
                     }
                 }
             }
+
+            if let Plot::Parallel(pp) = plot {
+                if pp.legend_label.is_some() {
+                    has_legend = true;
+                    for g in pp.groups() {
+                        max_label_len = max_label_len.max(g.len());
+                    }
+                }
+            }
         }
 
         // Save raw data range before padding (log scale needs it)

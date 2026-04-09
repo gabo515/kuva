@@ -155,6 +155,7 @@ pub fn add_axes_and_grid(scene: &mut Scene, computed: &ComputedLayout, layout: &
                     anchor: TextAnchor::End,
                     rotate: None,
                     bold: false,
+                    color: None,
                 });
 
                 scene.add(Primitive::Line {
@@ -188,6 +189,7 @@ pub fn add_axes_and_grid(scene: &mut Scene, computed: &ComputedLayout, layout: &
                         anchor,
                         rotate,
                         bold: false,
+                        color: None,
                     });
 
                     scene.add(Primitive::Line {
@@ -233,6 +235,7 @@ pub fn add_axes_and_grid(scene: &mut Scene, computed: &ComputedLayout, layout: &
                         anchor,
                         rotate,
                         bold: false,
+                        color: None,
                     });
                 }
             }
@@ -256,6 +259,7 @@ pub fn add_axes_and_grid(scene: &mut Scene, computed: &ComputedLayout, layout: &
                     anchor,
                     rotate,
                     bold: false,
+                    color: None,
                 });
 
                 scene.add(Primitive::Line {
@@ -298,6 +302,7 @@ pub fn add_axes_and_grid(scene: &mut Scene, computed: &ComputedLayout, layout: &
                     anchor: TextAnchor::End,
                     rotate: None,
                     bold: false,
+                    color: None,
                 });
             }
         }
@@ -338,6 +343,7 @@ pub fn add_axes_and_grid(scene: &mut Scene, computed: &ComputedLayout, layout: &
                     anchor,
                     rotate,
                     bold: false,
+                    color: None,
                 });
             }
         }
@@ -371,6 +377,7 @@ pub fn add_axes_and_grid(scene: &mut Scene, computed: &ComputedLayout, layout: &
                     anchor: TextAnchor::End,
                     rotate: None,
                     bold: false,
+                    color: None,
                 });
             }
         }
@@ -452,6 +459,7 @@ pub fn add_y2_axis(scene: &mut Scene, computed: &ComputedLayout, layout: &Layout
             anchor: TextAnchor::Start,
             rotate: None,
             bold: false,
+            color: None,
         });
     }
 
@@ -465,6 +473,7 @@ pub fn add_y2_axis(scene: &mut Scene, computed: &ComputedLayout, layout: &Layout
             anchor: TextAnchor::Middle,
             rotate: Some(90.0),
             bold: false,
+            color: None,
         });
     }
 }
@@ -484,6 +493,7 @@ pub fn add_labels_and_title(scene: &mut Scene, computed: &ComputedLayout, layout
                 anchor: TextAnchor::Middle,
                 rotate: None,
                 bold: false,
+                color: None,
             });
         }
     }
@@ -504,6 +514,7 @@ pub fn add_labels_and_title(scene: &mut Scene, computed: &ComputedLayout, layout
                 anchor: TextAnchor::Middle,
                 rotate: Some(-90.0),
                 bold: false,
+                color: None,
             });
         }
     }
@@ -518,6 +529,7 @@ pub fn add_labels_and_title(scene: &mut Scene, computed: &ComputedLayout, layout
             anchor: TextAnchor::Middle,
             rotate: None,
             bold: false,
+            color: None,
         });
     }
 }

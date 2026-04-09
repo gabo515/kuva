@@ -92,6 +92,8 @@ pub use crate::plot::{
     VennPlot,
     VennSet,
     VennOverlap,
+    ParallelPlot,
+    ParallelRow,
     // Style / config types used when building plots
     MarkerShape,
     LineStyle,
@@ -123,6 +125,7 @@ pub use crate::render::render::{
     render_jointplot,
     render_slope,
     render_venn,
+    render_parallel,
 };
 
 // ── Figure (multi-plot grid) ─────────────────────────────────────────────────

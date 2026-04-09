@@ -483,6 +483,7 @@ impl Figure {
                     anchor: TextAnchor::Start,
                     rotate: None,
                     bold: config.bold,
+                    color: None,
                 });
             }
         }
@@ -496,6 +497,7 @@ impl Figure {
                 anchor: TextAnchor::Middle,
                 rotate: None,
                 bold: false,
+                color: None,
             });
         }
 

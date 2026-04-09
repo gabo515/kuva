@@ -37,6 +37,7 @@ use crate::plot::survival::SurvivalPlot;
 use crate::plot::roc::RocPlot;
 use crate::plot::slope::SlopePlot;
 use crate::plot::venn::VennPlot;
+use crate::plot::parallel::ParallelPlot;
 use crate::plot::legend::ColorBarInfo;
 use crate::render::render_utils;
 
@@ -81,6 +82,7 @@ pub enum Plot {
     Roc(RocPlot),
     Slope(SlopePlot),
     Venn(VennPlot),
+    Parallel(ParallelPlot),
 }
 
 impl From<ScatterPlot>    for Plot { fn from(p: ScatterPlot)    -> Self { Plot::Scatter(p) } }
@@ -121,7 +123,8 @@ impl From<LollipopPlot>  for Plot { fn from(p: LollipopPlot)  -> Self { Plot::Lo
 impl From<SurvivalPlot>  for Plot { fn from(p: SurvivalPlot)  -> Self { Plot::Survival(p) } }
 impl From<RocPlot>       for Plot { fn from(p: RocPlot)       -> Self { Plot::Roc(p) } }
 impl From<SlopePlot>     for Plot { fn from(p: SlopePlot)     -> Self { Plot::Slope(p) } }
-impl From<VennPlot>      for Plot { fn from(p: VennPlot)      -> Self { Plot::Venn(p) } }
+impl From<VennPlot>        for Plot { fn from(p: VennPlot)        -> Self { Plot::Venn(p) } }
+impl From<ParallelPlot>    for Plot { fn from(p: ParallelPlot)    -> Self { Plot::Parallel(p) } }
 
 fn bounds_from_2d<I>(points: I) -> Option<((f64, f64), (f64, f64))>
     where
@@ -177,6 +180,7 @@ impl Plot {
             Plot::Survival(s) => s.color = color.into(),
             Plot::Roc(r) => r.color = color.into(),
             Plot::Slope(s) => s.color = color.into(),
+            Plot::Parallel(p) => p.color = color.into(),
             _ => {}
         }
     }
@@ -714,6 +718,8 @@ impl Plot {
             }
             // Pixel-space plot — dummy bounds so auto_from_plots sees it
             Plot::Venn(_) => Some(((-1.0, 1.0), (-1.0, 1.0))),
+            // Pixel-space plot — dummy bounds so auto_from_plots sees it
+            Plot::Parallel(_) => Some(((-1.0, 1.0), (-1.0, 1.0))),
         }
     }
 
@@ -761,6 +767,7 @@ impl Plot {
             }).sum::<usize>() + 10,
             Plot::Slope(s) => s.points.len() * 5 + 10,
             Plot::Venn(v) => v.sets.len() * 10 + 50,
+            Plot::Parallel(p) => p.rows.len() + p.axis_names.len() * 10 + 50,
             _ => 100,
         }
     }

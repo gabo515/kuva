@@ -69,6 +69,7 @@ use crate::plot::raincloud::RaincloudPlot;
 use crate::plot::roc::RocPlot;
 use crate::plot::slope::SlopePlot;
 use crate::plot::venn::VennPlot;
+use crate::plot::parallel::{ParallelPlot, ParallelRow};
 
 use crate::plot::Legend;
 use crate::plot::legend::{ColorBarInfo, LegendEntry, LegendGroup, LegendPosition, LegendShape};
@@ -107,6 +108,7 @@ pub enum Primitive {
         anchor: TextAnchor,
         rotate: Option<f64>,
         bold: bool,
+        color: Option<Color>,
     },
     Line {
         x1: f64,
@@ -654,6 +656,7 @@ fn add_scatter(scatter: &ScatterPlot, scene: &mut Scene, computed: &ComputedLayo
                             anchor: TextAnchor::Start,
                             rotate: None,
                             bold: false,
+                            color: None,
                         });
                     }
                 }
@@ -1064,6 +1067,7 @@ fn add_histogram2d(hist2d: &Histogram2D, scene: &mut Scene, computed: &ComputedL
             anchor: TextAnchor::End,
             rotate: None,
             bold: false,
+            color: None,
         });
     }
 }
@@ -1378,6 +1382,7 @@ fn add_pie(pie: &PiePlot, scene: &mut Scene, computed: &ComputedLayout) {
                 anchor: TextAnchor::Middle,
                 rotate: None,
                 bold: false,
+                color: None,
             });
         } else {
             let right_side = mid_angle.cos() >= 0.0;
@@ -1448,6 +1453,7 @@ fn add_pie(pie: &PiePlot, scene: &mut Scene, computed: &ComputedLayout) {
             anchor,
             rotate: None,
             bold: false,
+            color: None,
         });
     }
 }
@@ -1547,6 +1553,7 @@ fn add_heatmap(heatmap: &Heatmap, scene: &mut Scene, computed: &ComputedLayout) 
                 anchor: TextAnchor::Middle,
                 rotate: None,
                 bold: false,
+                color: None,
             });
         }
     }
@@ -1637,6 +1644,7 @@ fn add_brickplot(brickplot: &BrickPlot, scene: &mut Scene, computed: &ComputedLa
                     anchor: TextAnchor::Middle,
                     rotate: None,
                     bold: false,
+                    color: None,
                 });
 
                 x_pos += width;
@@ -1930,6 +1938,7 @@ fn add_lollipop(lp: &crate::plot::lollipop::LollipopPlot, scene: &mut Scene, com
                 anchor: TextAnchor::Middle,
                 bold: false,
                 rotate: None,
+                color: None,
             });
         }
     }
@@ -1995,6 +2004,7 @@ fn add_lollipop(lp: &crate::plot::lollipop::LollipopPlot, scene: &mut Scene, com
                 anchor: TextAnchor::Middle,
                 bold: false,
                 rotate: None,
+                color: None,
             });
         }
     }
@@ -2132,6 +2142,7 @@ fn add_survival(sp: &crate::plot::survival::SurvivalPlot, scene: &mut Scene, com
             anchor: TextAnchor::End,
             bold: false,
             rotate: None,
+            color: None,
         });
     }
 }
@@ -2361,6 +2372,7 @@ fn add_slope(sp: &crate::plot::slope::SlopePlot, scene: &mut Scene, computed: &C
                 anchor: before_anchor,
                 bold: false,
                 rotate: None,
+                color: None,
             });
             scene.add(Primitive::Text {
                 x: after_x,
@@ -2370,6 +2382,7 @@ fn add_slope(sp: &crate::plot::slope::SlopePlot, scene: &mut Scene, computed: &C
                 anchor: after_anchor,
                 bold: false,
                 rotate: None,
+                color: None,
             });
         }
     }
@@ -2390,6 +2403,7 @@ fn add_slope(sp: &crate::plot::slope::SlopePlot, scene: &mut Scene, computed: &C
             anchor: TextAnchor::Middle,
             bold: true,
             rotate: None,
+            color: None,
         });
     }
     if let Some(ref al) = sp.after_label {
@@ -2407,6 +2421,7 @@ fn add_slope(sp: &crate::plot::slope::SlopePlot, scene: &mut Scene, computed: &C
             anchor: TextAnchor::Middle,
             bold: true,
             rotate: None,
+            color: None,
         });
     }
 }
@@ -2423,6 +2438,347 @@ pub fn render_slope(sp: SlopePlot, layout: Layout) -> Scene {
 pub fn render_venn(vp: VennPlot, layout: Layout) -> Scene {
     let plots = vec![crate::render::plots::Plot::Venn(vp)];
     render_multiple(plots, layout)
+}
+
+// ── ParallelPlot ───────────────────────────────────────────────────────────────
+
+/// Render a parallel coordinates plot with the given layout.
+pub fn render_parallel(pp: ParallelPlot, layout: Layout) -> Scene {
+    let plots = vec![crate::render::plots::Plot::Parallel(pp)];
+    render_multiple(plots, layout)
+}
+
+fn add_parallel(pp: &ParallelPlot, scene: &mut Scene, computed: &ComputedLayout) {
+    let n_axes = pp.axis_names.len();
+    if n_axes < 2 { return; }
+    if pp.rows.is_empty() { return; }
+
+    // ── Per-axis normalisation (computed first — needed to estimate label widths) ─
+    let mut axis_min = vec![f64::INFINITY;     n_axes];
+    let mut axis_max = vec![f64::NEG_INFINITY; n_axes];
+    for row in &pp.rows {
+        for (ai, &v) in row.values.iter().enumerate().take(n_axes) {
+            if v < axis_min[ai] { axis_min[ai] = v; }
+            if v > axis_max[ai] { axis_max[ai] = v; }
+        }
+    }
+    for ai in 0..n_axes {
+        if (axis_max[ai] - axis_min[ai]).abs() < 1e-12 {
+            axis_min[ai] -= 1.0;
+            axis_max[ai] += 1.0;
+        }
+    }
+    let global_lo = axis_min.iter().cloned().fold(f64::INFINITY,     f64::min);
+    let global_hi = axis_max.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+
+    // ── Adaptive h_inset to prevent horizontal tick-label collision ────────────
+    // The facing pair (second-to-last axis labels going right, last axis labels
+    // going left) is the tightest constraint. Required spacing:
+    //   W_right + W_left + 12 (6px offset each side) + MIN_GAP <= axis_step
+    // Strategy: first reduce h_inset toward 0 to widen inter-axis space; if that
+    // still isn't enough, scale the tick font size down proportionally.
+    const CHAR_W:    f64 = 0.62; // character width as fraction of font size (em)
+    const MIN_GAP:   f64 = 10.0; // minimum horizontal clearance between facing labels
+    const LABEL_OFF: f64 = 12.0; // combined 6px tick-to-label offset on both sides
+
+    let nominal_tick_size = (computed.body_size as f64 * 0.85) as u32;
+
+    // Estimate max formatted-value char count for axis i (uses extreme tick values).
+    let label_chars = |i: usize| -> f64 {
+        let (lo, hi) = if pp.normalize {
+            (axis_min[i], axis_max[i])
+        } else {
+            (global_lo, global_hi)
+        };
+        format_tick_value(lo).len().max(format_tick_value(hi).len()) as f64
+    };
+
+    let base_h_inset = 30.0_f64;
+    let avail_w = (computed.width - computed.margin_left - computed.margin_right).max(1.0);
+
+    let (h_inset, tick_size) = if n_axes > 1 {
+        let chars_r = label_chars(n_axes - 2); // second-to-last: labels go right
+        let chars_l = label_chars(n_axes - 1); // last: labels go left
+        let req_step = (chars_r + chars_l) * nominal_tick_size as f64 * CHAR_W
+            + LABEL_OFF + MIN_GAP;
+
+        let step_at_base = (avail_w - 2.0 * base_h_inset) / (n_axes - 1) as f64;
+        let step_at_zero = avail_w / (n_axes - 1) as f64;
+
+        if req_step <= step_at_base {
+            // Existing inset is already sufficient.
+            (base_h_inset, nominal_tick_size)
+        } else if req_step <= step_at_zero {
+            // Shrink h_inset so that axis_step exactly meets the requirement.
+            let h = (avail_w - req_step * (n_axes - 1) as f64) / 2.0;
+            (h.max(0.0), nominal_tick_size)
+        } else {
+            // Even h_inset = 0 isn't enough; scale the font down to fit.
+            let ts = ((step_at_zero - LABEL_OFF - MIN_GAP)
+                / ((chars_r + chars_l) * CHAR_W))
+                .max(6.0) as u32;
+            (0.0_f64, ts)
+        }
+    } else {
+        (base_h_inset, nominal_tick_size)
+    };
+
+    // ── Layout geometry ────────────────────────────────────────────────────────
+    let plot_left   = computed.margin_left  + h_inset;
+    let plot_right  = computed.width - computed.margin_right - h_inset;
+    let plot_top    = computed.margin_top;
+    let plot_bottom = computed.height - computed.margin_bottom;
+    let plot_w      = (plot_right - plot_left).max(1.0);
+    let plot_h      = (plot_bottom - plot_top).max(1.0);
+
+    // Pixel x-position for axis index i
+    let axis_x = |i: usize| -> f64 {
+        if n_axes == 1 {
+            plot_left + plot_w * 0.5
+        } else {
+            plot_left + plot_w * (i as f64) / ((n_axes - 1) as f64)
+        }
+    };
+
+    // Map a value on axis `ai` to a pixel y-position.
+    // Inversion flips the direction so high values appear at the bottom.
+    let map_val = |ai: usize, v: f64| -> f64 {
+        let (lo, hi) = if pp.normalize {
+            (axis_min[ai], axis_max[ai])
+        } else {
+            (global_lo, global_hi)
+        };
+        let t = (v - lo) / (hi - lo);
+        let t = if pp.is_inverted(ai) { t } else { 1.0 - t };
+        plot_top + t * plot_h
+    };
+
+    // ── Optional axis background bands ────────────────────────────────────────
+    if pp.show_axis_bands {
+        let slot_w = if n_axes > 1 { plot_w / (n_axes as f64 - 1.0) } else { plot_w };
+        let band_w = (slot_w * 0.5).min(40.0);
+        for i in 0..n_axes {
+            let ax = axis_x(i);
+            scene.add(Primitive::Rect {
+                x: ax - band_w * 0.5,
+                y: plot_top,
+                width: band_w,
+                height: plot_h,
+                fill: Color::from("#f5f5f5"),
+                stroke: None,
+                stroke_width: None,
+                opacity: Some(1.0),
+            });
+        }
+    }
+
+    const AXIS_COLOR:     &str = "#555555";
+    const INVERTED_COLOR: &str = "#d46000";  // orange — unmissable on any background
+
+    // ── Axis lines ─────────────────────────────────────────────────────────────
+    for i in 0..n_axes {
+        let ax    = axis_x(i);
+        let color = if pp.is_inverted(i) { INVERTED_COLOR } else { AXIS_COLOR };
+        scene.add(Primitive::Line {
+            x1: ax, y1: plot_top,
+            x2: ax, y2: plot_bottom,
+            stroke: Color::from(color),
+            stroke_width: 1.5,
+            stroke_dasharray: None,
+        });
+    }
+
+    // ── Axis labels (column names) ─────────────────────────────────────────────
+    // First and last axis labels use Start/End anchor to stay within the plot area.
+    // Helper closure — recomputes anchor each call (TextAnchor is not Copy/Clone).
+    let label_anchor = |i: usize| -> TextAnchor {
+        if i == 0 { TextAnchor::Start }
+        else if i == n_axes - 1 { TextAnchor::End }
+        else { TextAnchor::Middle }
+    };
+    let label_x = |i: usize| -> f64 { axis_x(i) };
+
+    let label_size = computed.body_size;
+    for (i, name) in pp.axis_names.iter().enumerate() {
+        let label_color = if pp.is_inverted(i) {
+            Some(Color::from(INVERTED_COLOR))
+        } else {
+            None
+        };
+        scene.add(Primitive::Text {
+            x: label_x(i),
+            y: plot_top - 8.0,
+            content: name.clone(),
+            size: label_size,
+            anchor: label_anchor(i),
+            rotate: None,
+            bold: true,
+            color: label_color,
+        });
+
+        // Inverted-axis indicator: bold "▼" at the top of the axis line (inside the
+        // plot area), in orange.  Orange axis line + orange label + ▼ symbol gives
+        // triple visual reinforcement that cannot be missed even when polylines overlap.
+        if pp.is_inverted(i) {
+            let sym_x = axis_x(i);
+            // Place the symbol just inside the top of the axis, offset so the glyph
+            // baseline sits a little below plot_top (making it clearly "on the axis").
+            let sym_y = plot_top + label_size as f64 * 1.0;
+            let sym_size = label_size + 2;
+            scene.add(Primitive::Text {
+                x: sym_x,
+                y: sym_y,
+                content: "▼".to_string(),
+                size: sym_size,
+                anchor: TextAnchor::Middle,
+                rotate: None,
+                bold: true,
+                color: Some(Color::from(INVERTED_COLOR)),
+            });
+        }
+    }
+
+    // ── Tick marks & value labels ──────────────────────────────────────────────
+    // `tick_size` was computed above (with possible font-size reduction to prevent
+    // horizontal label collision on densely-spaced axes).
+    if pp.show_axis_ticks {
+        // Cap tick count so labels never overlap vertically.
+        let min_px_per_tick = tick_size as f64 * 2.2;
+        let max_ticks_by_space = (plot_h / min_px_per_tick) as usize;
+        let n_ticks = pp.axis_ticks.min(max_ticks_by_space).max(1);
+
+        for i in 0..n_axes {
+            let ax = axis_x(i);
+            let (lo, hi) = if pp.normalize {
+                (axis_min[i], axis_max[i])
+            } else {
+                (global_lo, global_hi)
+            };
+            let is_last = i == n_axes - 1;
+            // Rightmost axis: ticks point left; all others: ticks point right
+            let tick_dx = if is_last { -4.0_f64 } else { 4.0_f64 };
+            let label_x = if is_last { ax - 6.0 } else { ax + 6.0 };
+            let tick_color = if pp.is_inverted(i) { INVERTED_COLOR } else { AXIS_COLOR };
+
+            for t in 0..=n_ticks {
+                let frac = t as f64 / n_ticks as f64;
+                let val  = lo + frac * (hi - lo);
+                let py   = map_val(i, val);
+                scene.add(Primitive::Line {
+                    x1: ax, y1: py,
+                    x2: ax + tick_dx, y2: py,
+                    stroke: Color::from(tick_color),
+                    stroke_width: 1.0,
+                    stroke_dasharray: None,
+                });
+                scene.add(Primitive::Text {
+                    x: label_x,
+                    y: py + tick_size as f64 * 0.35,
+                    content: format_tick_value(val),
+                    size: tick_size,
+                    anchor: if is_last { TextAnchor::End } else { TextAnchor::Start },
+                    rotate: None,
+                    bold: false,
+                    color: None,
+                });
+            }
+        }
+    }
+
+    // ── Group color mapping ────────────────────────────────────────────────────
+    let groups    = pp.groups();
+    let has_groups = !groups.is_empty();
+    let group_idx = |g: &str| -> usize {
+        groups.iter().position(|x| x == g).unwrap_or(0)
+    };
+
+    // ── Build path string (straight or bezier) ─────────────────────────────────
+    let build_path = |pts: &[(f64, f64)]| -> String {
+        let mut d = String::new();
+        if pts.is_empty() { return d; }
+        let _ = write!(d, "M {:.2},{:.2}", pts[0].0, pts[0].1);
+        if pp.curved {
+            for w in pts.windows(2) {
+                let (x0, y0) = w[0];
+                let (x1, y1) = w[1];
+                let mx = (x0 + x1) * 0.5;
+                // Cubic bezier: control points have mid x, start/end y respectively
+                let _ = write!(d, " C {:.2},{:.2} {:.2},{:.2} {:.2},{:.2}", mx, y0, mx, y1, x1, y1);
+            }
+        } else {
+            for &(px, py) in &pts[1..] {
+                let _ = write!(d, " L {:.2},{:.2}", px, py);
+            }
+        }
+        d
+    };
+
+    // ── Individual polylines ────────────────────────────────────────────────────
+    for row in &pp.rows {
+        if row.values.len() < n_axes { continue; }
+        let color_str = if has_groups {
+            if let Some(ref g) = row.group {
+                pp.color_for_group_idx(group_idx(g))
+            } else {
+                pp.color.clone()
+            }
+        } else {
+            pp.color.clone()
+        };
+
+        let pts: Vec<(f64, f64)> = row.values.iter().enumerate().take(n_axes)
+            .map(|(ai, &v)| (axis_x(ai), map_val(ai, v)))
+            .collect();
+
+        scene.add(Primitive::Path(Box::new(PathData {
+            d: build_path(&pts),
+            fill: None,
+            stroke: Color::from(color_str.as_str()),
+            stroke_width: pp.stroke_width,
+            opacity: Some(pp.opacity),
+            stroke_dasharray: None,
+        })));
+    }
+
+    // ── Group mean lines ────────────────────────────────────────────────────────
+    if pp.show_mean && has_groups {
+        for (gi, g) in groups.iter().enumerate() {
+            let group_rows: Vec<&ParallelRow> = pp.rows.iter()
+                .filter(|r| r.group.as_deref() == Some(g.as_str()) && r.values.len() >= n_axes)
+                .collect();
+            if group_rows.is_empty() { continue; }
+
+            let means: Vec<f64> = (0..n_axes).map(|ai| {
+                let sum: f64 = group_rows.iter().map(|r| r.values[ai]).sum();
+                sum / group_rows.len() as f64
+            }).collect();
+
+            let pts: Vec<(f64, f64)> = means.iter().enumerate()
+                .map(|(ai, &v)| (axis_x(ai), map_val(ai, v)))
+                .collect();
+
+            let color_str = pp.color_for_group_idx(gi);
+            scene.add(Primitive::Path(Box::new(PathData {
+                d: build_path(&pts),
+                fill: None,
+                stroke: Color::from(color_str.as_str()),
+                stroke_width: pp.mean_stroke_width,
+                opacity: Some(1.0),
+                stroke_dasharray: None,
+            })));
+        }
+    }
+}
+
+/// Format a tick value compactly.
+fn format_tick_value(val: f64) -> String {
+    if val == 0.0 { return "0".to_string(); }
+    if val.abs() >= 10_000.0 || (val.abs() < 0.01 && val != 0.0) {
+        format!("{val:.2e}")
+    } else {
+        let s = format!("{val:.3}");
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
+    }
 }
 
 /// Build a rotated-ellipse SVG path by sampling 72 points.
@@ -2783,6 +3139,7 @@ fn add_venn(vp: &VennPlot, scene: &mut Scene, computed: &ComputedLayout) {
                         anchor: TextAnchor::Middle,
                         rotate: None,
                         bold: false,
+                        color: None,
                     });
                     scene.add(Primitive::Text {
                         x: lx,
@@ -2792,6 +3149,7 @@ fn add_venn(vp: &VennPlot, scene: &mut Scene, computed: &ComputedLayout) {
                         anchor: TextAnchor::Middle,
                         rotate: None,
                         bold: false,
+                        color: None,
                     });
                 }
                 (true, false) => {
@@ -2803,6 +3161,7 @@ fn add_venn(vp: &VennPlot, scene: &mut Scene, computed: &ComputedLayout) {
                         anchor: TextAnchor::Middle,
                         rotate: None,
                         bold: false,
+                        color: None,
                     });
                 }
                 (false, true) => {
@@ -2814,6 +3173,7 @@ fn add_venn(vp: &VennPlot, scene: &mut Scene, computed: &ComputedLayout) {
                         anchor: TextAnchor::Middle,
                         rotate: None,
                         bold: false,
+                        color: None,
                     });
                 }
                 (false, false) => {}
@@ -2981,6 +3341,7 @@ fn add_venn(vp: &VennPlot, scene: &mut Scene, computed: &ComputedLayout) {
                         anchor: TextAnchor::Start,
                         rotate: None,
                         bold: false,
+                        color: None,
                     });
                 }
                 if vp.show_percentages {
@@ -2992,6 +3353,7 @@ fn add_venn(vp: &VennPlot, scene: &mut Scene, computed: &ComputedLayout) {
                         anchor: TextAnchor::Start,
                         rotate: None,
                         bold: false,
+                        color: None,
                     });
                 }
             }
@@ -3041,6 +3403,7 @@ fn add_venn(vp: &VennPlot, scene: &mut Scene, computed: &ComputedLayout) {
                             anchor: TextAnchor::Middle,
                             rotate: None,
                             bold: false,
+                            color: None,
                         });
                         scene.add(Primitive::Text {
                             x: lx,
@@ -3050,6 +3413,7 @@ fn add_venn(vp: &VennPlot, scene: &mut Scene, computed: &ComputedLayout) {
                             anchor: TextAnchor::Middle,
                             rotate: None,
                             bold: false,
+                            color: None,
                         });
                     }
                     (true, false) => {
@@ -3061,6 +3425,7 @@ fn add_venn(vp: &VennPlot, scene: &mut Scene, computed: &ComputedLayout) {
                             anchor: TextAnchor::Middle,
                             rotate: None,
                             bold: false,
+                            color: None,
                         });
                     }
                     (false, true) => {
@@ -3072,6 +3437,7 @@ fn add_venn(vp: &VennPlot, scene: &mut Scene, computed: &ComputedLayout) {
                             anchor: TextAnchor::Middle,
                             rotate: None,
                             bold: false,
+                            color: None,
                         });
                     }
                     (false, false) => {}
@@ -3142,6 +3508,7 @@ fn add_venn(vp: &VennPlot, scene: &mut Scene, computed: &ComputedLayout) {
                 anchor,
                 rotate: None,
                 bold: true,
+                color: None,
             });
         }
     }
@@ -3221,6 +3588,7 @@ fn add_venn(vp: &VennPlot, scene: &mut Scene, computed: &ComputedLayout) {
             anchor: TextAnchor::Start,
             rotate: None,
             bold: true,
+            color: None,
         });
         // Stress value (value row)
         scene.add(Primitive::Text {
@@ -3231,6 +3599,7 @@ fn add_venn(vp: &VennPlot, scene: &mut Scene, computed: &ComputedLayout) {
             anchor: TextAnchor::Start,
             rotate: None,
             bold: false,
+            color: None,
         });
     }
 }
@@ -3849,6 +4218,7 @@ fn add_clustermap(cm: &Clustermap, scene: &mut Scene, computed: &ComputedLayout)
                 anchor: TextAnchor::End,
                 rotate: Some(-90.0),
                 bold: false,
+                color: None,
             });
         }
         for (k, &orig_row) in row_perm.iter().enumerate() {
@@ -3880,6 +4250,7 @@ fn add_clustermap(cm: &Clustermap, scene: &mut Scene, computed: &ComputedLayout)
                 anchor: TextAnchor::End,
                 rotate: None,
                 bold: false,
+                color: None,
             });
         }
         for (k, &orig_col) in col_perm.iter().enumerate() {
@@ -3961,6 +4332,7 @@ fn add_clustermap(cm: &Clustermap, scene: &mut Scene, computed: &ComputedLayout)
                     anchor: TextAnchor::Middle,
                     rotate: None,
                     bold: false,
+                    color: None,
                 });
             }
         }
@@ -3979,6 +4351,7 @@ fn add_clustermap(cm: &Clustermap, scene: &mut Scene, computed: &ComputedLayout)
                 anchor: TextAnchor::Start,
                 rotate: None,
                 bold: false,
+                color: None,
             });
         }
     }
@@ -3993,6 +4366,7 @@ fn add_clustermap(cm: &Clustermap, scene: &mut Scene, computed: &ComputedLayout)
                 anchor: TextAnchor::End,
                 rotate: Some(-45.0),
                 bold: false,
+                color: None,
             });
         }
     }
@@ -4121,6 +4495,7 @@ fn add_waterfall(waterfall: &WaterfallPlot, scene: &mut Scene, computed: &Comput
                 anchor: TextAnchor::Middle,
                 rotate: None,
                 bold: false,
+                color: None,
             });
         }
 
@@ -4147,6 +4522,7 @@ fn render_legend_entry(entry: &LegendEntry, scene: &mut Scene, legend_x: f64, cu
         size: computed.body_size,
         rotate: None,
         bold: false,
+        color: None,
     });
     match entry.shape {
         LegendShape::Rect => scene.add(Primitive::Rect {
@@ -4290,6 +4666,7 @@ fn add_stats_box(layout: &Layout, scene: &mut Scene, computed: &ComputedLayout) 
             size: body_size,
             rotate: None,
             bold: true,
+            color: None,
         });
         cur_y += line_height;
     }
@@ -4303,6 +4680,7 @@ fn add_stats_box(layout: &Layout, scene: &mut Scene, computed: &ComputedLayout) 
             size: body_size,
             rotate: None,
             bold: false,
+            color: None,
         });
         cur_y += line_height;
     }
@@ -4362,6 +4740,7 @@ fn add_legend_at(legend: &Legend, scene: &mut Scene, computed: &ComputedLayout, 
             x: swatch_x + 18.0, y: swatch_y + computed.body_size as f64 * 0.8,
             content: entry.label.clone(), size: computed.body_size,
             anchor: TextAnchor::Start, rotate: None, bold: false,
+            color: None,
         });
         cur_y += line_height;
     }
@@ -4473,6 +4852,7 @@ fn add_legend_with_offset(legend: &Legend, scene: &mut Scene, computed: &Compute
             size: computed.body_size,
             rotate: None,
             bold: true,
+            color: None,
         });
         cur_y += line_height;
     }
@@ -4490,6 +4870,7 @@ fn add_legend_with_offset(legend: &Legend, scene: &mut Scene, computed: &Compute
                 size: computed.body_size,
                 rotate: None,
                 bold: true,
+                color: None,
             });
             cur_y += line_height;
             for entry in &group.entries {
@@ -4600,6 +4981,7 @@ fn add_colorbar_at(
             anchor: TextAnchor::Start,
             rotate: None,
             bold: false,
+            color: None,
         });
     }
 
@@ -4616,6 +4998,7 @@ fn add_colorbar_at(
             anchor: TextAnchor::Middle,
             rotate: Some(-90.0),
             bold: false,
+            color: None,
         });
     }
 }
@@ -4739,6 +5122,7 @@ fn add_volcano(vp: &VolcanoPlot, scene: &mut Scene, computed: &ComputedLayout) {
                     anchor: TextAnchor::Middle,
                     rotate: None,
                     bold: false,
+                    color: None,
                 });
             }
         }
@@ -4770,6 +5154,7 @@ fn add_volcano(vp: &VolcanoPlot, scene: &mut Scene, computed: &ComputedLayout) {
                     anchor: TextAnchor::Middle,
                     rotate: None,
                     bold: false,
+                    color: None,
                 });
             }
         }
@@ -4803,6 +5188,7 @@ fn add_volcano(vp: &VolcanoPlot, scene: &mut Scene, computed: &ComputedLayout) {
                     anchor,
                     rotate: None,
                     bold: false,
+                    color: None,
                 });
             }
         }
@@ -4915,6 +5301,7 @@ fn add_manhattan(mp: &ManhattanPlot, scene: &mut Scene, computed: &ComputedLayou
                     anchor: TextAnchor::Middle,
                     rotate: None,
                     bold: false,
+                    color: None,
                 });
             }
         }
@@ -4939,6 +5326,7 @@ fn add_manhattan(mp: &ManhattanPlot, scene: &mut Scene, computed: &ComputedLayou
                     anchor: TextAnchor::Middle,
                     rotate: None,
                     bold: false,
+                    color: None,
                 });
             }
         }
@@ -4969,6 +5357,7 @@ fn add_manhattan(mp: &ManhattanPlot, scene: &mut Scene, computed: &ComputedLayou
                     anchor,
                     rotate: None,
                     bold: false,
+                    color: None,
                 });
             }
         }
@@ -5013,6 +5402,7 @@ fn add_manhattan_chr_labels(mp: &ManhattanPlot, scene: &mut Scene, computed: &Co
                 anchor,
                 rotate,
                 bold: false,
+                color: None,
             });
         }
     }
@@ -5603,6 +5993,7 @@ fn add_diceplot(dp: &DicePlot, scene: &mut Scene, computed: &ComputedLayout) {
                 x: tx, y: ty + tl + tlm + ts as f64 * 0.7,
                 content: label.clone(), size: ts,
                 anchor: TextAnchor::Middle, rotate: None, bold: false,
+                color: None,
             });
         }
 
@@ -5616,6 +6007,7 @@ fn add_diceplot(dp: &DicePlot, scene: &mut Scene, computed: &ComputedLayout) {
                 x: grid_x0 - tl - tlm, y: ty + ts as f64 * 0.35,
                 content: label.clone(), size: ts,
                 anchor: TextAnchor::End, rotate: None, bold: false,
+                color: None,
             });
         }
     }
@@ -5788,6 +6180,7 @@ fn add_dice_position_legend(
         y: y_start + computed.body_size as f64 * 0.85,
         content: title.to_string(), size: computed.body_size,
         anchor: TextAnchor::Middle, rotate: None, bold: true,
+        color: None,
     });
 
     // Centre the die face horizontally within the legend box
@@ -5839,6 +6232,7 @@ fn add_dice_position_legend(
             y: pip_cy + die_cell_pip_h / 2.0 + label_area_h * 0.8,
             content: label.to_string(), size: label_size,
             anchor: TextAnchor::Middle, rotate: None, bold: false,
+            color: None,
         });
     }
 
@@ -5876,6 +6270,7 @@ fn add_dice_size_legend_section(
         y: y_start + computed.body_size as f64 * 0.8,
         content: title.to_string(), size: computed.body_size,
         anchor: TextAnchor::Middle, rotate: None, bold: true,
+        color: None,
     });
 
     // base_r must match the actual plot pip radius (tile_sq/6 * pip_scale)
@@ -5898,6 +6293,7 @@ fn add_dice_size_legend_section(
             x: swatch_cx + 14.0, y: circle_cy + computed.body_size as f64 / 3.0,
             content: format!("{:.1}", value), size: computed.body_size,
             anchor: TextAnchor::Start, rotate: None, bold: false,
+            color: None,
         });
         row_y += line_height;
     }
@@ -6026,6 +6422,7 @@ fn add_dot_stacked_legends(
         anchor: TextAnchor::Middle,
         rotate: None,
         bold: false,
+        color: None,
     });
 
     let mut legend_y = box_top;
@@ -6040,6 +6437,7 @@ fn add_dot_stacked_legends(
             anchor: TextAnchor::Start,
             rotate: None,
             bold: false,
+            color: None,
         });
         if let LegendShape::CircleSize(r) = entry.shape {
             scene.add(Primitive::Circle {
@@ -6119,6 +6517,7 @@ fn add_dot_stacked_legends(
             anchor: TextAnchor::Start,
             rotate: None,
             bold: false,
+            color: None,
         });
     }
 
@@ -6134,6 +6533,7 @@ fn add_dot_stacked_legends(
             anchor: TextAnchor::Middle,
             rotate: Some(-90.0),
             bold: false,
+            color: None,
         });
     }
 }
@@ -6682,6 +7082,28 @@ pub fn collect_legend_entries(plots: &[Plot]) -> Vec<LegendEntry> {
                     }
                 }
             }
+            Plot::Parallel(pp) => {
+                if pp.legend_label.is_some() {
+                    let groups = pp.groups();
+                    if groups.is_empty() {
+                        entries.push(LegendEntry {
+                            label: pp.color.clone(),
+                            color: pp.color.clone(),
+                            shape: LegendShape::Line,
+                            dasharray: None,
+                        });
+                    } else {
+                        for (i, g) in groups.iter().enumerate() {
+                            entries.push(LegendEntry {
+                                label: g.clone(),
+                                color: pp.color_for_group_idx(i),
+                                shape: LegendShape::Line,
+                                dasharray: None,
+                            });
+                        }
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -6750,6 +7172,7 @@ pub fn render_legend_at(
             size: body_size,
             rotate: None,
             bold: true,
+            color: None,
         });
         cur_y += line_height;
     }
@@ -6766,6 +7189,7 @@ pub fn render_legend_at(
             size: body_size,
             rotate: None,
             bold: false,
+            color: None,
         });
         match entry.shape {
             LegendShape::Rect => scene.add(Primitive::Rect {
@@ -6825,6 +7249,7 @@ pub fn render_legend_at(
                 size: body_size,
                 rotate: None,
                 bold: true,
+                color: None,
             });
             cur_y += line_height;
             for entry in &group.entries {
@@ -6933,6 +7358,7 @@ fn add_upset(up: &UpSetPlot, scene: &mut Scene, computed: &ComputedLayout) {
                     content: format!("{}", size),
                     size: computed.tick_size,
                     anchor: TextAnchor::Start, rotate: None, bold: false,
+                    color: None,
                 });
             }
         }
@@ -6944,6 +7370,7 @@ fn add_upset(up: &UpSetPlot, scene: &mut Scene, computed: &ComputedLayout) {
             content: "Set size".to_string(),
             size: computed.label_size,
             anchor: TextAnchor::Middle, rotate: None, bold: false,
+            color: None,
         });
     }
 
@@ -6957,6 +7384,7 @@ fn add_upset(up: &UpSetPlot, scene: &mut Scene, computed: &ComputedLayout) {
             content: name.clone(),
             size: computed.tick_size,
             anchor: TextAnchor::End, rotate: None, bold: false,
+            color: None,
         });
     }
 
@@ -6996,6 +7424,7 @@ fn add_upset(up: &UpSetPlot, scene: &mut Scene, computed: &ComputedLayout) {
             content: format!("{}", val),
             size: computed.tick_size,
             anchor: TextAnchor::End, rotate: None, bold: false,
+            color: None,
         });
     }
 
@@ -7008,6 +7437,7 @@ fn add_upset(up: &UpSetPlot, scene: &mut Scene, computed: &ComputedLayout) {
         anchor: TextAnchor::Middle,
         rotate: Some(-90.0),
         bold: false,
+        color: None,
     });
 
     // Intersection bars.
@@ -7034,6 +7464,7 @@ fn add_upset(up: &UpSetPlot, scene: &mut Scene, computed: &ComputedLayout) {
                 content: format!("{}", inter.count),
                 size: computed.tick_size,
                 anchor: TextAnchor::Middle, rotate: None, bold: false,
+                color: None,
             });
         }
     }
@@ -7695,6 +8126,7 @@ fn add_chord(chord: &ChordPlot, scene: &mut Scene, computed: &ComputedLayout) {
             anchor,
             rotate: None,
             bold: false,
+            color: None,
         });
     }
 
@@ -8056,6 +8488,7 @@ fn add_sankey(sankey: &SankeyPlot, scene: &mut Scene, computed: &ComputedLayout)
                     anchor: TextAnchor::Middle,
                     rotate: None,
                     bold: false,
+                    color: None,
                 });
             }
         }
@@ -8077,6 +8510,7 @@ fn add_sankey(sankey: &SankeyPlot, scene: &mut Scene, computed: &ComputedLayout)
             anchor,
             rotate: None,
             bold: false,
+            color: None,
         });
     }
 }
@@ -8193,7 +8627,7 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
         let skip_axes_for_meta = plots.iter().all(|p| matches!(p,
             Plot::Pie(_) | Plot::UpSet(_) | Plot::Chord(_) | Plot::Sankey(_)
             | Plot::PhyloTree(_) | Plot::Synteny(_) | Plot::Polar(_) | Plot::Ternary(_)
-            | Plot::Clustermap(_) | Plot::Joint(_) | Plot::Venn(_)));
+            | Plot::Clustermap(_) | Plot::Joint(_) | Plot::Venn(_) | Plot::Parallel(_)));
         if !skip_axes_for_meta {
             scene.axis_meta = Some(AxisMeta {
                 x_min: computed.x_range.0,
@@ -8210,7 +8644,7 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
         }
     }
 
-    let skip_axes = plots.iter().all(|p| matches!(p, Plot::Pie(_) | Plot::UpSet(_) | Plot::Chord(_) | Plot::Sankey(_) | Plot::PhyloTree(_) | Plot::Synteny(_) | Plot::Polar(_) | Plot::Ternary(_) | Plot::DicePlot(_) | Plot::Clustermap(_) | Plot::Joint(_) | Plot::Venn(_)));
+    let skip_axes = plots.iter().all(|p| matches!(p, Plot::Pie(_) | Plot::UpSet(_) | Plot::Chord(_) | Plot::Sankey(_) | Plot::PhyloTree(_) | Plot::Synteny(_) | Plot::Polar(_) | Plot::Ternary(_) | Plot::DicePlot(_) | Plot::Clustermap(_) | Plot::Joint(_) | Plot::Venn(_) | Plot::Parallel(_)));
     if !skip_axes {
         add_axes_and_grid(&mut scene, &computed, &layout);
     }
@@ -8422,6 +8856,9 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
             }
             Plot::Venn(v) => {
                 add_venn(v, &mut scene, &computed);
+            }
+            Plot::Parallel(p) => {
+                add_parallel(p, &mut scene, &computed);
             }
         }
     }
@@ -9023,6 +9460,7 @@ fn add_phylo_tree(tree: &PhyloTree, scene: &mut Scene, computed: &ComputedLayout
                 anchor,
                 rotate,
                 bold: false,
+                color: None,
             });
         }
     }
@@ -9041,6 +9479,7 @@ fn add_phylo_tree(tree: &PhyloTree, scene: &mut Scene, computed: &ComputedLayout
                         anchor: TextAnchor::Start,
                         rotate: None,
                         bold: false,
+                        color: None,
                     });
                 }
             }
@@ -9199,6 +9638,7 @@ fn add_synteny(synteny: &SyntenyPlot, scene: &mut Scene, computed: &ComputedLayo
             anchor: TextAnchor::End,
             rotate: None,
             bold: false,
+            color: None,
         });
     }
 }
@@ -9318,6 +9758,7 @@ fn add_polar(pp: &PolarPlot, scene: &mut Scene, computed: &ComputedLayout) {
                     anchor: TextAnchor::Start,
                     rotate: None,
                     bold: false,
+                    color: None,
                 });
             }
         }
@@ -9337,6 +9778,7 @@ fn add_polar(pp: &PolarPlot, scene: &mut Scene, computed: &ComputedLayout) {
                 anchor: TextAnchor::Start,
                 rotate: None,
                 bold: false,
+                color: None,
             });
         }
 
@@ -9397,6 +9839,7 @@ fn add_polar(pp: &PolarPlot, scene: &mut Scene, computed: &ComputedLayout) {
                 anchor,
                 rotate: None,
                 bold: false,
+                color: None,
             });
         }
 
@@ -9597,6 +10040,7 @@ fn add_ternary(tp: &TernaryPlot, scene: &mut Scene, computed: &ComputedLayout) {
                 anchor: TextAnchor::End,
                 rotate: None,
                 bold: false,
+                color: None,
             });
 
             // C-axis: right side (CA edge), C=k, reads 0%→100% top-to-bottom (CCW).
@@ -9610,6 +10054,7 @@ fn add_ternary(tp: &TernaryPlot, scene: &mut Scene, computed: &ComputedLayout) {
                 anchor: TextAnchor::Start,
                 rotate: None,
                 bold: false,
+                color: None,
             });
 
             // B-axis: bottom (BC edge), B=k, reads 0%→100% right-to-left (CCW).
@@ -9623,6 +10068,7 @@ fn add_ternary(tp: &TernaryPlot, scene: &mut Scene, computed: &ComputedLayout) {
                 anchor: TextAnchor::Middle,
                 rotate: None,
                 bold: false,
+                color: None,
             });
         }
     }
@@ -9640,6 +10086,7 @@ fn add_ternary(tp: &TernaryPlot, scene: &mut Scene, computed: &ComputedLayout) {
         anchor: TextAnchor::Middle,
         rotate: None,
         bold: true,
+        color: None,
     });
     // B = bottom-left
     scene.add(Primitive::Text {
@@ -9650,6 +10097,7 @@ fn add_ternary(tp: &TernaryPlot, scene: &mut Scene, computed: &ComputedLayout) {
         anchor: TextAnchor::End,
         rotate: None,
         bold: true,
+        color: None,
     });
     // C = bottom-right
     scene.add(Primitive::Text {
@@ -9660,6 +10108,7 @@ fn add_ternary(tp: &TernaryPlot, scene: &mut Scene, computed: &ComputedLayout) {
         anchor: TextAnchor::Start,
         rotate: None,
         bold: true,
+        color: None,
     });
 
     // ── Data points ───────────────────────────────────────────────────────────
@@ -10041,6 +10490,7 @@ fn add_jointplot(
                         x: legend_x + 18.0, y: cur_y + bs * 0.8,
                         content: lbl, size: scatter_computed.body_size,
                         anchor: TextAnchor::Start, rotate: None, bold: false,
+                        color: None,
                     });
                     cur_y += line_h;
                 }
@@ -10094,6 +10544,7 @@ pub fn render_jointplot(jp: crate::plot::jointplot::JointPlot, layout: Layout) -
             anchor: TextAnchor::Middle,
             rotate: None,
             bold: false,
+            color: None,
         });
     }
 

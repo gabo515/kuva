@@ -37,6 +37,7 @@ pub mod survival;
 pub mod roc;
 pub mod slope;
 pub mod venn;
+pub mod parallel;
 
 pub mod legend;
 
@@ -81,5 +82,6 @@ pub use survival::{SurvivalPlot, KMGroup};
 pub use roc::{RocPlot, RocGroup};
 pub use slope::{SlopePlot, SlopePoint, SlopeValueFormat};
 pub use venn::{VennPlot, VennSet, VennOverlap};
+pub use parallel::{ParallelPlot, ParallelRow};
 
 pub use legend::{Legend, LegendEntry, LegendShape, LegendPosition, LegendGroup};

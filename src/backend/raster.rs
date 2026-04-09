@@ -297,6 +297,7 @@ fn build_text_svg(scene: &Scene, texts: &[&Primitive]) -> String {
             anchor,
             rotate,
             bold,
+            ..
         } = elem
         {
             let anchor_str = match anchor {

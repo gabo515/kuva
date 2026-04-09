@@ -12,6 +12,7 @@ fn minimal_scene() -> Scene {
         anchor: TextAnchor::Middle,
         rotate: None,
         bold: false,
+        color: None,
     });
     scene
 }

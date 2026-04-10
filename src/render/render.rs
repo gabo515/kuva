@@ -10862,14 +10862,17 @@ fn add_network(net: &NetworkPlot, scene: &mut Scene, computed: &ComputedLayout) 
     let loop_r = (r_max * 10.0).min(pw.min(ph) * 0.15);
     let edge_label_size = font_size.saturating_sub(2).max(8);
 
+    // Arrowhead length for a given stroke width.
+    let arr_len = |stroke_w: f64| stroke_w * 2.5 + 3.0;
+
     // Arrowhead triangle: tip at (tip_x, tip_y), pointing along (ux, uy).
     let arrowhead = |scene: &mut Scene, tip_x: f64, tip_y: f64, ux: f64, uy: f64, stroke_w: f64, color: &str| {
-        let arr_size = stroke_w * 2.5 + 3.0;
-        let base_x = tip_x - ux * arr_size;
-        let base_y = tip_y - uy * arr_size;
+        let size = arr_len(stroke_w);
+        let base_x = tip_x - ux * size;
+        let base_y = tip_y - uy * size;
         let perp_x = -uy;
         let perp_y = ux;
-        let half_w = arr_size * 0.4;
+        let half_w = size * 0.4;
         let d = format!("M {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} Z",
             tip_x, tip_y,
             base_x + perp_x * half_w, base_y + perp_y * half_w,
@@ -10878,7 +10881,6 @@ fn add_network(net: &NetworkPlot, scene: &mut Scene, computed: &ComputedLayout) 
             d, fill: Some(color.into()), stroke: "none".into(),
             stroke_width: 0.0, opacity: None, stroke_dasharray: None,
         })));
-        arr_size
     };
 
     let fallback = Palette::category10();
@@ -11045,7 +11047,7 @@ fn add_network(net: &NetworkPlot, scene: &mut Scene, computed: &ComputedLayout) 
             let ly2 = y2 - uy * r_tgt;
 
             if net.directed {
-                let arr_size = stroke_w * 2.5 + 3.0;
+                let arr_size = arr_len(stroke_w);
                 // Direction at endpoint: tangent of quadratic bezier at t=1 is (end - control)
                 let tdx = lx2 - mx;
                 let tdy = ly2 - my;
@@ -11090,7 +11092,7 @@ fn add_network(net: &NetworkPlot, scene: &mut Scene, computed: &ComputedLayout) 
             let ly2 = y2 - uy * r_tgt;
 
             if net.directed {
-                let arr_size = stroke_w * 2.5 + 3.0;
+                let arr_size = arr_len(stroke_w);
                 let lx2_short = lx2 - ux * arr_size;
                 let ly2_short = ly2 - uy * arr_size;
 

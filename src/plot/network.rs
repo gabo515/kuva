@@ -61,7 +61,7 @@ pub enum NodeShape {
 impl NodeShape {
     /// Ratio of the shape's circumradius to the base radius `r`.
     /// Used to offset edge endpoints so they clear the shape boundary.
-    pub fn circumradius_factor(self) -> f64 {
+    pub(crate) fn circumradius_factor(self) -> f64 {
         match self {
             Self::Circle => 1.0,
             Self::Square => std::f64::consts::SQRT_2,
@@ -206,7 +206,7 @@ impl NetworkPlot {
         I: IntoIterator<Item = (S, S, f64)>,
     {
         for (src, tgt, w) in edges {
-            self = self.with_edge(src, tgt, w);
+            self.push_edge(src.into(), tgt.into(), w, None, None);
         }
         self
     }

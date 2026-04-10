@@ -139,6 +139,18 @@ impl NetworkPlot {
         self
     }
 
+    /// Add an edge with an explicit colour.
+    pub fn with_edge_color<S: Into<String>, C: Into<String>>(
+        mut self, source: S, target: S, weight: f64, color: C,
+    ) -> Self {
+        let src = source.into();
+        let tgt = target.into();
+        let si = self.node_index(&src);
+        let ti = self.node_index(&tgt);
+        self.edges.push(NetworkEdge { source: si, target: ti, weight, color: Some(color.into()) });
+        self
+    }
+
     /// Bulk-add edges from an iterator of `(source, target, weight)`.
     pub fn with_edges<S, I>(mut self, edges: I) -> Self
     where
@@ -154,9 +166,12 @@ impl NetworkPlot {
     /// Build a network from an N×N adjacency matrix.
     ///
     /// Non-zero entries become edges; the value is used as the weight.
-    /// The matrix is stored and edges are expanded when needed (by
-    /// [`compute_positions`] or [`resolve_matrix`]), so `.with_directed()`
-    /// can be called before or after this method.
+    /// The matrix is stored and edges are expanded by
+    /// [`resolve_matrix`] (called automatically by `render_multiple`),
+    /// so `.with_directed()` can be called before or after this method.
+    ///
+    /// If you call [`compute_positions`] directly (e.g. to inspect the
+    /// layout), call `resolve_matrix()` first.
     pub fn with_matrix<S, L>(mut self, matrix: Vec<Vec<f64>>, labels: L) -> Self
     where
         S: Into<String>,
@@ -169,8 +184,8 @@ impl NetworkPlot {
     }
 
     /// Expand a pending adjacency matrix into edges.  Called automatically
-    /// by [`compute_positions`]; safe to call multiple times (no-op after
-    /// the first).
+    /// by `render_multiple`; safe to call multiple times (no-op after the
+    /// first).
     pub fn resolve_matrix(&mut self) {
         if let Some((matrix, indices)) = self.pending_matrix.take() {
             let n = indices.len();
@@ -266,7 +281,9 @@ impl NetworkPlot {
         self
     }
 
-    /// Show a legend; one entry per unique group.
+    /// Show a legend; one entry per unique group.  If no groups have been
+    /// assigned the legend falls back to one entry per node, which can be
+    /// large — prefer using [`with_node_group`] to keep the legend compact.
     pub fn with_legend<S: Into<String>>(mut self, label: S) -> Self {
         self.legend_label = Some(label.into());
         self

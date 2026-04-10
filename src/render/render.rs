@@ -11010,6 +11010,10 @@ fn add_network(net: &NetworkPlot, scene: &mut Scene, computed: &ComputedLayout) 
         let (x1, y1) = (px[si], py[si]);
         let (x2, y2) = (px[ti], py[ti]);
 
+        // TODO: antiparallel edges (A→B and B→A) currently overlap as
+        // straight lines with opposing arrowheads.  A future improvement
+        // could offset or arc one of the pair.
+
         // Unit vector along the edge.
         let dx = x2 - x1;
         let dy = y2 - y1;

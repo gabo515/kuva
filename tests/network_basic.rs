@@ -178,7 +178,7 @@ fn network_disconnected() {
 
 #[test]
 fn network_pinned_positions() {
-    let mut net = NetworkPlot::new()
+    let net = NetworkPlot::new()
         .with_edge("A", "B", 1.0)
         .with_edge("B", "C", 1.0)
         .with_edge("C", "A", 1.0)

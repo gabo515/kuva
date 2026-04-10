@@ -100,6 +100,7 @@ pub use crate::plot::{
     NetworkNode,
     NetworkEdge,
     NetworkLayout,
+    NodeShape,
     // Style / config types used when building plots
     MarkerShape,
     LineStyle,

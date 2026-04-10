@@ -37,7 +37,7 @@ pub struct NetworkArgs {
     #[arg(long)]
     pub directed: bool,
 
-    /// Layout algorithm: "force" (default) or "circle".
+    /// Layout algorithm: "force" (default), "kk" (Kamada-Kawai), or "circle".
     #[arg(long, default_value = "force")]
     pub layout: String,
 
@@ -52,6 +52,10 @@ pub struct NetworkArgs {
     /// Show node labels.
     #[arg(long)]
     pub labels: bool,
+
+    /// Push overlapping labels apart.
+    #[arg(long)]
+    pub repel_labels: bool,
 
     /// Show a legend with this label.
     #[arg(long)]
@@ -75,11 +79,13 @@ pub fn run(args: NetworkArgs) -> Result<(), String> {
 
     if args.directed { plot = plot.with_directed(); }
     if args.labels { plot = plot.with_labels(); }
+    if args.repel_labels { plot = plot.with_repel_labels(); }
 
     match args.layout.as_str() {
         "force" => {}
+        "kk" | "kamada-kawai" => { plot = plot.with_layout(NetworkLayout::KamadaKawai); }
         "circle" => { plot = plot.with_layout(NetworkLayout::Circle); }
-        other => return Err(format!("unknown layout '{other}'; expected 'force' or 'circle'")),
+        other => return Err(format!("unknown layout '{other}'; expected 'force', 'kk', or 'circle'")),
     }
 
     if let Some(r) = args.node_radius { plot = plot.with_node_radius(r); }

@@ -71,7 +71,7 @@ use crate::plot::slope::SlopePlot;
 use crate::plot::venn::VennPlot;
 use crate::plot::parallel::{ParallelPlot, ParallelRow};
 use crate::plot::mosaic::MosaicPlot;
-use crate::plot::network::NetworkPlot;
+use crate::plot::network::{NetworkPlot, NodeShape};
 
 use crate::plot::Legend;
 use crate::plot::legend::{ColorBarInfo, LegendEntry, LegendGroup, LegendPosition, LegendShape};
@@ -10823,6 +10823,7 @@ fn add_mosaic(mp: &MosaicPlot, scene: &mut Scene, computed: &ComputedLayout) {
 
 fn add_network(net: &NetworkPlot, scene: &mut Scene, computed: &ComputedLayout) {
     use crate::render::palette::Palette;
+    use std::collections::HashSet;
 
     if net.nodes.is_empty() { return; }
 
@@ -10845,14 +10846,7 @@ fn add_network(net: &NetworkPlot, scene: &mut Scene, computed: &ComputedLayout) 
     let plot_h = computed.plot_height();
     let base_pad = r_max + 4.0;
 
-    // The inset shrinks the usable range to [inset, 1-inset] so nodes
-    // aren't flush against edges.  Right-side padding must account for
-    // the label extending beyond the rightmost node at position (1-inset).
     let inset = 0.1;
-    // After inset, the rightmost node sits at (1 - inset) × pw from ox.
-    // Its label extends r_max + 4 + max_label_px further right.  The
-    // remaining (inset × pw) pixels of headroom may not be enough, so
-    // add the shortfall as extra right padding.
     let label_overhang = r_max + 4.0 + max_label_px;
     let pad_right_extra = (label_overhang - inset * plot_w).max(0.0);
 
@@ -10865,8 +10859,6 @@ fn add_network(net: &NetworkPlot, scene: &mut Scene, computed: &ComputedLayout) 
     let py: Vec<f64> = positions.iter()
         .map(|(_, y)| oy + (inset + y * (1.0 - 2.0 * inset)) * ph).collect();
 
-    // Self-loop radius: fixed multiple of node radius, capped so it
-    // doesn't extend far outside the plot area for large nodes.
     let loop_r = (r_max * 10.0).min(pw.min(ph) * 0.15);
 
     let fallback = Palette::category10();
@@ -10911,6 +10903,21 @@ fn add_network(net: &NetworkPlot, scene: &mut Scene, computed: &ComputedLayout) 
     let cx_graph = px.iter().sum::<f64>() / px.len() as f64;
     let cy_graph = py.iter().sum::<f64>() / py.len() as f64;
 
+    // Detect antiparallel edge pairs so we can curve them.
+    let antiparallel: HashSet<(usize, usize)> = {
+        let mut set = HashSet::new();
+        let edge_set: HashSet<(usize, usize)> = net.edges.iter()
+            .filter(|e| e.source != e.target)
+            .map(|e| (e.source, e.target))
+            .collect();
+        for &(s, t) in &edge_set {
+            if edge_set.contains(&(t, s)) {
+                set.insert((s, t));
+            }
+        }
+        set
+    };
+
     // ── Draw edges ────────────────────────────────────────────────────
     for edge in &net.edges {
         let (si, ti) = (edge.source, edge.target);
@@ -10936,9 +10943,6 @@ fn add_network(net: &NetworkPlot, scene: &mut Scene, computed: &ComputedLayout) 
             let nx = px[si];
             let ny = py[si];
 
-            // Direction from graph centre to this node (outward).
-            // Fall back to "upward" when the node is at the centre (e.g.
-            // single-node graph) so the loop doesn't degenerate.
             let out_dx = nx - cx_graph;
             let out_dy = ny - cy_graph;
             let out_len = (out_dx * out_dx + out_dy * out_dy).sqrt();
@@ -10948,17 +10952,14 @@ fn add_network(net: &NetworkPlot, scene: &mut Scene, computed: &ComputedLayout) 
                 (out_dx / out_len, out_dy / out_len)
             };
 
-            // Perpendicular for the two attachment points on the node circle.
             let perp_x = -out_uy;
             let perp_y = out_ux;
 
-            // Start/end points on the node boundary, offset to each side.
             let sx = nx + out_ux * r + perp_x * r * 0.5;
             let sy = ny + out_uy * r + perp_y * r * 0.5;
             let ex = nx + out_ux * r - perp_x * r * 0.5;
             let ey = ny + out_uy * r - perp_y * r * 0.5;
 
-            // Control points pushed outward.
             let cp1x = nx + out_ux * (r + loop_r * 1.5) + perp_x * loop_r;
             let cp1y = ny + out_uy * (r + loop_r * 1.5) + perp_y * loop_r;
             let cp2x = nx + out_ux * (r + loop_r * 1.5) - perp_x * loop_r;
@@ -10996,12 +10997,22 @@ fn add_network(net: &NetworkPlot, scene: &mut Scene, computed: &ComputedLayout) 
                 );
                 scene.add(Primitive::Path(Box::new(PathData {
                     d,
-                    fill: Some(edge_color.into()),
+                    fill: Some(edge_color.clone().into()),
                     stroke: "none".into(),
                     stroke_width: 0.0,
                     opacity: None,
                     stroke_dasharray: None,
                 })));
+            }
+            // Edge label for self-loop
+            if let Some(ref lbl) = edge.label {
+                let lx = (cp1x + cp2x) / 2.0;
+                let ly = (cp1y + cp2y) / 2.0;
+                scene.add(Primitive::Text {
+                    x: round2(lx), y: round2(ly),
+                    content: lbl.clone(), size: font_size.saturating_sub(2).max(8),
+                    anchor: TextAnchor::Middle, rotate: None, bold: false, color: None,
+                });
             }
             scene.add(Primitive::GroupEnd);
             continue;
@@ -11010,11 +11021,6 @@ fn add_network(net: &NetworkPlot, scene: &mut Scene, computed: &ComputedLayout) 
         let (x1, y1) = (px[si], py[si]);
         let (x2, y2) = (px[ti], py[ti]);
 
-        // TODO: antiparallel edges (A→B and B→A) currently overlap as
-        // straight lines with opposing arrowheads.  A future improvement
-        // could offset or arc one of the pair.
-
-        // Unit vector along the edge.
         let dx = x2 - x1;
         let dy = y2 - y1;
         let dist = (dx * dx + dy * dy).sqrt().max(1e-6);
@@ -11023,61 +11029,120 @@ fn add_network(net: &NetworkPlot, scene: &mut Scene, computed: &ComputedLayout) 
         let r_src = net.nodes[si].size.unwrap_or(net.node_radius);
         let r_tgt = net.nodes[ti].size.unwrap_or(net.node_radius);
 
-        // Line starts at source boundary.
-        let lx1 = x1 + ux * r_src;
-        let ly1 = y1 + uy * r_src;
-        // Line ends at target boundary.
-        let lx2 = x2 - ux * r_tgt;
-        let ly2 = y2 - uy * r_tgt;
+        let is_antiparallel = antiparallel.contains(&(si, ti));
+        let curve_offset = if is_antiparallel { dist * 0.15 } else { 0.0 };
 
-        if net.directed {
-            // Shorten the line so it ends at the arrowhead base, not the tip.
-            let arr_size = stroke_w * 2.5 + 3.0;
-            let lx2_short = lx2 - ux * arr_size;
-            let ly2_short = ly2 - uy * arr_size;
-
-            scene.add(Primitive::Line {
-                x1: round2(lx1),
-                y1: round2(ly1),
-                x2: round2(lx2_short),
-                y2: round2(ly2_short),
-                stroke: edge_color.clone().into(),
-                stroke_width: stroke_w,
-                stroke_dasharray: None,
-            });
-
-            // Arrowhead: tip at target boundary, base recessed.
-            let tip_x = lx2;
-            let tip_y = ly2;
-            let base_x = lx2_short;
-            let base_y = ly2_short;
+        if curve_offset > 0.0 {
+            // Curved edge via quadratic bezier to separate antiparallel pair.
             let perp_x = -uy;
             let perp_y = ux;
-            let half_w = arr_size * 0.4;
-            let d = format!(
-                "M {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} Z",
-                tip_x, tip_y,
-                base_x + perp_x * half_w, base_y + perp_y * half_w,
-                base_x - perp_x * half_w, base_y - perp_y * half_w,
-            );
-            scene.add(Primitive::Path(Box::new(PathData {
-                d,
-                fill: Some(edge_color.into()),
-                stroke: "none".into(),
-                stroke_width: 0.0,
-                opacity: None,
-                stroke_dasharray: None,
-            })));
+            let mx = (x1 + x2) / 2.0 + perp_x * curve_offset;
+            let my = (y1 + y2) / 2.0 + perp_y * curve_offset;
+
+            // Shorten start/end to node boundaries (approximate for curve)
+            let lx1 = x1 + ux * r_src;
+            let ly1 = y1 + uy * r_src;
+            let lx2 = x2 - ux * r_tgt;
+            let ly2 = y2 - uy * r_tgt;
+
+            if net.directed {
+                let arr_size = stroke_w * 2.5 + 3.0;
+                // Direction at endpoint: tangent of quadratic bezier at t=1 is (end - control)
+                let tdx = lx2 - mx;
+                let tdy = ly2 - my;
+                let tlen = (tdx * tdx + tdy * tdy).sqrt().max(1e-6);
+                let tux = tdx / tlen;
+                let tuy = tdy / tlen;
+                let lx2_short = lx2 - tux * arr_size;
+                let ly2_short = ly2 - tuy * arr_size;
+
+                let d = format!("M {:.2} {:.2} Q {:.2} {:.2} {:.2} {:.2}",
+                    lx1, ly1, mx, my, lx2_short, ly2_short);
+                scene.add(Primitive::Path(Box::new(PathData {
+                    d, fill: None, stroke: edge_color.clone().into(),
+                    stroke_width: stroke_w, opacity: None, stroke_dasharray: None,
+                })));
+
+                // Arrowhead along curve tangent
+                let ap_x = -tuy;
+                let ap_y = tux;
+                let half_w = arr_size * 0.4;
+                let d = format!("M {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} Z",
+                    lx2, ly2,
+                    lx2_short + ap_x * half_w, ly2_short + ap_y * half_w,
+                    lx2_short - ap_x * half_w, ly2_short - ap_y * half_w);
+                scene.add(Primitive::Path(Box::new(PathData {
+                    d, fill: Some(edge_color.clone().into()), stroke: "none".into(),
+                    stroke_width: 0.0, opacity: None, stroke_dasharray: None,
+                })));
+            } else {
+                let d = format!("M {:.2} {:.2} Q {:.2} {:.2} {:.2} {:.2}",
+                    lx1, ly1, mx, my, lx2, ly2);
+                scene.add(Primitive::Path(Box::new(PathData {
+                    d, fill: None, stroke: edge_color.clone().into(),
+                    stroke_width: stroke_w, opacity: None, stroke_dasharray: None,
+                })));
+            }
+
+            // Edge label at curve midpoint
+            if let Some(ref lbl) = edge.label {
+                let elx = (lx1 + 2.0 * mx + lx2) / 4.0;
+                let ely = (ly1 + 2.0 * my + ly2) / 4.0 - font_size as f64 * 0.4;
+                scene.add(Primitive::Text {
+                    x: round2(elx), y: round2(ely),
+                    content: lbl.clone(), size: font_size.saturating_sub(2).max(8),
+                    anchor: TextAnchor::Middle, rotate: None, bold: false, color: None,
+                });
+            }
         } else {
-            scene.add(Primitive::Line {
-                x1: round2(lx1),
-                y1: round2(ly1),
-                x2: round2(lx2),
-                y2: round2(ly2),
-                stroke: edge_color.into(),
-                stroke_width: stroke_w,
-                stroke_dasharray: None,
-            });
+            // Straight edge
+            let lx1 = x1 + ux * r_src;
+            let ly1 = y1 + uy * r_src;
+            let lx2 = x2 - ux * r_tgt;
+            let ly2 = y2 - uy * r_tgt;
+
+            if net.directed {
+                let arr_size = stroke_w * 2.5 + 3.0;
+                let lx2_short = lx2 - ux * arr_size;
+                let ly2_short = ly2 - uy * arr_size;
+
+                scene.add(Primitive::Line {
+                    x1: round2(lx1), y1: round2(ly1),
+                    x2: round2(lx2_short), y2: round2(ly2_short),
+                    stroke: edge_color.clone().into(), stroke_width: stroke_w,
+                    stroke_dasharray: None,
+                });
+
+                let perp_x = -uy;
+                let perp_y = ux;
+                let half_w = arr_size * 0.4;
+                let d = format!("M {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} Z",
+                    lx2, ly2,
+                    lx2_short + perp_x * half_w, ly2_short + perp_y * half_w,
+                    lx2_short - perp_x * half_w, ly2_short - perp_y * half_w);
+                scene.add(Primitive::Path(Box::new(PathData {
+                    d, fill: Some(edge_color.clone().into()), stroke: "none".into(),
+                    stroke_width: 0.0, opacity: None, stroke_dasharray: None,
+                })));
+            } else {
+                scene.add(Primitive::Line {
+                    x1: round2(lx1), y1: round2(ly1),
+                    x2: round2(lx2), y2: round2(ly2),
+                    stroke: edge_color.clone().into(), stroke_width: stroke_w,
+                    stroke_dasharray: None,
+                });
+            }
+
+            // Edge label at midpoint
+            if let Some(ref lbl) = edge.label {
+                let elx = (lx1 + lx2) / 2.0;
+                let ely = (ly1 + ly2) / 2.0 - font_size as f64 * 0.4;
+                scene.add(Primitive::Text {
+                    x: round2(elx), y: round2(ely),
+                    content: lbl.clone(), size: font_size.saturating_sub(2).max(8),
+                    anchor: TextAnchor::Middle, rotate: None, bold: false, color: None,
+                });
+            }
         }
         scene.add(Primitive::GroupEnd);
     }
@@ -11086,30 +11151,101 @@ fn add_network(net: &NetworkPlot, scene: &mut Scene, computed: &ComputedLayout) 
     for (i, node) in net.nodes.iter().enumerate() {
         let r = node.size.unwrap_or(net.node_radius);
         let color = get_color(i);
-        scene.add(Primitive::Circle {
-            cx: round2(px[i]),
-            cy: round2(py[i]),
-            r,
-            fill: color.into(),
-            fill_opacity: None,
-            stroke: Some("#ffffff".into()),
-            stroke_width: Some(1.5),
-        });
+        match node.shape {
+            NodeShape::Circle => {
+                scene.add(Primitive::Circle {
+                    cx: round2(px[i]), cy: round2(py[i]), r,
+                    fill: color.into(), fill_opacity: None,
+                    stroke: Some("#ffffff".into()), stroke_width: Some(1.5),
+                });
+            }
+            NodeShape::Square => {
+                scene.add(Primitive::Rect {
+                    x: round2(px[i] - r), y: round2(py[i] - r),
+                    width: r * 2.0, height: r * 2.0,
+                    fill: color.into(), stroke: Some("#ffffff".into()),
+                    stroke_width: Some(1.5), opacity: None,
+                });
+            }
+            NodeShape::Diamond => {
+                let d = format!(
+                    "M {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} Z",
+                    px[i], py[i] - r * 1.2,
+                    px[i] + r * 1.2, py[i],
+                    px[i], py[i] + r * 1.2,
+                    px[i] - r * 1.2, py[i],
+                );
+                scene.add(Primitive::Path(Box::new(PathData {
+                    d, fill: Some(color.into()), stroke: "#ffffff".into(),
+                    stroke_width: 1.5, opacity: None, stroke_dasharray: None,
+                })));
+            }
+            NodeShape::Triangle => {
+                let h = r * 1.4;
+                let d = format!(
+                    "M {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} Z",
+                    px[i], py[i] - h,
+                    px[i] + h * 0.87, py[i] + h * 0.5,
+                    px[i] - h * 0.87, py[i] + h * 0.5,
+                );
+                scene.add(Primitive::Path(Box::new(PathData {
+                    d, fill: Some(color.into()), stroke: "#ffffff".into(),
+                    stroke_width: 1.5, opacity: None, stroke_dasharray: None,
+                })));
+            }
+        }
     }
 
-    // ── Draw labels ───────────────────────────────────────────────────
+    // ── Draw labels (with optional repulsion) ─────────────────────────
     if net.show_labels {
-        for (i, node) in net.nodes.iter().enumerate() {
-            let r = node.size.unwrap_or(net.node_radius);
+        // Compute initial label positions
+        let mut labels: Vec<(f64, f64, String, f64)> = net.nodes.iter().enumerate()
+            .map(|(i, node)| {
+                let r = node.size.unwrap_or(net.node_radius);
+                let lx = px[i] + r + 4.0;
+                let ly = py[i] + font_size as f64 * 0.35;
+                let lw = node.label.len() as f64 * 0.6 * font_size as f64;
+                (lx, ly, node.label.clone(), lw)
+            })
+            .collect();
+
+        if net.repel_labels && labels.len() > 1 {
+            let lh = font_size as f64;
+            // Simple iterative repulsion to push overlapping labels apart
+            for _ in 0..50 {
+                let mut moved = false;
+                for i in 0..labels.len() {
+                    for j in (i + 1)..labels.len() {
+                        let dx = labels[j].0 - labels[i].0;
+                        let dy = labels[j].1 - labels[i].1;
+                        // Check bounding-box overlap
+                        let overlap_x = (labels[i].3 + labels[j].3) / 2.0 - dx.abs();
+                        let overlap_y = lh - dy.abs();
+                        if overlap_x > 0.0 && overlap_y > 0.0 {
+                            // Push apart along the axis with less overlap
+                            let push = 0.5;
+                            if overlap_x < overlap_y {
+                                let sign = if dx >= 0.0 { 1.0 } else { -1.0 };
+                                labels[i].0 -= sign * overlap_x * push;
+                                labels[j].0 += sign * overlap_x * push;
+                            } else {
+                                let sign = if dy >= 0.0 { 1.0 } else { -1.0 };
+                                labels[i].1 -= sign * overlap_y * push;
+                                labels[j].1 += sign * overlap_y * push;
+                            }
+                            moved = true;
+                        }
+                    }
+                }
+                if !moved { break; }
+            }
+        }
+
+        for (lx, ly, text, _lw) in &labels {
             scene.add(Primitive::Text {
-                x: round2(px[i] + r + 4.0),
-                y: round2(py[i] + font_size as f64 * 0.35),
-                content: node.label.clone(),
-                size: font_size,
-                anchor: TextAnchor::Start,
-                rotate: None,
-                bold: false,
-                color: None,
+                x: round2(*lx), y: round2(*ly),
+                content: text.clone(), size: font_size,
+                anchor: TextAnchor::Start, rotate: None, bold: false, color: None,
             });
         }
     }

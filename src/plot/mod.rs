@@ -86,6 +86,6 @@ pub use slope::{SlopePlot, SlopePoint, SlopeValueFormat};
 pub use venn::{VennPlot, VennSet, VennOverlap};
 pub use parallel::{ParallelPlot, ParallelRow};
 pub use mosaic::{MosaicPlot, MosaicCell};
-pub use network::{NetworkPlot, NetworkNode, NetworkEdge, NetworkLayout};
+pub use network::{NetworkPlot, NetworkNode, NetworkEdge, NetworkLayout, NodeShape};
 
 pub use legend::{Legend, LegendEntry, LegendShape, LegendPosition, LegendGroup};

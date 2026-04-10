@@ -1,4 +1,4 @@
-use kuva::plot::network::{NetworkPlot, NetworkLayout};
+use kuva::plot::network::{NetworkPlot, NetworkLayout, NodeShape};
 use kuva::render::{plots::Plot, layout::Layout, render::render_multiple};
 use kuva::backend::svg::SvgBackend;
 
@@ -257,4 +257,98 @@ fn network_matrix_directed_order_independent() {
     let arrow_count = svg.matches("<path").count();
     assert!(arrow_count >= 3, "directed matrix should produce at least 3 arrowhead paths, got {arrow_count}");
     std::fs::write("test_outputs/network_matrix_directed.svg", svg).unwrap();
+}
+
+#[test]
+fn network_kamada_kawai() {
+    let net = NetworkPlot::new()
+        .with_edge("A", "B", 1.0)
+        .with_edge("B", "C", 1.0)
+        .with_edge("C", "D", 1.0)
+        .with_edge("D", "E", 1.0)
+        .with_edge("E", "A", 1.0)
+        .with_edge("A", "C", 0.5)
+        .with_layout(NetworkLayout::KamadaKawai)
+        .with_labels();
+    let plots = vec![Plot::Network(net)];
+    let layout = Layout::auto_from_plots(&plots)
+        .with_title("Kamada-Kawai Layout");
+    let svg = SvgBackend.render_scene(&render_multiple(plots, layout));
+    assert!(svg.contains("<circle"), "KK layout should produce nodes");
+    std::fs::write("test_outputs/network_kamada_kawai.svg", svg).unwrap();
+}
+
+#[test]
+fn network_edge_labels() {
+    let net = NetworkPlot::new()
+        .with_edge_label("A", "B", 0.95, "0.95")
+        .with_edge_label("B", "C", 0.72, "0.72")
+        .with_edge_label("C", "A", 0.45, "0.45")
+        .with_labels();
+    let plots = vec![Plot::Network(net)];
+    let layout = Layout::auto_from_plots(&plots)
+        .with_title("Edge Labels");
+    let svg = SvgBackend.render_scene(&render_multiple(plots, layout));
+    assert!(svg.contains("0.95"), "edge label should appear in SVG");
+    assert!(svg.contains("0.72"), "edge label should appear in SVG");
+    std::fs::write("test_outputs/network_edge_labels.svg", svg).unwrap();
+}
+
+#[test]
+fn network_node_shapes() {
+    let net = NetworkPlot::new()
+        .with_edge("Circle", "Square", 1.0)
+        .with_edge("Square", "Diamond", 1.0)
+        .with_edge("Diamond", "Triangle", 1.0)
+        .with_edge("Triangle", "Circle", 1.0)
+        .with_node_shape("Circle", NodeShape::Circle)
+        .with_node_shape("Square", NodeShape::Square)
+        .with_node_shape("Diamond", NodeShape::Diamond)
+        .with_node_shape("Triangle", NodeShape::Triangle)
+        .with_layout(NetworkLayout::Circle)
+        .with_labels();
+    let plots = vec![Plot::Network(net)];
+    let layout = Layout::auto_from_plots(&plots)
+        .with_title("Node Shapes");
+    let svg = SvgBackend.render_scene(&render_multiple(plots, layout));
+    assert!(svg.contains("<circle"), "should have circle nodes");
+    assert!(svg.contains("<rect"), "should have square nodes");
+    // Diamond and triangle are rendered as <path>
+    std::fs::write("test_outputs/network_node_shapes.svg", svg).unwrap();
+}
+
+#[test]
+fn network_antiparallel_curved() {
+    let net = NetworkPlot::new()
+        .with_edge("A", "B", 2.0)
+        .with_edge("B", "A", 1.0)
+        .with_edge("B", "C", 1.5)
+        .with_directed()
+        .with_labels();
+    let plots = vec![Plot::Network(net)];
+    let layout = Layout::auto_from_plots(&plots)
+        .with_title("Antiparallel Curved Edges");
+    let svg = SvgBackend.render_scene(&render_multiple(plots, layout));
+    // Antiparallel A↔B should produce quadratic bezier paths (Q command)
+    assert!(svg.contains(" Q "), "antiparallel edges should use quadratic bezier curves");
+    std::fs::write("test_outputs/network_antiparallel.svg", svg).unwrap();
+}
+
+#[test]
+fn network_repel_labels() {
+    // Many nodes close together to trigger label overlap
+    let net = NetworkPlot::new()
+        .with_edge("Alpha", "Beta", 1.0)
+        .with_edge("Beta", "Gamma", 1.0)
+        .with_edge("Gamma", "Delta", 1.0)
+        .with_edge("Delta", "Epsilon", 1.0)
+        .with_edge("Epsilon", "Alpha", 1.0)
+        .with_labels()
+        .with_repel_labels();
+    let plots = vec![Plot::Network(net)];
+    let layout = Layout::auto_from_plots(&plots)
+        .with_title("Label Repulsion");
+    let svg = SvgBackend.render_scene(&render_multiple(plots, layout));
+    assert!(svg.contains("Alpha"), "labels should still be present");
+    std::fs::write("test_outputs/network_repel_labels.svg", svg).unwrap();
 }

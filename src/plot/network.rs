@@ -1,5 +1,5 @@
 /// A network / graph diagram: nodes connected by edges, laid out with
-/// force-directed (Fruchterman–Reingold) or circular placement.
+/// force-directed (Fruchterman–Reingold), Kamada–Kawai, or circular placement.
 ///
 /// Supports both edge-list and adjacency-matrix input. Edges can be directed
 /// (arrowheads) or undirected (plain lines). Self-loops are rendered as small
@@ -34,13 +34,27 @@
 /// std::fs::write("network.svg", svg).unwrap();
 /// ```
 
+use std::collections::HashMap;
+
 /// Layout algorithm for node placement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NetworkLayout {
     /// Fruchterman–Reingold force-directed layout (default).
     ForceDirected,
+    /// Kamada–Kawai stress-based layout.  Produces cleaner results for
+    /// small–medium graphs where edge lengths should reflect graph distance.
+    KamadaKawai,
     /// Nodes evenly spaced on a circle.
     Circle,
+}
+
+/// Node marker shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeShape {
+    Circle,
+    Square,
+    Triangle,
+    Diamond,
 }
 
 /// A node in the network graph.
@@ -50,6 +64,7 @@ pub struct NetworkNode {
     pub color: Option<String>,
     pub size: Option<f64>,
     pub group: Option<String>,
+    pub shape: NodeShape,
     /// Fixed position in normalised \[0, 1\] space. When `Some`, the layout
     /// algorithm will not move this node.
     pub position: Option<(f64, f64)>,
@@ -64,6 +79,7 @@ pub struct NetworkEdge {
     pub target: usize,
     pub weight: f64,
     pub color: Option<String>,
+    pub label: Option<String>,
 }
 
 /// A network / graph diagram.
@@ -85,10 +101,12 @@ pub struct NetworkPlot {
     pub legend_label: Option<String>,
     /// Override label font size (pixels).
     pub label_size: Option<u32>,
+    /// Apply label repulsion to avoid overlap (default `false`).
+    pub repel_labels: bool,
     /// Deferred adjacency matrix (expanded into edges by `resolve_matrix`).
     pending_matrix: Option<(Vec<Vec<f64>>, Vec<usize>)>,
     /// O(1) label→index lookup, kept in sync with `nodes`.
-    node_map: std::collections::HashMap<String, usize>,
+    node_map: HashMap<String, usize>,
 }
 
 impl Default for NetworkPlot {
@@ -107,8 +125,9 @@ impl NetworkPlot {
             show_labels: false,
             legend_label: None,
             label_size: None,
+            repel_labels: false,
             pending_matrix: None,
-            node_map: std::collections::HashMap::new(),
+            node_map: HashMap::new(),
         }
     }
 
@@ -123,6 +142,7 @@ impl NetworkPlot {
             color: None,
             size: None,
             group: None,
+            shape: NodeShape::Circle,
             position: None,
         });
         self.node_map.insert(label.to_string(), idx);
@@ -135,7 +155,7 @@ impl NetworkPlot {
         let tgt = target.into();
         let si = self.node_index(&src);
         let ti = self.node_index(&tgt);
-        self.edges.push(NetworkEdge { source: si, target: ti, weight, color: None });
+        self.edges.push(NetworkEdge { source: si, target: ti, weight, color: None, label: None });
         self
     }
 
@@ -147,7 +167,19 @@ impl NetworkPlot {
         let tgt = target.into();
         let si = self.node_index(&src);
         let ti = self.node_index(&tgt);
-        self.edges.push(NetworkEdge { source: si, target: ti, weight, color: Some(color.into()) });
+        self.edges.push(NetworkEdge { source: si, target: ti, weight, color: Some(color.into()), label: None });
+        self
+    }
+
+    /// Add an edge with a text label rendered at its midpoint.
+    pub fn with_edge_label<S: Into<String>, L: Into<String>>(
+        mut self, source: S, target: S, weight: f64, label: L,
+    ) -> Self {
+        let src = source.into();
+        let tgt = target.into();
+        let si = self.node_index(&src);
+        let ti = self.node_index(&tgt);
+        self.edges.push(NetworkEdge { source: si, target: ti, weight, color: None, label: Some(label.into()) });
         self
     }
 
@@ -196,7 +228,7 @@ impl NetworkPlot {
                     let w = matrix[i][j];
                     if w.abs() < f64::EPSILON { continue; }
                     self.edges.push(NetworkEdge {
-                        source: indices[i], target: indices[j], weight: w, color: None,
+                        source: indices[i], target: indices[j], weight: w, color: None, label: None,
                     });
                 }
                 // Self-loops from diagonal (only when directed).
@@ -204,7 +236,7 @@ impl NetworkPlot {
                     let w = matrix[i][i];
                     if w.abs() >= f64::EPSILON {
                         self.edges.push(NetworkEdge {
-                            source: indices[i], target: indices[i], weight: w, color: None,
+                            source: indices[i], target: indices[i], weight: w, color: None, label: None,
                         });
                     }
                 }
@@ -240,6 +272,14 @@ impl NetworkPlot {
         let label = label.into();
         let idx = self.node_index(&label);
         self.nodes[idx].group = Some(group.into());
+        self
+    }
+
+    /// Set the marker shape for a node, creating it if absent.
+    pub fn with_node_shape<S: Into<String>>(mut self, label: S, shape: NodeShape) -> Self {
+        let label = label.into();
+        let idx = self.node_index(&label);
+        self.nodes[idx].shape = shape;
         self
     }
 
@@ -281,6 +321,12 @@ impl NetworkPlot {
         self
     }
 
+    /// Enable label repulsion so overlapping labels push apart.
+    pub fn with_repel_labels(mut self) -> Self {
+        self.repel_labels = true;
+        self
+    }
+
     /// Show a legend; one entry per unique group.  If no groups have been
     /// assigned the legend falls back to one entry per node, which can be
     /// large — prefer using [`with_node_group`] to keep the legend compact.
@@ -305,6 +351,7 @@ impl NetworkPlot {
     pub fn compute_positions(&self) -> Vec<(f64, f64)> {
         match self.layout {
             NetworkLayout::ForceDirected => self.fruchterman_reingold(),
+            NetworkLayout::KamadaKawai => self.kamada_kawai(),
             NetworkLayout::Circle => self.circle_layout(),
         }
     }
@@ -322,6 +369,106 @@ impl NetworkPlot {
         }).collect()
     }
 
+    // ── Shared helpers ────────────────────────────────────────────────
+
+    /// Build an adjacency list from the current edges (ignoring self-loops).
+    fn adjacency(&self) -> Vec<Vec<(usize, f64)>> {
+        let n = self.nodes.len();
+        let mut adj = vec![vec![]; n];
+        for e in &self.edges {
+            if e.source == e.target { continue; }
+            adj[e.source].push((e.target, e.weight));
+            if !self.directed {
+                adj[e.target].push((e.source, e.weight));
+            }
+        }
+        adj
+    }
+
+    /// All-pairs shortest-path distances (BFS-like using Dijkstra with
+    /// `weight = 1/edge_weight` so stronger edges mean shorter distance).
+    /// Returns `dist[i][j]`; disconnected pairs get `f64::INFINITY`.
+    fn all_pairs_distances(&self) -> Vec<Vec<f64>> {
+        let n = self.nodes.len();
+        let adj = self.adjacency();
+        let mut dist = vec![vec![f64::INFINITY; n]; n];
+        for s in 0..n {
+            dist[s][s] = 0.0;
+            // Dijkstra from s
+            let mut visited = vec![false; n];
+            let mut d = vec![f64::INFINITY; n];
+            d[s] = 0.0;
+            for _ in 0..n {
+                // Find unvisited node with smallest distance
+                let mut u = n;
+                let mut best = f64::INFINITY;
+                for v in 0..n {
+                    if !visited[v] && d[v] < best {
+                        best = d[v];
+                        u = v;
+                    }
+                }
+                if u == n { break; }
+                visited[u] = true;
+                for &(v, w) in &adj[u] {
+                    let edge_dist = 1.0 / w.max(1e-9);
+                    if d[u] + edge_dist < d[v] {
+                        d[v] = d[u] + edge_dist;
+                    }
+                }
+            }
+            dist[s] = d;
+        }
+        dist
+    }
+
+    /// Deterministic initial grid placement with perturbation.
+    fn initial_positions(&self) -> Vec<(f64, f64)> {
+        let n = self.nodes.len();
+        let cols = (n as f64).sqrt().ceil() as usize;
+        let mut pos: Vec<(f64, f64)> = (0..n).map(|i| {
+            let row = i / cols;
+            let col = i % cols;
+            let x = (col as f64 + 0.5) / cols as f64;
+            let y = (row as f64 + 0.5) / cols as f64;
+            let hash = ((i as u64).wrapping_mul(2654435761) & 0xFFFF) as f64 / 65536.0;
+            (x + 0.01 * hash, y + 0.01 * (1.0 - hash))
+        }).collect();
+        // Honour user-supplied positions
+        for (i, node) in self.nodes.iter().enumerate() {
+            if let Some((px, py)) = node.position {
+                pos[i] = (px, py);
+            }
+        }
+        pos
+    }
+
+    /// Normalise unpinned node positions to \[0, 1\] with uniform scaling.
+    fn normalise_positions(&self, pos: &mut Vec<(f64, f64)>) {
+        let n = pos.len();
+        let free: Vec<usize> = (0..n)
+            .filter(|&i| self.nodes[i].position.is_none())
+            .collect();
+        if free.is_empty() { return; }
+        let (mut xmin, mut xmax) = (f64::INFINITY, f64::NEG_INFINITY);
+        let (mut ymin, mut ymax) = (f64::INFINITY, f64::NEG_INFINITY);
+        for &i in &free {
+            xmin = xmin.min(pos[i].0); xmax = xmax.max(pos[i].0);
+            ymin = ymin.min(pos[i].1); ymax = ymax.max(pos[i].1);
+        }
+        let xrange = xmax - xmin;
+        let yrange = ymax - ymin;
+        let scale = xrange.max(yrange).max(1e-6);
+        let x_offset = (1.0 - xrange / scale) / 2.0;
+        let y_offset = (1.0 - yrange / scale) / 2.0;
+        for &i in &free {
+            pos[i].0 = (pos[i].0 - xmin) / scale + x_offset;
+            pos[i].1 = (pos[i].1 - ymin) / scale + y_offset;
+        }
+    }
+
+    // ── Fruchterman–Reingold (with Barnes–Hut for n > 256) ────────────
+
     fn fruchterman_reingold(&self) -> Vec<(f64, f64)> {
         let n = self.nodes.len();
         if n == 0 { return vec![]; }
@@ -333,48 +480,43 @@ impl NetworkPlot {
         let mut temp = 0.1 * (n as f64).sqrt();
         let cooling = temp / iterations as f64;
 
-        // Deterministic initial placement: grid with slight offset
-        let cols = (n as f64).sqrt().ceil() as usize;
-        let mut pos: Vec<(f64, f64)> = (0..n).map(|i| {
-            let row = i / cols;
-            let col = i % cols;
-            let x = (col as f64 + 0.5) / cols as f64;
-            let y = (row as f64 + 0.5) / cols as f64;
-            // small perturbation to break symmetry
-            let hash = ((i as u64).wrapping_mul(2654435761) & 0xFFFF) as f64 / 65536.0;
-            (x + 0.01 * hash, y + 0.01 * (1.0 - hash))
-        }).collect();
-
-        // Honour user-supplied positions
-        for (i, node) in self.nodes.iter().enumerate() {
-            if let Some((px, py)) = node.position {
-                pos[i] = (px, py);
-            }
-        }
+        let mut pos = self.initial_positions();
 
         let fa = |d: f64| -> f64 { d * d / k };            // attractive
-        let fr = |d: f64| -> f64 { k * k / (d + 1e-6) };   // repulsive
+        let fr_force = |d: f64| -> f64 { k * k / (d + 1e-6) };   // repulsive
+
+        let use_bh = n > 256;
 
         for _ in 0..iterations {
-            // Repulsive forces
             let mut disp = vec![(0.0_f64, 0.0_f64); n];
-            for i in 0..n {
-                for j in (i + 1)..n {
-                    let dx = pos[i].0 - pos[j].0;
-                    let dy = pos[i].1 - pos[j].1;
-                    let dist = (dx * dx + dy * dy).sqrt().max(1e-6);
-                    let force = fr(dist);
-                    let fx = dx / dist * force;
-                    let fy = dy / dist * force;
+
+            if use_bh {
+                // Barnes–Hut: build quadtree, approximate distant repulsion
+                let tree = QuadTree::build(&pos);
+                for i in 0..n {
+                    let (fx, fy) = tree.repulsive_force(pos[i].0, pos[i].1, k, 0.8);
                     disp[i].0 += fx;
                     disp[i].1 += fy;
-                    disp[j].0 -= fx;
-                    disp[j].1 -= fy;
+                }
+            } else {
+                // Exact O(n²) repulsion
+                for i in 0..n {
+                    for j in (i + 1)..n {
+                        let dx = pos[i].0 - pos[j].0;
+                        let dy = pos[i].1 - pos[j].1;
+                        let dist = (dx * dx + dy * dy).sqrt().max(1e-6);
+                        let force = fr_force(dist);
+                        let fx = dx / dist * force;
+                        let fy = dy / dist * force;
+                        disp[i].0 += fx;
+                        disp[i].1 += fy;
+                        disp[j].0 -= fx;
+                        disp[j].1 -= fy;
+                    }
                 }
             }
 
-            // Gentle gravity toward centre — prevents disconnected components
-            // from flying apart and compressing each other's internal layout.
+            // Gentle gravity toward centre
             let gravity = 0.5;
             let cx = pos.iter().map(|p| p.0).sum::<f64>() / n as f64;
             let cy = pos.iter().map(|p| p.1).sum::<f64>() / n as f64;
@@ -386,7 +528,7 @@ impl NetworkPlot {
             // Attractive forces along edges
             for edge in &self.edges {
                 let (si, ti) = (edge.source, edge.target);
-                if si == ti { continue; } // skip self-loops
+                if si == ti { continue; }
                 let dx = pos[si].0 - pos[ti].0;
                 let dy = pos[si].1 - pos[ti].1;
                 let dist = (dx * dx + dy * dy).sqrt().max(1e-6);
@@ -401,7 +543,7 @@ impl NetworkPlot {
 
             // Apply displacement capped by temperature
             for i in 0..n {
-                if self.nodes[i].position.is_some() { continue; } // pinned
+                if self.nodes[i].position.is_some() { continue; }
                 let dx = disp[i].0;
                 let dy = disp[i].1;
                 let mag = (dx * dx + dy * dy).sqrt().max(1e-6);
@@ -414,31 +556,199 @@ impl NetworkPlot {
             if temp < 0.0 { temp = 0.0; }
         }
 
-        // Normalise unpinned nodes to [0, 1].  Use a uniform scale
-        // (max of xrange, yrange) so aspect ratio is preserved and gravity
-        // controls the tightness of disconnected components.
-        let free: Vec<usize> = (0..n)
-            .filter(|&i| self.nodes[i].position.is_none())
-            .collect();
-        if !free.is_empty() {
-            let (mut xmin, mut xmax) = (f64::INFINITY, f64::NEG_INFINITY);
-            let (mut ymin, mut ymax) = (f64::INFINITY, f64::NEG_INFINITY);
-            for &i in &free {
-                xmin = xmin.min(pos[i].0); xmax = xmax.max(pos[i].0);
-                ymin = ymin.min(pos[i].1); ymax = ymax.max(pos[i].1);
-            }
-            let xrange = xmax - xmin;
-            let yrange = ymax - ymin;
-            let scale = xrange.max(yrange).max(1e-6);
-            // Centre in [0, 1] after uniform scaling.
-            let x_offset = (1.0 - xrange / scale) / 2.0;
-            let y_offset = (1.0 - yrange / scale) / 2.0;
-            for &i in &free {
-                pos[i].0 = (pos[i].0 - xmin) / scale + x_offset;
-                pos[i].1 = (pos[i].1 - ymin) / scale + y_offset;
+        self.normalise_positions(&mut pos);
+        pos
+    }
+
+    // ── Kamada–Kawai ──────────────────────────────────────────────────
+
+    fn kamada_kawai(&self) -> Vec<(f64, f64)> {
+        let n = self.nodes.len();
+        if n == 0 { return vec![]; }
+        if n == 1 { return vec![(0.5, 0.5)]; }
+
+        let dist = self.all_pairs_distances();
+
+        // Ideal distances: d_ij * L / max_dist, where L ≈ 1.0
+        let max_dist = dist.iter().flatten()
+            .filter(|&&d| d.is_finite())
+            .cloned()
+            .fold(0.0_f64, f64::max)
+            .max(1.0);
+        let l_factor = 1.0 / max_dist;
+
+        // Spring strengths: k_ij = 1 / d_ij^2
+        // Start from circle layout for stability
+        let mut pos = self.circle_layout();
+        for (i, node) in self.nodes.iter().enumerate() {
+            if let Some((px, py)) = node.position {
+                pos[i] = (px, py);
             }
         }
 
+        let iterations = 200;
+        let epsilon = 1e-4;
+
+        for _ in 0..iterations {
+            // Find node with largest partial derivative (most stress)
+            let mut max_delta = 0.0_f64;
+            let mut m = 0;
+            for i in 0..n {
+                if self.nodes[i].position.is_some() { continue; }
+                let (mut dx, mut dy) = (0.0, 0.0);
+                for j in 0..n {
+                    if i == j || !dist[i][j].is_finite() { continue; }
+                    let xd = pos[i].0 - pos[j].0;
+                    let yd = pos[i].1 - pos[j].1;
+                    let actual = (xd * xd + yd * yd).sqrt().max(1e-9);
+                    let ideal = dist[i][j] * l_factor;
+                    let k_ij = 1.0 / (dist[i][j] * dist[i][j]).max(1e-9);
+                    dx += k_ij * (xd - ideal * xd / actual);
+                    dy += k_ij * (yd - ideal * yd / actual);
+                }
+                let delta = (dx * dx + dy * dy).sqrt();
+                if delta > max_delta {
+                    max_delta = delta;
+                    m = i;
+                }
+            }
+            if max_delta < epsilon { break; }
+
+            // Move node m to reduce its stress (inner loop)
+            for _ in 0..5 {
+                let (mut dx, mut dy) = (0.0, 0.0);
+                let (mut dxx, mut dxy, mut dyy) = (0.0, 0.0, 0.0);
+                for j in 0..n {
+                    if m == j || !dist[m][j].is_finite() { continue; }
+                    let xd = pos[m].0 - pos[j].0;
+                    let yd = pos[m].1 - pos[j].1;
+                    let actual = (xd * xd + yd * yd).sqrt().max(1e-9);
+                    let ideal = dist[m][j] * l_factor;
+                    let k_ij = 1.0 / (dist[m][j] * dist[m][j]).max(1e-9);
+                    dx += k_ij * (xd - ideal * xd / actual);
+                    dy += k_ij * (yd - ideal * yd / actual);
+                    let actual3 = actual * actual * actual;
+                    dxx += k_ij * (1.0 - ideal * yd * yd / actual3);
+                    dxy += k_ij * (ideal * xd * yd / actual3);
+                    dyy += k_ij * (1.0 - ideal * xd * xd / actual3);
+                }
+                let det = (dxx * dyy - dxy * dxy).max(1e-9);
+                let step_x = (dyy * dx - dxy * dy) / det;
+                let step_y = (dxx * dy - dxy * dx) / det;
+                pos[m].0 -= step_x;
+                pos[m].1 -= step_y;
+            }
+        }
+
+        self.normalise_positions(&mut pos);
         pos
+    }
+}
+
+// ── Barnes–Hut quadtree for O(n log n) repulsive forces ──────────────────
+
+struct QuadTree {
+    // Bounding box
+    cx: f64, cy: f64, half: f64,
+    // Centre of mass and total count
+    com_x: f64, com_y: f64, count: usize,
+    // Children: NW, NE, SW, SE (None = empty)
+    children: [Option<Box<QuadTree>>; 4],
+}
+
+impl QuadTree {
+    fn build(points: &[(f64, f64)]) -> Self {
+        let (mut xmin, mut xmax) = (f64::INFINITY, f64::NEG_INFINITY);
+        let (mut ymin, mut ymax) = (f64::INFINITY, f64::NEG_INFINITY);
+        for &(x, y) in points {
+            xmin = xmin.min(x); xmax = xmax.max(x);
+            ymin = ymin.min(y); ymax = ymax.max(y);
+        }
+        let half = ((xmax - xmin).max(ymax - ymin) / 2.0).max(1e-6);
+        let cx = (xmin + xmax) / 2.0;
+        let cy = (ymin + ymax) / 2.0;
+        let mut tree = Self { cx, cy, half, com_x: 0.0, com_y: 0.0, count: 0, children: Default::default() };
+        for &(x, y) in points {
+            tree.insert(x, y);
+        }
+        tree
+    }
+
+    fn insert(&mut self, x: f64, y: f64) {
+        if self.count == 0 {
+            self.com_x = x;
+            self.com_y = y;
+            self.count = 1;
+            return;
+        }
+
+        // If this is a leaf with one point, push the existing point down
+        if self.count == 1 && self.children.iter().all(|c| c.is_none()) {
+            let old_x = self.com_x;
+            let old_y = self.com_y;
+            self.push_down(old_x, old_y);
+        }
+
+        // Update centre of mass
+        let total = self.count as f64 + 1.0;
+        self.com_x = (self.com_x * self.count as f64 + x) / total;
+        self.com_y = (self.com_y * self.count as f64 + y) / total;
+        self.count += 1;
+
+        // Insert into appropriate quadrant
+        self.push_down(x, y);
+    }
+
+    fn push_down(&mut self, x: f64, y: f64) {
+        let qi = if x < self.cx {
+            if y < self.cy { 0 } else { 2 }
+        } else {
+            if y < self.cy { 1 } else { 3 }
+        };
+        let child = self.children[qi].get_or_insert_with(|| {
+            let h = self.half / 2.0;
+            let ncx = if qi % 2 == 0 { self.cx - h } else { self.cx + h };
+            let ncy = if qi < 2 { self.cy - h } else { self.cy + h };
+            Box::new(QuadTree {
+                cx: ncx, cy: ncy, half: h,
+                com_x: 0.0, com_y: 0.0, count: 0,
+                children: Default::default(),
+            })
+        });
+        child.insert(x, y);
+    }
+
+    /// Compute repulsive force on point (px, py) from all points in the tree.
+    /// `theta` is the Barnes-Hut opening angle (0.8 is typical).
+    fn repulsive_force(&self, px: f64, py: f64, k: f64, theta: f64) -> (f64, f64) {
+        if self.count == 0 { return (0.0, 0.0); }
+
+        let dx = px - self.com_x;
+        let dy = py - self.com_y;
+        let dist = (dx * dx + dy * dy).sqrt();
+
+        // If sufficiently far away, treat cluster as single point
+        if self.half * 2.0 / dist.max(1e-9) < theta || self.count == 1 {
+            if dist < 1e-6 { return (0.0, 0.0); }
+            let force = k * k / (dist + 1e-6) * self.count as f64;
+            return (dx / dist * force, dy / dist * force);
+        }
+
+        // Otherwise recurse into children
+        let (mut fx, mut fy) = (0.0, 0.0);
+        for child in &self.children {
+            if let Some(c) = child {
+                let (cfx, cfy) = c.repulsive_force(px, py, k, theta);
+                fx += cfx;
+                fy += cfy;
+            }
+        }
+        (fx, fy)
+    }
+}
+
+impl Default for QuadTree {
+    fn default() -> Self {
+        Self { cx: 0.0, cy: 0.0, half: 1.0, com_x: 0.0, com_y: 0.0, count: 0, children: Default::default() }
     }
 }

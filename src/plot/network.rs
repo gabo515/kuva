@@ -59,6 +59,19 @@ pub enum NodeShape {
     Diamond,
 }
 
+impl NodeShape {
+    /// Ratio of the shape's circumradius to the base radius `r`.
+    /// Used to offset edge endpoints so they clear the shape boundary.
+    pub fn circumradius_factor(self) -> f64 {
+        match self {
+            Self::Circle => 1.0,
+            Self::Square => std::f64::consts::SQRT_2,
+            Self::Diamond => 1.2,
+            Self::Triangle => 1.4,
+        }
+    }
+}
+
 /// A node in the network graph.
 #[derive(Debug, Clone)]
 pub struct NetworkNode {
@@ -151,13 +164,15 @@ impl NetworkPlot {
         idx
     }
 
+    fn push_edge(&mut self, source: String, target: String, weight: f64, color: Option<String>, label: Option<String>) {
+        let si = self.node_index(&source);
+        let ti = self.node_index(&target);
+        self.edges.push(NetworkEdge { source: si, target: ti, weight, color, label });
+    }
+
     /// Add an edge, auto-creating source and target nodes by label if needed.
     pub fn with_edge<S: Into<String>>(mut self, source: S, target: S, weight: f64) -> Self {
-        let src = source.into();
-        let tgt = target.into();
-        let si = self.node_index(&src);
-        let ti = self.node_index(&tgt);
-        self.edges.push(NetworkEdge { source: si, target: ti, weight, color: None, label: None });
+        self.push_edge(source.into(), target.into(), weight, None, None);
         self
     }
 
@@ -165,11 +180,7 @@ impl NetworkPlot {
     pub fn with_edge_color<S: Into<String>, C: Into<String>>(
         mut self, source: S, target: S, weight: f64, color: C,
     ) -> Self {
-        let src = source.into();
-        let tgt = target.into();
-        let si = self.node_index(&src);
-        let ti = self.node_index(&tgt);
-        self.edges.push(NetworkEdge { source: si, target: ti, weight, color: Some(color.into()), label: None });
+        self.push_edge(source.into(), target.into(), weight, Some(color.into()), None);
         self
     }
 
@@ -177,11 +188,7 @@ impl NetworkPlot {
     pub fn with_edge_label<S: Into<String>, L: Into<String>>(
         mut self, source: S, target: S, weight: f64, label: L,
     ) -> Self {
-        let src = source.into();
-        let tgt = target.into();
-        let si = self.node_index(&src);
-        let ti = self.node_index(&tgt);
-        self.edges.push(NetworkEdge { source: si, target: ti, weight, color: None, label: Some(label.into()) });
+        self.push_edge(source.into(), target.into(), weight, None, Some(label.into()));
         self
     }
 
@@ -189,14 +196,7 @@ impl NetworkPlot {
     pub fn with_edge_styled<S: Into<String>, C: Into<String>, L: Into<String>>(
         mut self, source: S, target: S, weight: f64, color: C, label: L,
     ) -> Self {
-        let src = source.into();
-        let tgt = target.into();
-        let si = self.node_index(&src);
-        let ti = self.node_index(&tgt);
-        self.edges.push(NetworkEdge {
-            source: si, target: ti, weight,
-            color: Some(color.into()), label: Some(label.into()),
-        });
+        self.push_edge(source.into(), target.into(), weight, Some(color.into()), Some(label.into()));
         self
     }
 
@@ -241,7 +241,7 @@ impl NetworkPlot {
             for i in 0..n {
                 let j_start = if self.directed { 0 } else { i + 1 };
                 for j in j_start..n {
-                    if j >= matrix[i].len() { continue; }
+                    if j == i || j >= matrix[i].len() { continue; }
                     let w = matrix[i][j];
                     if w.abs() < f64::EPSILON { continue; }
                     self.edges.push(NetworkEdge {

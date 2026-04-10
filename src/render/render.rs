@@ -10860,6 +10860,26 @@ fn add_network(net: &NetworkPlot, scene: &mut Scene, computed: &ComputedLayout) 
         .map(|(_, y)| oy + (inset + y * (1.0 - 2.0 * inset)) * ph).collect();
 
     let loop_r = (r_max * 10.0).min(pw.min(ph) * 0.15);
+    let edge_label_size = font_size.saturating_sub(2).max(8);
+
+    // Arrowhead triangle: tip at (tip_x, tip_y), pointing along (ux, uy).
+    let arrowhead = |scene: &mut Scene, tip_x: f64, tip_y: f64, ux: f64, uy: f64, stroke_w: f64, color: &str| {
+        let arr_size = stroke_w * 2.5 + 3.0;
+        let base_x = tip_x - ux * arr_size;
+        let base_y = tip_y - uy * arr_size;
+        let perp_x = -uy;
+        let perp_y = ux;
+        let half_w = arr_size * 0.4;
+        let d = format!("M {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} Z",
+            tip_x, tip_y,
+            base_x + perp_x * half_w, base_y + perp_y * half_w,
+            base_x - perp_x * half_w, base_y - perp_y * half_w);
+        scene.add(Primitive::Path(Box::new(PathData {
+            d, fill: Some(color.into()), stroke: "none".into(),
+            stroke_width: 0.0, opacity: None, stroke_dasharray: None,
+        })));
+        arr_size
+    };
 
     let fallback = Palette::category10();
 
@@ -10981,28 +11001,7 @@ fn add_network(net: &NetworkPlot, scene: &mut Scene, computed: &ComputedLayout) 
                 let tdx = ex - cp2x;
                 let tdy = ey - cp2y;
                 let tlen = (tdx * tdx + tdy * tdy).sqrt().max(1e-6);
-                let tux = tdx / tlen;
-                let tuy = tdy / tlen;
-                let arr_size = stroke_w * 2.5 + 3.0;
-                let base_x = ex - tux * arr_size;
-                let base_y = ey - tuy * arr_size;
-                let ap_x = -tuy;
-                let ap_y = tux;
-                let half_w = arr_size * 0.4;
-                let d = format!(
-                    "M {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} Z",
-                    ex, ey,
-                    base_x + ap_x * half_w, base_y + ap_y * half_w,
-                    base_x - ap_x * half_w, base_y - ap_y * half_w,
-                );
-                scene.add(Primitive::Path(Box::new(PathData {
-                    d,
-                    fill: Some(edge_color.clone().into()),
-                    stroke: "none".into(),
-                    stroke_width: 0.0,
-                    opacity: None,
-                    stroke_dasharray: None,
-                })));
+                arrowhead(&mut *scene, ex, ey, tdx / tlen, tdy / tlen, stroke_w, &edge_color);
             }
             // Edge label for self-loop
             if let Some(ref lbl) = edge.label {
@@ -11010,7 +11009,7 @@ fn add_network(net: &NetworkPlot, scene: &mut Scene, computed: &ComputedLayout) 
                 let ly = (cp1y + cp2y) / 2.0;
                 scene.add(Primitive::Text {
                     x: round2(lx), y: round2(ly),
-                    content: lbl.clone(), size: font_size.saturating_sub(2).max(8),
+                    content: lbl.clone(), size: edge_label_size,
                     anchor: TextAnchor::Middle, rotate: None, bold: false, color: None,
                 });
             }
@@ -11026,17 +11025,8 @@ fn add_network(net: &NetworkPlot, scene: &mut Scene, computed: &ComputedLayout) 
         let dist = (dx * dx + dy * dy).sqrt().max(1e-6);
         let ux = dx / dist;
         let uy = dy / dist;
-        // Circumradius factor: edge endpoints need to clear non-circle shapes.
-        let shape_factor = |shape: &NodeShape| -> f64 {
-            match shape {
-                NodeShape::Circle => 1.0,
-                NodeShape::Square => std::f64::consts::SQRT_2,
-                NodeShape::Diamond => 1.2,
-                NodeShape::Triangle => 1.4,
-            }
-        };
-        let r_src = net.nodes[si].size.unwrap_or(net.node_radius) * shape_factor(&net.nodes[si].shape);
-        let r_tgt = net.nodes[ti].size.unwrap_or(net.node_radius) * shape_factor(&net.nodes[ti].shape);
+        let r_src = net.nodes[si].size.unwrap_or(net.node_radius) * net.nodes[si].shape.circumradius_factor();
+        let r_tgt = net.nodes[ti].size.unwrap_or(net.node_radius) * net.nodes[ti].shape.circumradius_factor();
 
         let is_antiparallel = net.directed && antiparallel.contains(&(si, ti));
         let curve_offset = if is_antiparallel { dist * 0.15 } else { 0.0 };
@@ -11072,18 +11062,7 @@ fn add_network(net: &NetworkPlot, scene: &mut Scene, computed: &ComputedLayout) 
                     stroke_width: stroke_w, opacity: None, stroke_dasharray: None,
                 })));
 
-                // Arrowhead along curve tangent
-                let ap_x = -tuy;
-                let ap_y = tux;
-                let half_w = arr_size * 0.4;
-                let d = format!("M {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} Z",
-                    lx2, ly2,
-                    lx2_short + ap_x * half_w, ly2_short + ap_y * half_w,
-                    lx2_short - ap_x * half_w, ly2_short - ap_y * half_w);
-                scene.add(Primitive::Path(Box::new(PathData {
-                    d, fill: Some(edge_color.clone().into()), stroke: "none".into(),
-                    stroke_width: 0.0, opacity: None, stroke_dasharray: None,
-                })));
+                arrowhead(&mut *scene, lx2, ly2, tux, tuy, stroke_w, &edge_color);
             } else {
                 let d = format!("M {:.2} {:.2} Q {:.2} {:.2} {:.2} {:.2}",
                     lx1, ly1, mx, my, lx2, ly2);
@@ -11099,7 +11078,7 @@ fn add_network(net: &NetworkPlot, scene: &mut Scene, computed: &ComputedLayout) 
                 let ely = (ly1 + 2.0 * my + ly2) / 4.0 - font_size as f64 * 0.4;
                 scene.add(Primitive::Text {
                     x: round2(elx), y: round2(ely),
-                    content: lbl.clone(), size: font_size.saturating_sub(2).max(8),
+                    content: lbl.clone(), size: edge_label_size,
                     anchor: TextAnchor::Middle, rotate: None, bold: false, color: None,
                 });
             }
@@ -11121,18 +11100,7 @@ fn add_network(net: &NetworkPlot, scene: &mut Scene, computed: &ComputedLayout) 
                     stroke: edge_color.clone().into(), stroke_width: stroke_w,
                     stroke_dasharray: None,
                 });
-
-                let perp_x = -uy;
-                let perp_y = ux;
-                let half_w = arr_size * 0.4;
-                let d = format!("M {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} Z",
-                    lx2, ly2,
-                    lx2_short + perp_x * half_w, ly2_short + perp_y * half_w,
-                    lx2_short - perp_x * half_w, ly2_short - perp_y * half_w);
-                scene.add(Primitive::Path(Box::new(PathData {
-                    d, fill: Some(edge_color.clone().into()), stroke: "none".into(),
-                    stroke_width: 0.0, opacity: None, stroke_dasharray: None,
-                })));
+                arrowhead(&mut *scene, lx2, ly2, ux, uy, stroke_w, &edge_color);
             } else {
                 scene.add(Primitive::Line {
                     x1: round2(lx1), y1: round2(ly1),
@@ -11148,7 +11116,7 @@ fn add_network(net: &NetworkPlot, scene: &mut Scene, computed: &ComputedLayout) 
                 let ely = (ly1 + ly2) / 2.0 - font_size as f64 * 0.4;
                 scene.add(Primitive::Text {
                     x: round2(elx), y: round2(ely),
-                    content: lbl.clone(), size: font_size.saturating_sub(2).max(8),
+                    content: lbl.clone(), size: edge_label_size,
                     anchor: TextAnchor::Middle, rotate: None, bold: false, color: None,
                 });
             }

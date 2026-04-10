@@ -28,10 +28,11 @@ BAX	0	0	0
 | `--weight-col <COL>` | — | Edge weight column |
 | `--group-col <COL>` | — | Node group column for colouring |
 | `--directed` | off | Draw arrowheads on edges |
-| `--layout <ALG>` | `force` | Layout algorithm: `force` or `circle` |
+| `--layout <ALG>` | `force` | Layout algorithm: `force`, `kk` (Kamada-Kawai), or `circle` |
 | `--node-radius <PX>` | `8.0` | Node circle radius in pixels |
 | `--opacity <F>` | `0.6` | Edge opacity |
 | `--labels` | off | Show node labels |
+| `--repel-labels` | off | Push overlapping labels apart |
 | `--legend <LABEL>` | — | Show legend |
 
 ```bash

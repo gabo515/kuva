@@ -125,7 +125,8 @@ let net = NetworkPlot::new()
 
 | Layout | Method | Description |
 |--------|--------|-------------|
-| Force-directed | `NetworkLayout::ForceDirected` (default) | Fruchterman-Reingold: connected nodes attract, all nodes repel. Best for most graphs. |
+| Force-directed | `NetworkLayout::ForceDirected` (default) | Fruchterman-Reingold: connected nodes attract, all nodes repel. Best for most graphs. Uses Barnes-Hut approximation for n > 256. |
+| Kamada-Kawai | `NetworkLayout::KamadaKawai` | Stress-based: Euclidean distances reflect graph-theoretic distances. Better for small-medium graphs. |
 | Circle | `NetworkLayout::Circle` | Nodes evenly spaced on a circle. Deterministic and clean for small/medium graphs. |
 
 User-supplied positions can pin individual nodes with `.with_node_position(label, x, y)` in normalised `[0, 1]` space; unpinned nodes are placed by the layout algorithm.
@@ -144,17 +145,22 @@ Self-loops (`source == target`) are rendered as a small arc pointing outward fro
 |--------|-------------|
 | `NetworkPlot::new()` | Create a network plot with defaults |
 | `.with_edge(src, tgt, w)` | Add an edge (auto-creates nodes) |
+| `.with_edge_color(src, tgt, w, color)` | Add an edge with explicit colour |
+| `.with_edge_label(src, tgt, w, label)` | Add an edge with a midpoint label |
+| `.with_edge_styled(src, tgt, w, color, label)` | Add an edge with both colour and label |
 | `.with_edges(iter)` | Bulk-add `(src, tgt, weight)` edges |
 | `.with_matrix(m, labels)` | Build from N×N adjacency matrix |
 | `.with_node(label)` | Declare a node explicitly |
 | `.with_node_color(label, c)` | Set a node's colour |
 | `.with_node_size(label, s)` | Set a node's radius |
 | `.with_node_group(label, g)` | Assign a node to a group |
+| `.with_node_shape(label, shape)` | Set marker shape (`Circle`, `Square`, `Triangle`, `Diamond`) |
 | `.with_node_position(label, x, y)` | Pin a node at `(x, y)` in `[0, 1]` space |
 | `.with_directed()` | Draw arrowheads on edges |
-| `.with_layout(alg)` | Set layout algorithm (`ForceDirected` or `Circle`) |
+| `.with_layout(alg)` | Set layout algorithm (`ForceDirected`, `KamadaKawai`, or `Circle`) |
 | `.with_node_radius(px)` | Base node radius in pixels (default `8.0`) |
 | `.with_edge_opacity(f)` | Edge opacity `0.0`-`1.0` (default `0.6`) |
 | `.with_labels()` | Show node labels |
+| `.with_repel_labels()` | Push overlapping labels apart |
 | `.with_legend(s)` | Show a per-group colour legend |
 | `.with_label_size(px)` | Override label font size |

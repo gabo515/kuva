@@ -10845,23 +10845,29 @@ fn add_network(net: &NetworkPlot, scene: &mut Scene, computed: &ComputedLayout) 
     let plot_h = computed.plot_height();
     let base_pad = r_max + 4.0;
 
-    let pad_right_extra = max_label_px;
+    // The inset shrinks the usable range to [inset, 1-inset] so nodes
+    // aren't flush against edges.  Right-side padding must account for
+    // the label extending beyond the rightmost node at position (1-inset).
+    let inset = 0.1;
+    // After inset, the rightmost node sits at (1 - inset) × pw from ox.
+    // Its label extends r_max + 4 + max_label_px further right.  The
+    // remaining (inset × pw) pixels of headroom may not be enough, so
+    // add the shortfall as extra right padding.
+    let label_overhang = r_max + 4.0 + max_label_px;
+    let pad_right_extra = (label_overhang - inset * plot_w).max(0.0);
 
     let ox = computed.margin_left + base_pad;
     let oy = computed.margin_top + base_pad;
     let pw = (plot_w - 2.0 * base_pad - pad_right_extra).max(1.0);
     let ph = (plot_h - 2.0 * base_pad).max(1.0);
-
-    // Inset positions to [0.1, 0.9] so nodes aren't flush against edges,
-    // leaving room for self-loops, labels, and arrowheads.
-    let inset = 0.1;
     let px: Vec<f64> = positions.iter()
         .map(|(x, _)| ox + (inset + x * (1.0 - 2.0 * inset)) * pw).collect();
     let py: Vec<f64> = positions.iter()
         .map(|(_, y)| oy + (inset + y * (1.0 - 2.0 * inset)) * ph).collect();
 
-    // Self-loop radius: fixed multiple of node radius (like ggraph's strength).
-    let loop_r = r_max * 10.0;
+    // Self-loop radius: fixed multiple of node radius, capped so it
+    // doesn't extend far outside the plot area for large nodes.
+    let loop_r = (r_max * 10.0).min(pw.min(ph) * 0.15);
 
     let fallback = Palette::category10();
 

@@ -87,6 +87,8 @@ pub struct NetworkPlot {
     pub label_size: Option<u32>,
     /// Deferred adjacency matrix (expanded into edges by `resolve_matrix`).
     pending_matrix: Option<(Vec<Vec<f64>>, Vec<usize>)>,
+    /// O(1) label→index lookup, kept in sync with `nodes`.
+    node_map: std::collections::HashMap<String, usize>,
 }
 
 impl Default for NetworkPlot {
@@ -106,12 +108,13 @@ impl NetworkPlot {
             legend_label: None,
             label_size: None,
             pending_matrix: None,
+            node_map: std::collections::HashMap::new(),
         }
     }
 
     /// Find an existing node by label, or insert a new one and return its index.
     fn node_index(&mut self, label: &str) -> usize {
-        if let Some(idx) = self.nodes.iter().position(|n| n.label == label) {
+        if let Some(&idx) = self.node_map.get(label) {
             return idx;
         }
         let idx = self.nodes.len();
@@ -122,6 +125,7 @@ impl NetworkPlot {
             group: None,
             position: None,
         });
+        self.node_map.insert(label.to_string(), idx);
         idx
     }
 

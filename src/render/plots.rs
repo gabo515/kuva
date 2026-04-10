@@ -43,6 +43,7 @@ use crate::plot::venn::VennPlot;
 use crate::plot::parallel::ParallelPlot;
 use crate::plot::mosaic::MosaicPlot;
 use crate::plot::qq::QQPlot;
+use crate::plot::network::NetworkPlot;
 use crate::plot::legend::ColorBarInfo;
 use crate::render::render_utils;
 
@@ -93,6 +94,7 @@ pub enum Plot {
     Mosaic(MosaicPlot),
     Ecdf(EcdfPlot),
     QQ(QQPlot),
+    Network(NetworkPlot),
 }
 
 impl From<ScatterPlot>    for Plot { fn from(p: ScatterPlot)    -> Self { Plot::Scatter(p) } }
@@ -140,6 +142,7 @@ impl From<ParallelPlot>    for Plot { fn from(p: ParallelPlot)    -> Self { Plot
 impl From<MosaicPlot>      for Plot { fn from(p: MosaicPlot)      -> Self { Plot::Mosaic(p) } }
 impl From<EcdfPlot>        for Plot { fn from(p: EcdfPlot)        -> Self { Plot::Ecdf(p) } }
 impl From<QQPlot>          for Plot { fn from(p: QQPlot)          -> Self { Plot::QQ(p) } }
+impl From<NetworkPlot>     for Plot { fn from(p: NetworkPlot)     -> Self { Plot::Network(p) } }
 
 use crate::plot::plot3d::DataRanges3D;
 use crate::plot::heatmap::ColorMap;
@@ -774,7 +777,6 @@ impl Plot {
                     }
                 }
                 if !x_min.is_finite() { return None; }
-                // y is always [0, 1] for ECDF / CCDF
                 Some(((x_min, x_max), (0.0, 1.0)))
             }
             Plot::QQ(qp) => {
@@ -814,6 +816,8 @@ impl Plot {
                     }
                 }
             }
+            // Rendered in pixel space; dummy bounds satisfy Layout::auto_from_plots.
+            Plot::Network(_) => Some(((0.0, 1.0), (0.0, 1.0))),
         }
     }
 
@@ -883,6 +887,7 @@ impl Plot {
                 let band = if qp.show_ci_band { n * 4 } else { 0 };
                 qp.groups.len() * 2 + n + band + 20
             }
+            Plot::Network(n) => n.nodes.len() * 2 + n.edges.len() * 3 + 20,
             _ => 100,
         }
     }

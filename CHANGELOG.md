@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`NetworkPlot`** — new plot type: node-edge network / graph diagram with force-directed (Fruchterman-Reingold) and circular layout algorithms. Supports edge-list and adjacency-matrix input, directed/undirected edges, self-loops, weighted edges (stroke width + opacity), per-node color/size/group, and group-based legends. CLI: `kuva network`.
+
+---
+
 ## [0.1.6] — 2026-04-01
 
 - **`DicePlot`** — new plot type: a grid of cells where each cell shows up to 6 dots in a canonical die-face layout. Ports rendering logic from the [ggdiceplot](https://github.com/maflot/ggdiceplot) R package (v1.2.0). Three input modes: categorical (`with_records`), continuous tile (`with_points`), and per-dot continuous (`with_dot_data`) for ZEBRA-style domino plots. Pip sizing uses the ggdiceplot 1.2.0 tight-packing algorithm with `pip_scale = 0.75` and offset shrinkage. Legend support: spatial-position legend (mini die faces), categorical colour legend, and size legend sections. Column-major grid positions match `make_offsets()`.

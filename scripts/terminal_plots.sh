@@ -163,6 +163,12 @@ header "chord"
 run chord "$DATA/chord.tsv" --title "Cell Type Co-occurrence" \
     --terminal $W $H
 
+# ── network ──────────────────────────────────────────────────────────────────
+header "network"
+run network "$DATA/network.tsv" --source-col source --target-col target \
+    --weight-col weight --labels --title "Gene Regulatory Network" \
+    --terminal $W $H
+
 # ── sankey ───────────────────────────────────────────────────────────────────
 header "sankey"
 run sankey "$DATA/sankey.tsv" --source-col source --target-col target --value-col value \

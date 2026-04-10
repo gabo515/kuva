@@ -106,6 +106,11 @@ pub use crate::plot::{
     QQPlot,
     QQGroup,
     QQMode,
+    NetworkPlot,
+    NetworkNode,
+    NetworkEdge,
+    NetworkLayout,
+    NodeShape,
     // Style / config types used when building plots
     MarkerShape,
     LineStyle,

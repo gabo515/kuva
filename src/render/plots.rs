@@ -39,6 +39,7 @@ use crate::plot::slope::SlopePlot;
 use crate::plot::venn::VennPlot;
 use crate::plot::parallel::ParallelPlot;
 use crate::plot::mosaic::MosaicPlot;
+use crate::plot::network::NetworkPlot;
 use crate::plot::legend::ColorBarInfo;
 use crate::render::render_utils;
 
@@ -85,6 +86,7 @@ pub enum Plot {
     Venn(VennPlot),
     Parallel(ParallelPlot),
     Mosaic(MosaicPlot),
+    Network(NetworkPlot),
 }
 
 impl From<ScatterPlot>    for Plot { fn from(p: ScatterPlot)    -> Self { Plot::Scatter(p) } }
@@ -128,6 +130,7 @@ impl From<SlopePlot>     for Plot { fn from(p: SlopePlot)     -> Self { Plot::Sl
 impl From<VennPlot>        for Plot { fn from(p: VennPlot)        -> Self { Plot::Venn(p) } }
 impl From<ParallelPlot>    for Plot { fn from(p: ParallelPlot)    -> Self { Plot::Parallel(p) } }
 impl From<MosaicPlot>      for Plot { fn from(p: MosaicPlot)      -> Self { Plot::Mosaic(p) } }
+impl From<NetworkPlot>     for Plot { fn from(p: NetworkPlot)     -> Self { Plot::Network(p) } }
 
 fn bounds_from_2d<I>(points: I) -> Option<((f64, f64), (f64, f64))>
     where
@@ -725,6 +728,8 @@ impl Plot {
             Plot::Parallel(_) => Some(((-1.0, 1.0), (-1.0, 1.0))),
             // Pixel-space plot — no axis bounds needed
             Plot::Mosaic(_) => None,
+            // Rendered in pixel space; dummy bounds satisfy Layout::auto_from_plots.
+            Plot::Network(_) => Some(((0.0, 1.0), (0.0, 1.0))),
         }
     }
 

@@ -28,6 +28,7 @@ mod ridgeline;
 mod polar;
 mod ternary;
 mod forest;
+mod network;
 #[cfg(feature = "doom")]
 mod doom;
 
@@ -75,6 +76,7 @@ enum Commands {
     Polar(polar::PolarArgs),
     Ternary(ternary::TernaryArgs),
     Forest(forest::ForestArgs),
+    Network(network::NetworkArgs),
     #[cfg(feature = "doom")]
     /// Generate a self-contained DOOM SVG playable in any browser.
     Doom(doom::DoomArgs),
@@ -119,6 +121,7 @@ fn main() {
         Commands::Polar(args) => polar::run(args),
         Commands::Ternary(args) => ternary::run(args),
         Commands::Forest(args) => forest::run(args),
+        Commands::Network(args) => network::run(args),
         #[cfg(feature = "doom")]
         Commands::Doom(args) => doom::run(args),
         Commands::Man => unreachable!(),

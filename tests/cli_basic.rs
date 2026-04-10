@@ -370,6 +370,29 @@ fn test_synteny_svg() {
     assert!(stdout.starts_with("<svg"), "output should start with <svg");
 }
 
+#[test]
+fn test_network_svg() {
+    let (stdout, stderr, code) = run_with_file(&[
+        "network", &data("network.tsv"),
+        "--source-col", "source", "--target-col", "target",
+        "--title", "Gene Regulatory Network",
+    ]);
+    assert_eq!(code, 0, "exit code should be 0; stderr: {stderr}");
+    assert!(stdout.starts_with("<svg"), "output should start with <svg");
+}
+
+#[test]
+fn test_network_has_circles() {
+    let (stdout, _stderr, code) = run_with_file(&[
+        "network", &data("network.tsv"),
+        "--source-col", "source", "--target-col", "target",
+        "--labels",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("<circle"), "network SVG should contain <circle elements for nodes");
+    assert!(stdout.contains("<text"), "network SVG with --labels should contain <text elements");
+}
+
 // ─── Tier 2: Content verification tests ──────────────────────────────────────
 
 #[test]

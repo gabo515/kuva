@@ -39,6 +39,7 @@ pub mod slope;
 pub mod venn;
 pub mod parallel;
 pub mod mosaic;
+pub mod network;
 
 pub mod legend;
 
@@ -85,5 +86,6 @@ pub use slope::{SlopePlot, SlopePoint, SlopeValueFormat};
 pub use venn::{VennPlot, VennSet, VennOverlap};
 pub use parallel::{ParallelPlot, ParallelRow};
 pub use mosaic::{MosaicPlot, MosaicCell};
+pub use network::{NetworkPlot, NetworkNode, NetworkEdge, NetworkLayout};
 
 pub use legend::{Legend, LegendEntry, LegendShape, LegendPosition, LegendGroup};

@@ -28,6 +28,7 @@ EXAMPLES=(
     line
     lollipop
     manhattan
+    network
     phylo
     pie
     sankey

@@ -225,6 +225,7 @@ cat gwas.tsv | kuva manhattan --chr-col chr --pvalue-col pvalue --terminal
 | [dot](./dot.md) | Dot plot (size + color at categorical positions) |
 | [upset](./upset.md) | UpSet plot for set-intersection analysis |
 | [chord](./chord.md) | Chord diagram for pairwise flow data |
+| [network](./network.md) | Network / graph diagram from edge list or matrix |
 | [sankey](./sankey.md) | Sankey / alluvial flow diagram |
 | [phylo](./phylo.md) | Phylogenetic tree |
 | [synteny](./synteny.md) | Synteny / genomic alignment ribbon plot |

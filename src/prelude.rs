@@ -96,6 +96,10 @@ pub use crate::plot::{
     ParallelRow,
     MosaicPlot,
     MosaicCell,
+    NetworkPlot,
+    NetworkNode,
+    NetworkEdge,
+    NetworkLayout,
     // Style / config types used when building plots
     MarkerShape,
     LineStyle,

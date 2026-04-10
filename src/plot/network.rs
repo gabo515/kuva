@@ -33,7 +33,6 @@
 /// let svg = SvgBackend.render_scene(&render_multiple(plots, layout));
 /// std::fs::write("network.svg", svg).unwrap();
 /// ```
-
 use std::collections::HashMap;
 
 /// Layout algorithm for node placement.
@@ -461,7 +460,7 @@ impl NetworkPlot {
     }
 
     /// Normalise unpinned node positions to \[0, 1\] with uniform scaling.
-    fn normalise_positions(&self, pos: &mut Vec<(f64, f64)>) {
+    fn normalise_positions(&self, pos: &mut [(f64, f64)]) {
         let n = pos.len();
         let free: Vec<usize> = (0..n)
             .filter(|&i| self.nodes[i].position.is_none())
@@ -662,10 +661,10 @@ impl NetworkPlot {
         let gravity = 0.02;
         let cx = pos.iter().map(|p| p.0).sum::<f64>() / n as f64;
         let cy = pos.iter().map(|p| p.1).sum::<f64>() / n as f64;
-        for i in 0..n {
+        for (i, p) in pos.iter_mut().enumerate() {
             if self.nodes[i].position.is_some() { continue; }
-            pos[i].0 -= gravity * (pos[i].0 - cx);
-            pos[i].1 -= gravity * (pos[i].1 - cy);
+            p.0 -= gravity * (p.0 - cx);
+            p.1 -= gravity * (p.1 - cy);
         }
 
         self.normalise_positions(&mut pos);
@@ -778,12 +777,10 @@ impl QuadTree {
 
         // Otherwise recurse into children
         let (mut fx, mut fy) = (0.0, 0.0);
-        for child in &self.children {
-            if let Some(c) = child {
-                let (cfx, cfy) = c.repulsive_force(px, py, k, theta);
-                fx += cfx;
-                fy += cfy;
-            }
+        for c in self.children.iter().flatten() {
+            let (cfx, cfy) = c.repulsive_force(px, py, k, theta);
+            fx += cfx;
+            fy += cfy;
         }
         (fx, fy)
     }

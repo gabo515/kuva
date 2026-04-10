@@ -11026,10 +11026,19 @@ fn add_network(net: &NetworkPlot, scene: &mut Scene, computed: &ComputedLayout) 
         let dist = (dx * dx + dy * dy).sqrt().max(1e-6);
         let ux = dx / dist;
         let uy = dy / dist;
-        let r_src = net.nodes[si].size.unwrap_or(net.node_radius);
-        let r_tgt = net.nodes[ti].size.unwrap_or(net.node_radius);
+        // Circumradius factor: edge endpoints need to clear non-circle shapes.
+        let shape_factor = |shape: &NodeShape| -> f64 {
+            match shape {
+                NodeShape::Circle => 1.0,
+                NodeShape::Square => std::f64::consts::SQRT_2,
+                NodeShape::Diamond => 1.2,
+                NodeShape::Triangle => 1.4,
+            }
+        };
+        let r_src = net.nodes[si].size.unwrap_or(net.node_radius) * shape_factor(&net.nodes[si].shape);
+        let r_tgt = net.nodes[ti].size.unwrap_or(net.node_radius) * shape_factor(&net.nodes[ti].shape);
 
-        let is_antiparallel = antiparallel.contains(&(si, ti));
+        let is_antiparallel = net.directed && antiparallel.contains(&(si, ti));
         let curve_offset = if is_antiparallel { dist * 0.15 } else { 0.0 };
 
         if curve_offset > 0.0 {
@@ -11238,6 +11247,13 @@ fn add_network(net: &NetworkPlot, scene: &mut Scene, computed: &ComputedLayout) 
                     }
                 }
                 if !moved { break; }
+            }
+            // Clamp labels to plot bounds.
+            let x_max = ox + pw + pad_right_extra;
+            let y_max = oy + ph;
+            for l in labels.iter_mut() {
+                l.0 = l.0.clamp(ox, x_max);
+                l.1 = l.1.clamp(oy + font_size as f64, y_max);
             }
         }
 

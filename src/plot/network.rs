@@ -43,6 +43,8 @@ pub enum NetworkLayout {
     ForceDirected,
     /// Kamada–Kawai stress-based layout.  Produces cleaner results for
     /// small–medium graphs where edge lengths should reflect graph distance.
+    /// Disconnected components receive a gentle gravity toward the centre
+    /// so they don't overlap.
     KamadaKawai,
     /// Nodes evenly spaced on a circle.
     Circle,
@@ -180,6 +182,21 @@ impl NetworkPlot {
         let si = self.node_index(&src);
         let ti = self.node_index(&tgt);
         self.edges.push(NetworkEdge { source: si, target: ti, weight, color: None, label: Some(label.into()) });
+        self
+    }
+
+    /// Add an edge with both an explicit colour and a text label.
+    pub fn with_edge_styled<S: Into<String>, C: Into<String>, L: Into<String>>(
+        mut self, source: S, target: S, weight: f64, color: C, label: L,
+    ) -> Self {
+        let src = source.into();
+        let tgt = target.into();
+        let si = self.node_index(&src);
+        let ti = self.node_index(&tgt);
+        self.edges.push(NetworkEdge {
+            source: si, target: ti, weight,
+            color: Some(color.into()), label: Some(label.into()),
+        });
         self
     }
 
@@ -638,6 +655,17 @@ impl NetworkPlot {
                 pos[m].0 -= step_x;
                 pos[m].1 -= step_y;
             }
+        }
+
+        // Gentle gravity for disconnected components: push all nodes toward
+        // the centroid so components don't overlap.
+        let gravity = 0.02;
+        let cx = pos.iter().map(|p| p.0).sum::<f64>() / n as f64;
+        let cy = pos.iter().map(|p| p.1).sum::<f64>() / n as f64;
+        for i in 0..n {
+            if self.nodes[i].position.is_some() { continue; }
+            pos[i].0 -= gravity * (pos[i].0 - cx);
+            pos[i].1 -= gravity * (pos[i].1 - cy);
         }
 
         self.normalise_positions(&mut pos);

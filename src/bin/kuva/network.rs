@@ -28,7 +28,8 @@ pub struct NetworkArgs {
     #[arg(long)]
     pub weight_col: Option<ColSpec>,
 
-    /// Node group column for colouring (edge-list mode; 0-based index or header name).
+    /// Source node group column for colouring (edge-list mode; 0-based index or header name).
+    /// Each row assigns the group to the source node only.
     #[arg(long)]
     pub group_col: Option<ColSpec>,
 
@@ -126,11 +127,11 @@ pub fn run(args: NetworkArgs) -> Result<(), String> {
         // Apply group column if provided.
         if let Some(ref gc) = args.group_col {
             let groups = table.col_str(gc)?;
-            // Build a map of node-label → group from the edge-list rows.
-            // Each row has a source and target; assign the group from that row.
-            for ((src, tgt), grp) in sources.iter().zip(targets.iter()).zip(groups.iter()) {
+            // Assign the group to the source node only; this avoids silently
+            // overwriting a node's group when it appears as a target in a
+            // later row with a different group value.
+            for (src, grp) in sources.iter().zip(groups.iter()) {
                 plot = plot.with_node_group(src.clone(), grp.clone());
-                plot = plot.with_node_group(tgt.clone(), grp.clone());
             }
         }
     }

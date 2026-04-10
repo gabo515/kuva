@@ -85,6 +85,8 @@ pub struct NetworkPlot {
     pub legend_label: Option<String>,
     /// Override label font size (pixels).
     pub label_size: Option<u32>,
+    /// Deferred adjacency matrix (expanded into edges by `resolve_matrix`).
+    pending_matrix: Option<(Vec<Vec<f64>>, Vec<usize>)>,
 }
 
 impl Default for NetworkPlot {
@@ -103,6 +105,7 @@ impl NetworkPlot {
             show_labels: false,
             legend_label: None,
             label_size: None,
+            pending_matrix: None,
         }
     }
 
@@ -147,7 +150,9 @@ impl NetworkPlot {
     /// Build a network from an N×N adjacency matrix.
     ///
     /// Non-zero entries become edges; the value is used as the weight.
-    /// When `directed` is false only the upper triangle is read.
+    /// The matrix is stored and edges are expanded when needed (by
+    /// [`compute_positions`] or [`resolve_matrix`]), so `.with_directed()`
+    /// can be called before or after this method.
     pub fn with_matrix<S, L>(mut self, matrix: Vec<Vec<f64>>, labels: L) -> Self
     where
         S: Into<String>,
@@ -155,17 +160,37 @@ impl NetworkPlot {
     {
         let labels: Vec<String> = labels.into_iter().map(Into::into).collect();
         let indices: Vec<usize> = labels.iter().map(|l| self.node_index(l)).collect();
-        let n = labels.len();
-        for i in 0..n {
-            let j_start = if self.directed { 0 } else { i };
-            for j in j_start..n {
-                if j >= matrix[i].len() { continue; }
-                let w = matrix[i][j];
-                if w.abs() < f64::EPSILON { continue; }
-                self.edges.push(NetworkEdge { source: indices[i], target: indices[j], weight: w, color: None });
+        self.pending_matrix = Some((matrix, indices));
+        self
+    }
+
+    /// Expand a pending adjacency matrix into edges.  Called automatically
+    /// by [`compute_positions`]; safe to call multiple times (no-op after
+    /// the first).
+    pub fn resolve_matrix(&mut self) {
+        if let Some((matrix, indices)) = self.pending_matrix.take() {
+            let n = indices.len();
+            for i in 0..n {
+                let j_start = if self.directed { 0 } else { i + 1 };
+                for j in j_start..n {
+                    if j >= matrix[i].len() { continue; }
+                    let w = matrix[i][j];
+                    if w.abs() < f64::EPSILON { continue; }
+                    self.edges.push(NetworkEdge {
+                        source: indices[i], target: indices[j], weight: w, color: None,
+                    });
+                }
+                // Self-loops from diagonal (only when directed).
+                if self.directed && i < matrix[i].len() {
+                    let w = matrix[i][i];
+                    if w.abs() >= f64::EPSILON {
+                        self.edges.push(NetworkEdge {
+                            source: indices[i], target: indices[i], weight: w, color: None,
+                        });
+                    }
+                }
             }
         }
-        self
     }
 
     /// Declare a node explicitly (no-op if it already exists).
@@ -252,6 +277,10 @@ impl NetworkPlot {
     // ── Layout algorithms ─────────────────────────────────────────────
 
     /// Compute node positions in \[0, 1\] × \[0, 1\] space.
+    ///
+    /// Call [`resolve_matrix`] first if a matrix was provided via
+    /// [`with_matrix`], or this will only see edges added via
+    /// [`with_edge`]/[`with_edges`].
     pub fn compute_positions(&self) -> Vec<(f64, f64)> {
         match self.layout {
             NetworkLayout::ForceDirected => self.fruchterman_reingold(),

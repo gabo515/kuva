@@ -175,3 +175,86 @@ fn network_disconnected() {
     let svg = SvgBackend.render_scene(&render_multiple(plots, layout));
     std::fs::write("test_outputs/network_disconnected.svg", svg).unwrap();
 }
+
+#[test]
+fn network_pinned_positions() {
+    let mut net = NetworkPlot::new()
+        .with_edge("A", "B", 1.0)
+        .with_edge("B", "C", 1.0)
+        .with_edge("C", "A", 1.0)
+        .with_node_position("A", 0.0, 0.0)
+        .with_node_position("C", 1.0, 1.0)
+        .with_labels();
+    let positions = net.compute_positions();
+    // A and C should remain at their pinned positions.
+    assert!((positions[0].0 - 0.0).abs() < 1e-6, "pinned node A x should be 0.0");
+    assert!((positions[0].1 - 0.0).abs() < 1e-6, "pinned node A y should be 0.0");
+    assert!((positions[2].0 - 1.0).abs() < 1e-6, "pinned node C x should be 1.0");
+    assert!((positions[2].1 - 1.0).abs() < 1e-6, "pinned node C y should be 1.0");
+    let plots = vec![Plot::Network(net)];
+    let layout = Layout::auto_from_plots(&plots)
+        .with_title("Pinned Positions");
+    let svg = SvgBackend.render_scene(&render_multiple(plots, layout));
+    std::fs::write("test_outputs/network_pinned.svg", svg).unwrap();
+}
+
+#[test]
+fn network_explicit_node_colors() {
+    let net = NetworkPlot::new()
+        .with_edge("A", "B", 1.0)
+        .with_edge("B", "C", 1.0)
+        .with_node_color("A", "#e41a1c")
+        .with_node_color("B", "#377eb8")
+        .with_node_color("C", "#4daf4a")
+        .with_node_group("A", "Group1")
+        .with_node_group("B", "Group1")
+        .with_node_group("C", "Group2")
+        .with_labels()
+        .with_legend("Groups");
+    let plots = vec![Plot::Network(net)];
+    let layout = Layout::auto_from_plots(&plots)
+        .with_title("Explicit Colors Override Group");
+    let svg = SvgBackend.render_scene(&render_multiple(plots, layout));
+    // Verify the explicit colors appear in the SVG, not palette defaults.
+    assert!(svg.contains("#e41a1c"), "node A should use explicit red");
+    assert!(svg.contains("#377eb8"), "node B should use explicit blue");
+    assert!(svg.contains("#4daf4a"), "node C should use explicit green");
+    std::fs::write("test_outputs/network_explicit_colors.svg", svg).unwrap();
+}
+
+#[test]
+fn network_single_node_self_loop() {
+    let net = NetworkPlot::new()
+        .with_edge("X", "X", 1.0)
+        .with_directed()
+        .with_labels();
+    let plots = vec![Plot::Network(net)];
+    let layout = Layout::auto_from_plots(&plots)
+        .with_title("Single Node Self-Loop");
+    let svg = SvgBackend.render_scene(&render_multiple(plots, layout));
+    // Should not panic and should contain a bezier path for the loop.
+    assert!(svg.contains("<path"), "single-node self-loop should produce a path");
+    std::fs::write("test_outputs/network_single_self_loop.svg", svg).unwrap();
+}
+
+#[test]
+fn network_matrix_directed_order_independent() {
+    // with_directed() called AFTER with_matrix() should still produce
+    // directed edges (both triangles of the matrix).
+    let matrix = vec![
+        vec![0.0, 1.0, 0.0],
+        vec![0.0, 0.0, 1.0],
+        vec![1.0, 0.0, 0.0],
+    ];
+    let net = NetworkPlot::new()
+        .with_matrix(matrix, ["A", "B", "C"])
+        .with_directed();
+    let plots = vec![Plot::Network(net)];
+    let layout = Layout::auto_from_plots(&plots);
+    let svg = SvgBackend.render_scene(&render_multiple(plots, layout));
+    // Directed graph from this matrix has 3 edges: A→B, B→C, C→A.
+    // Each directed edge emits a triangle arrowhead path.
+    let arrow_count = svg.matches("<path").count();
+    assert!(arrow_count >= 3, "directed matrix should produce at least 3 arrowhead paths, got {arrow_count}");
+    std::fs::write("test_outputs/network_matrix_directed.svg", svg).unwrap();
+}

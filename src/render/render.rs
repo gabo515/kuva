@@ -8608,6 +8608,14 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
         }
     }
 
+    // Resolve any pending adjacency matrices in network plots so edges
+    // are available for rendering and legend collection.
+    for plot in plots.iter_mut() {
+        if let Plot::Network(ref mut net) = plot {
+            net.resolve_matrix();
+        }
+    }
+
     let mut computed = ComputedLayout::from_layout(&layout);
 
     // Pie canvas-widening: when a Pie with outside labels is present, ensure the
@@ -10923,11 +10931,16 @@ fn add_network(net: &NetworkPlot, scene: &mut Scene, computed: &ComputedLayout) 
             let ny = py[si];
 
             // Direction from graph centre to this node (outward).
+            // Fall back to "upward" when the node is at the centre (e.g.
+            // single-node graph) so the loop doesn't degenerate.
             let out_dx = nx - cx_graph;
             let out_dy = ny - cy_graph;
-            let out_len = (out_dx * out_dx + out_dy * out_dy).sqrt().max(1e-6);
-            let out_ux = out_dx / out_len;
-            let out_uy = out_dy / out_len;
+            let out_len = (out_dx * out_dx + out_dy * out_dy).sqrt();
+            let (out_ux, out_uy) = if out_len < 1e-4 {
+                (0.0, -1.0)
+            } else {
+                (out_dx / out_len, out_dy / out_len)
+            };
 
             // Perpendicular for the two attachment points on the node circle.
             let perp_x = -out_uy;

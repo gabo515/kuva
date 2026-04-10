@@ -783,6 +783,7 @@ impl Plot {
                 let nr = mp.effective_row_order().len();
                 nc * nr * 2 + nc + nr + 30
             }
+            Plot::Network(n) => n.nodes.len() * 2 + n.edges.len() * 3 + 20,
             _ => 100,
         }
     }

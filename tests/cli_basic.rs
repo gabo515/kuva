@@ -393,6 +393,52 @@ fn test_network_has_circles() {
     assert!(stdout.contains("<text"), "network SVG with --labels should contain <text elements");
 }
 
+#[test]
+fn test_network_matrix_svg() {
+    let (stdout, stderr, code) = run_with_file(&[
+        "network", &data("network_matrix.tsv"),
+        "--matrix", "--directed", "--labels",
+        "--title", "Matrix Network",
+    ]);
+    assert_eq!(code, 0, "exit code should be 0; stderr: {stderr}");
+    assert!(stdout.starts_with("<svg"), "output should start with <svg");
+    assert!(stdout.contains("<circle"), "matrix network should have nodes");
+}
+
+#[test]
+fn test_network_kk_layout() {
+    let (stdout, stderr, code) = run_with_file(&[
+        "network", &data("network.tsv"),
+        "--source-col", "source", "--target-col", "target",
+        "--layout", "kk", "--labels",
+    ]);
+    assert_eq!(code, 0, "exit code should be 0; stderr: {stderr}");
+    assert!(stdout.starts_with("<svg"), "output should start with <svg");
+}
+
+#[test]
+fn test_network_directed_weighted() {
+    let (stdout, stderr, code) = run_with_file(&[
+        "network", &data("network.tsv"),
+        "--source-col", "source", "--target-col", "target",
+        "--weight-col", "weight", "--directed", "--labels",
+        "--group-col", "group", "--legend", "pathway",
+    ]);
+    assert_eq!(code, 0, "exit code should be 0; stderr: {stderr}");
+    assert!(stdout.contains("<path"), "directed network should have arrowhead paths");
+}
+
+#[test]
+fn test_network_bad_layout_errors() {
+    let (_stdout, stderr, code) = run_with_file(&[
+        "network", &data("network.tsv"),
+        "--source-col", "source", "--target-col", "target",
+        "--layout", "bogus",
+    ]);
+    assert_ne!(code, 0, "bad layout should fail");
+    assert!(stderr.contains("unknown layout"), "error should mention unknown layout");
+}
+
 // ─── Tier 2: Content verification tests ──────────────────────────────────────
 
 #[test]

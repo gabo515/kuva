@@ -411,6 +411,14 @@ check "network circle layout" \
     "$BIN" network "$DATA/network.tsv" --source-col source --target-col target \
         --layout circle --labels --title "Circle Layout"
 
+check "network kk layout" \
+    "$BIN" network "$DATA/network.tsv" --source-col source --target-col target \
+        --layout kk --labels --title "Kamada-Kawai Layout"
+
+check "network matrix" \
+    "$BIN" network "$DATA/network_matrix.tsv" --matrix --directed --labels \
+        --title "Matrix Input"
+
 # ── sankey ────────────────────────────────────────────────────────────────────
 check "sankey basic" \
     "$BIN" sankey "$DATA/sankey.tsv" --source-col source --target-col target --value-col value \

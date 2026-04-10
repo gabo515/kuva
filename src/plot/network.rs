@@ -703,6 +703,10 @@ impl QuadTree {
     }
 
     fn insert(&mut self, x: f64, y: f64) {
+        self.insert_depth(x, y, 0);
+    }
+
+    fn insert_depth(&mut self, x: f64, y: f64, depth: usize) {
         if self.count == 0 {
             self.com_x = x;
             self.com_y = y;
@@ -710,11 +714,21 @@ impl QuadTree {
             return;
         }
 
+        // Stop subdividing at depth 50 to prevent infinite recursion when
+        // two points share the same coordinates.
+        if depth >= 50 {
+            let total = self.count as f64 + 1.0;
+            self.com_x = (self.com_x * self.count as f64 + x) / total;
+            self.com_y = (self.com_y * self.count as f64 + y) / total;
+            self.count += 1;
+            return;
+        }
+
         // If this is a leaf with one point, push the existing point down
         if self.count == 1 && self.children.iter().all(|c| c.is_none()) {
             let old_x = self.com_x;
             let old_y = self.com_y;
-            self.push_down(old_x, old_y);
+            self.push_down_depth(old_x, old_y, depth + 1);
         }
 
         // Update centre of mass
@@ -724,10 +738,10 @@ impl QuadTree {
         self.count += 1;
 
         // Insert into appropriate quadrant
-        self.push_down(x, y);
+        self.push_down_depth(x, y, depth + 1);
     }
 
-    fn push_down(&mut self, x: f64, y: f64) {
+    fn push_down_depth(&mut self, x: f64, y: f64, depth: usize) {
         let qi = if x < self.cx {
             if y < self.cy { 0 } else { 2 }
         } else {
@@ -743,7 +757,7 @@ impl QuadTree {
                 children: Default::default(),
             })
         });
-        child.insert(x, y);
+        child.insert_depth(x, y, depth);
     }
 
     /// Compute repulsive force on point (px, py) from all points in the tree.

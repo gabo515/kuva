@@ -191,6 +191,12 @@ Click any image to go to the full documentation page.
 <div class="gallery-desc">Pairwise flows between N groups as arc segments and Bézier ribbons.</div>
 </a></div>
 
+<div class="gallery-card"><a href="./plots/network.html">
+<img src="./assets/network/grouped.svg" alt="Network Plot">
+<div class="gallery-caption">Network Plot</div>
+<div class="gallery-desc">Node-edge graph with force-directed or circular layout, directed arrows, and weighted edges.</div>
+</a></div>
+
 <div class="gallery-card"><a href="./plots/sankey.html">
 <img src="./assets/sankey/variant_filter.svg" alt="Sankey Diagram">
 <div class="gallery-caption">Sankey Diagram</div>

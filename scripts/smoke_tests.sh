@@ -397,6 +397,28 @@ check "chord gap legend" \
     "$BIN" chord "$DATA/chord.tsv" --gap 3.0 --opacity 0.6 --legend "connectivity" \
         --title "Cell Type Co-occurrence"
 
+# ── network ───────────────────────────────────────────────────────────────────
+check "network basic" \
+    "$BIN" network "$DATA/network.tsv" --source-col source --target-col target \
+        --labels --title "Gene Regulatory Network"
+
+check "network directed weighted legend" \
+    "$BIN" network "$DATA/network.tsv" --source-col source --target-col target \
+        --weight-col weight --group-col group --directed --labels \
+        --legend "pathway" --title "Gene Regulatory Network"
+
+check "network circle layout" \
+    "$BIN" network "$DATA/network.tsv" --source-col source --target-col target \
+        --layout circle --labels --title "Circle Layout"
+
+check "network kk layout" \
+    "$BIN" network "$DATA/network.tsv" --source-col source --target-col target \
+        --layout kk --labels --title "Kamada-Kawai Layout"
+
+check "network matrix" \
+    "$BIN" network "$DATA/network_matrix.tsv" --matrix --directed --labels \
+        --title "Matrix Input"
+
 # ── sankey ────────────────────────────────────────────────────────────────────
 check "sankey basic" \
     "$BIN" sankey "$DATA/sankey.tsv" --source-col source --target-col target --value-col value \

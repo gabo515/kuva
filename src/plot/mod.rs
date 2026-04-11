@@ -44,6 +44,7 @@ pub mod venn;
 pub mod parallel;
 pub mod mosaic;
 pub mod qq;
+pub mod network;
 pub mod streamgraph;
 
 pub mod legend;
@@ -96,6 +97,7 @@ pub use venn::{VennPlot, VennSet, VennOverlap};
 pub use parallel::{ParallelPlot, ParallelRow};
 pub use mosaic::{MosaicPlot, MosaicCell};
 pub use qq::{QQPlot, QQGroup, QQMode};
+pub use network::{NetworkPlot, NetworkNode, NetworkEdge, NetworkLayout, NodeShape};
 pub use streamgraph::{StreamgraphPlot, StreamBaseline, StreamOrder};
 
 pub use legend::{Legend, LegendEntry, LegendShape, LegendPosition, LegendGroup};

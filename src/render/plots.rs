@@ -43,6 +43,7 @@ use crate::plot::venn::VennPlot;
 use crate::plot::parallel::ParallelPlot;
 use crate::plot::mosaic::MosaicPlot;
 use crate::plot::qq::QQPlot;
+use crate::plot::network::NetworkPlot;
 use crate::plot::streamgraph::StreamgraphPlot;
 use crate::plot::legend::ColorBarInfo;
 use crate::render::render_utils;
@@ -94,6 +95,7 @@ pub enum Plot {
     Mosaic(MosaicPlot),
     Ecdf(EcdfPlot),
     QQ(QQPlot),
+    Network(NetworkPlot),
     Streamgraph(StreamgraphPlot),
 }
 
@@ -142,6 +144,7 @@ impl From<ParallelPlot>    for Plot { fn from(p: ParallelPlot)    -> Self { Plot
 impl From<MosaicPlot>      for Plot { fn from(p: MosaicPlot)      -> Self { Plot::Mosaic(p) } }
 impl From<EcdfPlot>        for Plot { fn from(p: EcdfPlot)        -> Self { Plot::Ecdf(p) } }
 impl From<QQPlot>          for Plot { fn from(p: QQPlot)          -> Self { Plot::QQ(p) } }
+impl From<NetworkPlot>     for Plot { fn from(p: NetworkPlot)     -> Self { Plot::Network(p) } }
 impl From<StreamgraphPlot> for Plot { fn from(p: StreamgraphPlot) -> Self { Plot::Streamgraph(p) } }
 
 use crate::plot::plot3d::DataRanges3D;
@@ -794,7 +797,6 @@ impl Plot {
                     }
                 }
                 if !x_min.is_finite() { return None; }
-                // y is always [0, 1] for ECDF / CCDF
                 Some(((x_min, x_max), (0.0, 1.0)))
             }
             Plot::QQ(qp) => {
@@ -834,6 +836,8 @@ impl Plot {
                     }
                 }
             }
+            // Rendered in pixel space; dummy bounds satisfy Layout::auto_from_plots.
+            Plot::Network(_) => Some(((0.0, 1.0), (0.0, 1.0))),
             Plot::Streamgraph(sg) => {
                 let geom = sg.compute_geometry()?;
                 let x_min = sg.x.iter().cloned().fold(f64::INFINITY, f64::min);
@@ -913,6 +917,7 @@ impl Plot {
                 let band = if qp.show_ci_band { n * 4 } else { 0 };
                 qp.groups.len() * 2 + n + band + 20
             }
+            Plot::Network(n) => n.nodes.len() * 2 + n.edges.len() * 3 + 20,
             Plot::Streamgraph(sg) => {
                 sg.series.len() * (sg.x.len() * 3 + 2) + 20
             }

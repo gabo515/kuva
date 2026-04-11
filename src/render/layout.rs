@@ -596,6 +596,27 @@ impl Layout {
                 }
             }
 
+            if let Plot::Network(net) = plot {
+                if net.legend_label.is_some() {
+                    has_legend = true;
+                    // Measure group labels, or node labels if no groups.
+                    let mut seen_groups: Vec<&str> = Vec::new();
+                    for node in &net.nodes {
+                        if let Some(ref g) = node.group {
+                            if !seen_groups.contains(&g.as_str()) {
+                                max_label_len = max_label_len.max(g.len());
+                                seen_groups.push(g);
+                            }
+                        }
+                    }
+                    if seen_groups.is_empty() {
+                        for node in &net.nodes {
+                            max_label_len = max_label_len.max(node.label.len());
+                        }
+                    }
+                }
+            }
+
             if let Plot::PhyloTree(t) = plot {
                 if t.legend_label.is_some() {
                     has_legend = true;

@@ -191,6 +191,148 @@ let plot = BrickPlot::new()
 
 ---
 
+## Flanked strigars
+
+`with_flanked_strigars` is a convenience wrapper for workflows where each read carries DNA flanking sequence on both sides of the STR region. Pass an iterator of `(left_flank, motif_string, strigar_string, right_flank)` tuples. Flanks are rendered with standard bioinformatics DNA colors (A=green, C=blue, G=orange, T=red) immediately adjacent to the STR bricks.
+
+```rust,no_run
+# use kuva::plot::BrickPlot;
+# use kuva::render::plots::Plot;
+let flanked = vec![
+    // (left_flank, motifs, strigar, right_flank)
+    ("ACGTACGT", "CAG:A,CAA:B", "6A1B8A", "TGCATGCA"),
+    ("ACGTACGT", "CAG:A",       "16A",    "TGCATGCA"),
+];
+
+let plot = BrickPlot::new()
+    .with_names(vec!["consensus", "read_1"])
+    .with_flanked_strigars(flanked);
+```
+
+The motif and strigar strings are processed identically to `with_strigars`. The flank strings are treated as raw DNA sequences — each character becomes one brick with the standard base color.
+
+---
+
+## Right-anchoring
+
+By default all rows are left-aligned (STR start at x = 0 for all reads after offset adjustment). `with_anchor(BrickAnchor::Right)` instead aligns the **trailing edges** of all rows, which is useful when reads end at the same reference position but differ in length.
+
+```rust,no_run
+use kuva::plot::brick::BrickAnchor;
+# use kuva::plot::BrickPlot;
+# use kuva::render::plots::Plot;
+let plot = BrickPlot::new()
+    .with_names(names)
+    .with_strigars(strigars)
+    .with_anchor(BrickAnchor::Right);
+```
+
+`BrickAnchor::Left` is the default. `BrickAnchor::Right` shifts shorter rows rightward so all trailing edges line up on the same vertical.
+
+---
+
+## Consensus-anchored rotation
+
+When multiple reads cover the same STR locus, different reads may describe the same repeat unit using different rotations of the same k-mer (e.g. `CAG`, `AGC`, `GCA`). By default the rotation chosen for the legend is the most frequent one across all reads. `with_consensus_row(i)` locks the rotation to whatever row `i` uses, so the legend always reflects the reference or assembly read:
+
+```rust,no_run
+# use kuva::plot::BrickPlot;
+# use kuva::render::plots::Plot;
+let strigars = vec![
+    ("CAG:A".to_string(), "12A".to_string()),  // consensus — uses CAG
+    ("AGC:A".to_string(), "10A".to_string()),  // same unit, different rotation
+];
+
+let plot = BrickPlot::new()
+    .with_names(vec!["consensus", "read_1"])
+    .with_consensus_row(0)          // lock rotation to row 0's k-mers
+    .with_strigars(strigars);       // must be called after with_consensus_row
+```
+
+`with_consensus_row` must be set **before** `with_strigars` (or `with_flanked_strigars`), as rotation resolution happens during strigar parsing.
+
+---
+
+## Primary motif marker
+
+`with_mark_primary()` appends `*` to the legend label of global letter A (the dominant motif by brick count). This is a visual cue that A is the canonical repeat unit when the plot is shown alongside other data:
+
+```rust,no_run
+# use kuva::plot::BrickPlot;
+let plot = BrickPlot::new()
+    .with_names(names)
+    .with_mark_primary()
+    .with_strigars(strigars);
+// Legend entry for A reads "CAG*" instead of "CAG"
+```
+
+---
+
+## Per-block notation labels
+
+`with_notations` renders `(kmer)count` labels above the bricks for each consecutive run of the same motif. Pass one `Option<String>` per row: `Some(_)` enables labels for that row, `None` disables them. The string content is ignored — labels are always auto-generated from the run-length structure of the expanded strigar.
+
+```rust,no_run
+# use kuva::plot::BrickPlot;
+# use kuva::render::plots::Plot;
+let plot = BrickPlot::new()
+    .with_names(vec!["consensus", "read_1", "read_2"])
+    .with_consensus_row(0)
+    .with_flanked_strigars(flanked)
+    .with_notations(vec![
+        Some("".to_string()),  // enable labels for consensus row
+        None,                  // no labels for read_1
+        None,                  // no labels for read_2
+    ]);
+```
+
+For a consensus row with strigar `6A1B2A1C10A` and motifs `CAG:A, CAA:B, CCG:C`, this renders five separate labels above the corresponding brick runs: `(CAG)6`, `(CAA)1`, `(CAG)2`, `(CCG)1`, `(CAG)10`. Gap bricks (`@`) are skipped.
+
+When labels from adjacent runs overlap in pixel space they are staggered vertically across up to four tiers. The plot canvas automatically gains extra top-margin headroom when any row has notations enabled.
+
+---
+
+## Row ordering
+
+Row 0 is always rendered at the **top** of the plot. The first entry in `with_names` appears at the top of the y-axis. This matches the natural reading order when row 0 is a reference/consensus sequence.
+
+---
+
+## Bladerunner full-pipeline example
+
+Combining all of the above for a typical bladerunner workflow:
+
+```rust,no_run
+use kuva::plot::BrickPlot;
+use kuva::plot::brick::BrickAnchor;
+use kuva::render::plots::Plot;
+use kuva::render::layout::Layout;
+use kuva::render::render::render_multiple;
+use kuva::backend::svg::SvgBackend;
+
+let flanked = vec![
+    // consensus row — row 0, shown at the top with notation labels
+    ("ACGTACGT", "CAG:A,CAA:B,CCG:C", "6A1B2A1C10A", "TGCATGCA"),
+    // supporting reads — no labels
+    ("ACGTACGT", "CAG:A,CCG:B",       "8A1B10A",     "TGCATGCA"),
+    ("ACGTACGT", "CAG:A",             "20A",          "TGCA"),
+];
+
+let plot = BrickPlot::new()
+    .with_names(vec!["consensus", "read_1", "read_2"])
+    .with_consensus_row(0)
+    .with_mark_primary()
+    .with_flanked_strigars(flanked)
+    .with_notations(vec![Some("".to_string()), None, None]);
+
+let plots = vec![Plot::Brick(plot)];
+let layout = Layout::auto_from_plots(&plots).with_title("STR locus");
+let svg = SvgBackend.render_scene(&render_multiple(plots, layout));
+std::fs::write("brick_locus.svg", svg).unwrap();
+```
+
+---
+
 ## Built-in templates
 
 | Method | Alphabet | Colors |
@@ -208,7 +350,7 @@ Access the populated map via `.template` and pass it to `with_template()`.
 |--------|-------------|
 | `BrickPlot::new()` | Create with defaults |
 | `.with_sequences(iter)` | Load character sequences (one string per row) |
-| `.with_names(iter)` | Load row labels (one per sequence) |
+| `.with_names(iter)` | Load row labels (one per sequence); row 0 appears at the top |
 | `.with_template(map)` | Set `HashMap<char, CSS color>` |
 | `.with_x_offset(f)` | Global x-offset applied to all rows (shift left by f nt) |
 | `.with_x_offsets(iter)` | Per-row offsets (`f64` or `Option<f64>`; `None` → global fallback) |
@@ -216,5 +358,10 @@ Access the populated map via `.template` and pass it to `with_template()`.
 | `.with_x_origin(f)` | Reference coordinate mapped to x = 0; applied on top of all per-row offsets |
 | `.with_values()` | Draw character labels inside bricks |
 | `.with_strigars(iter)` | Load strigar data and switch to strigar mode; accepts bladerunner stitched format |
+| `.with_flanked_strigars(iter)` | Like `with_strigars` but each row also carries DNA left/right flanking sequences |
+| `.with_anchor(BrickAnchor)` | `BrickAnchor::Left` (default) or `BrickAnchor::Right` to align trailing edges |
+| `.with_consensus_row(i)` | Lock k-mer rotation to row i's motifs; must be called before `with_strigars` |
+| `.with_mark_primary()` | Append `*` to the legend label for global letter A (the dominant motif) |
+| `.with_notations(iter)` | Per-row `Option<String>`; `Some(_)` = render per-block `(kmer)count` labels above that row |
 | `BrickTemplate::new().dna()` | Pre-built DNA (A/C/G/T) color template |
 | `BrickTemplate::new().rna()` | Pre-built RNA (A/C/G/U) color template |

@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`NetworkPlot`** — new plot type: node-edge network / graph diagram with force-directed (Fruchterman-Reingold) and circular layout algorithms. Supports edge-list and adjacency-matrix input, directed/undirected edges, self-loops, weighted edges (stroke width + opacity), per-node color/size/group, and group-based legends. CLI: `kuva network`.
+
+---
+
 ## [0.1.6] — 2026-04-01
 
 - **`DicePlot`** — new plot type: a grid of cells where each cell shows up to 6 dots in a canonical die-face layout. Ports rendering logic from the [ggdiceplot](https://github.com/maflot/ggdiceplot) R package (v1.2.0). Three input modes: categorical (`with_records`), continuous tile (`with_points`), and per-dot continuous (`with_dot_data`) for ZEBRA-style domino plots. Pip sizing uses the ggdiceplot 1.2.0 tight-packing algorithm with `pip_scale = 0.75` and offset shrinkage. Legend support: spatial-position legend (mini die faces), categorical colour legend, and size legend sections. Column-major grid positions match `make_offsets()`.
@@ -27,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Custom X/Theta-Tick-Labels for `PolarPlot`** — `with_x_tick_format()` now applies to the theta axis on polar plots. New `TickFormat::Degree` default keeps existing behaviour unchanged.
 - **`Layout::with_polar_r_label_angle(deg)`** — override the angle at which r-axis ring labels are drawn (default: midpoint between spokes).
 - **`ForestPlot`** — forest plot for meta-analysis: point estimates with confidence intervals on a categorical Y-axis, vertical dashed null-effect reference line, optional weight-scaled markers. CLI: `kuva forest data.tsv --label-col study --estimate-col estimate --ci-lower-col lower --ci-upper-col upper`.
+- **`Scatter3DPlot`** — 3D scatter plot with orthographic projection, depth-sorted painter's algorithm, z-colormap, depth shading, per-point colors/sizes, configurable markers, and matplotlib-style open-box wireframe with grid on all three back walls. CLI: `kuva scatter3d data.tsv --x x --y y --z z`.
+- **`Surface3DPlot`** — 3D surface mesh rendered as depth-sorted filled quadrilaterals with z-colormap, wireframe edges, alpha transparency, `with_data_fn()` for function sampling, and `--resolution N` bilinear interpolation upsampling. CLI: `kuva surface3d data.tsv --x x --y y --z z --z-color viridis`.
+- **Shared 3D infrastructure** — `Projection3D` orthographic projection module, `View3D` view angles, `Box3DConfig` shared configuration, `draw_3d_box()` reusable box/grid/axes renderer, `DataRanges3D` bounding box, `ColorMap::map_rgb()` zero-allocation colormap path.
+- **`parse_colormap`** consolidated into shared `data.rs` helper (was duplicated 6x across CLI modules).
 - **`Figure::with_twin_y_plots(cell, primary, secondary)`** — twin-Y panels now work inside multi-panel `Figure` grid layouts. Auto-layout via `Layout::auto_from_twin_y_plots`; shared legend collection includes both primary and secondary plots.
 - **Fine-grained axis and grid line controls** — new `Layout` builder methods: `with_axis_line_width(f)`, `with_tick_width(f)`, `with_tick_length(f)`, `with_grid_line_width(f)`. All propagate through `ComputedLayout`; grid lines now drawn before axis borders (z-order fix). CLI: `--tick-length`, `--tick-width`, `--grid-stroke`.
 - **SVG clip-path support** — data elements are now clipped to the plot area, preventing points and lines from rendering outside the axis borders. Implemented via `Primitive::ClipStart`/`ClipEnd`; ignored by terminal and raster backends. Closes #53.

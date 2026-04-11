@@ -24,11 +24,14 @@ use crate::plot::sankey::SankeyPlot;
 use crate::plot::phylo::PhyloTree;
 use crate::plot::synteny::SyntenyPlot;
 use crate::plot::density::DensityPlot;
+use crate::plot::ecdf::EcdfPlot;
 use crate::plot::ridgeline::RidgelinePlot;
 use crate::plot::polar::PolarPlot;
 use crate::plot::ternary::TernaryPlot;
 use crate::plot::diceplot::DicePlot;
 use crate::plot::forest::ForestPlot;
+use crate::plot::scatter3d::Scatter3DPlot;
+use crate::plot::surface3d::Surface3DPlot;
 use crate::plot::clustermap::Clustermap;
 use crate::plot::jointplot::JointPlot;
 use crate::plot::raincloud::RaincloudPlot;
@@ -39,6 +42,9 @@ use crate::plot::slope::SlopePlot;
 use crate::plot::venn::VennPlot;
 use crate::plot::parallel::ParallelPlot;
 use crate::plot::mosaic::MosaicPlot;
+use crate::plot::qq::QQPlot;
+use crate::plot::network::NetworkPlot;
+use crate::plot::streamgraph::StreamgraphPlot;
 use crate::plot::legend::ColorBarInfo;
 use crate::render::render_utils;
 
@@ -75,6 +81,8 @@ pub enum Plot {
     Ternary(TernaryPlot),
     DicePlot(DicePlot),
     Forest(ForestPlot),
+    Scatter3D(Scatter3DPlot),
+    Surface3D(Surface3DPlot),
     Clustermap(Clustermap),
     Joint(JointPlot),
     Raincloud(RaincloudPlot),
@@ -85,6 +93,10 @@ pub enum Plot {
     Venn(VennPlot),
     Parallel(ParallelPlot),
     Mosaic(MosaicPlot),
+    Ecdf(EcdfPlot),
+    QQ(QQPlot),
+    Network(NetworkPlot),
+    Streamgraph(StreamgraphPlot),
 }
 
 impl From<ScatterPlot>    for Plot { fn from(p: ScatterPlot)    -> Self { Plot::Scatter(p) } }
@@ -118,6 +130,8 @@ impl From<PolarPlot>     for Plot { fn from(p: PolarPlot)     -> Self { Plot::Po
 impl From<TernaryPlot>   for Plot { fn from(p: TernaryPlot)   -> Self { Plot::Ternary(p) } }
 impl From<DicePlot>      for Plot { fn from(p: DicePlot)      -> Self { Plot::DicePlot(p) } }
 impl From<ForestPlot>    for Plot { fn from(p: ForestPlot)    -> Self { Plot::Forest(p) } }
+impl From<Scatter3DPlot> for Plot { fn from(p: Scatter3DPlot) -> Self { Plot::Scatter3D(p) } }
+impl From<Surface3DPlot> for Plot { fn from(p: Surface3DPlot) -> Self { Plot::Surface3D(p) } }
 impl From<Clustermap>   for Plot { fn from(p: Clustermap)   -> Self { Plot::Clustermap(p) } }
 impl From<JointPlot>    for Plot { fn from(p: JointPlot)    -> Self { Plot::Joint(p) } }
 impl From<RaincloudPlot> for Plot { fn from(p: RaincloudPlot) -> Self { Plot::Raincloud(p) } }
@@ -128,6 +142,29 @@ impl From<SlopePlot>     for Plot { fn from(p: SlopePlot)     -> Self { Plot::Sl
 impl From<VennPlot>        for Plot { fn from(p: VennPlot)        -> Self { Plot::Venn(p) } }
 impl From<ParallelPlot>    for Plot { fn from(p: ParallelPlot)    -> Self { Plot::Parallel(p) } }
 impl From<MosaicPlot>      for Plot { fn from(p: MosaicPlot)      -> Self { Plot::Mosaic(p) } }
+impl From<EcdfPlot>        for Plot { fn from(p: EcdfPlot)        -> Self { Plot::Ecdf(p) } }
+impl From<QQPlot>          for Plot { fn from(p: QQPlot)          -> Self { Plot::QQ(p) } }
+impl From<NetworkPlot>     for Plot { fn from(p: NetworkPlot)     -> Self { Plot::Network(p) } }
+impl From<StreamgraphPlot> for Plot { fn from(p: StreamgraphPlot) -> Self { Plot::Streamgraph(p) } }
+
+use crate::plot::plot3d::DataRanges3D;
+use crate::plot::heatmap::ColorMap;
+
+fn colorbar_from_z(cmap: &ColorMap, ranges: DataRanges3D, label: Option<String>) -> Option<ColorBarInfo> {
+    let (z_min, z_max) = ranges.z;
+    if !z_min.is_finite() || !z_max.is_finite() { return None; }
+    let cmap = cmap.clone();
+    Some(ColorBarInfo {
+        map_fn: Arc::new(move |t| {
+            let norm = (t - z_min) / (z_max - z_min + f64::EPSILON);
+            cmap.map(norm.clamp(0.0, 1.0))
+        }),
+        min_value: z_min,
+        max_value: z_max,
+        label,
+        tick_labels: None,
+    })
+}
 
 fn bounds_from_2d<I>(points: I) -> Option<((f64, f64), (f64, f64))>
     where
@@ -178,13 +215,17 @@ impl Plot {
             Plot::Strip(s) => s.color = color.into(),
             Plot::Density(d) => d.color = color.into(),
             Plot::Forest(f) => f.color = color.into(),
+            Plot::Scatter3D(s) => s.color = color.into(),
+            Plot::Surface3D(s) => s.color = color.into(),
             Plot::Raincloud(r) => r.color = color.into(),
             Plot::Lollipop(l) => l.color = color.into(),
             Plot::Survival(s) => s.color = color.into(),
             Plot::Roc(r) => r.color = color.into(),
             Plot::Slope(s) => s.color = color.into(),
             Plot::Parallel(p) => p.color = color.into(),
-            _ => {}
+            Plot::Ecdf(e) => e.color = color.into(),
+            Plot::QQ(q) => q.color = color.into(),
+            _ => {}  // multi-series plots (StackedArea, Streamgraph, etc.) skip palette auto-assign
         }
     }
 
@@ -595,21 +636,10 @@ impl Plot {
                     bp.sequences.len()
                 };
 
-                let max_width = if let Some(ref exp) = bp.strigar_exp {
-                    if let Some(ref ml) = bp.motif_lengths {
-                        // Variable-width: sum motif lengths per row
-                        exp.iter().map(|s| {
-                            s.chars().map(|c| *ml.get(&c).unwrap_or(&1) as f64).sum::<f64>()
-                        }).fold(0.0f64, f64::max)
-                    } else {
-                        exp.iter().map(|s| s.len()).max().unwrap_or(0) as f64
-                    }
-                } else {
-                    bp.sequences.iter().map(|s| s.len()).max().unwrap_or(0) as f64
-                };
+                let n_rows = rows;
 
-                // Compute the true x extent across all rows, accounting for per-row offsets.
-                let row_width = |i: usize| -> f64 {
+                // STR width for row i (in data units, excluding flanks).
+                let str_width = |i: usize| -> f64 {
                     if let Some(ref exp) = bp.strigar_exp {
                         if let Some(ref ml) = bp.motif_lengths {
                             exp.get(i).map(|s| {
@@ -622,22 +652,50 @@ impl Plot {
                         bp.sequences.get(i).map(|s| s.len() as f64).unwrap_or(0.0)
                     }
                 };
-                let n_rows = if bp.strigar_exp.is_some() { bp.strigar_exp.as_ref().map_or(0, |e| e.len()) } else { bp.sequences.len() };
-                let (x_min, x_max) = if let Some(ref offsets) = bp.x_offsets {
-                    let mut lo = f64::INFINITY;
-                    let mut hi = f64::NEG_INFINITY;
-                    for i in 0..n_rows {
-                        let off = offsets.get(i).copied().flatten().unwrap_or(bp.x_offset)
-                            + bp.x_origin;
-                        lo = lo.min(0.0 - off);
-                        hi = hi.max(row_width(i) - off);
-                    }
-                    (lo, hi)
-                } else {
-                    let off = bp.x_offset + bp.x_origin;
-                    (0.0 - off, max_width - off)
+                let left_len = |i: usize| -> f64 {
+                    bp.left_flanks.as_ref()
+                        .and_then(|f| f.get(i))
+                        .map(|s| s.chars().count() as f64)
+                        .unwrap_or(0.0)
                 };
-                Some(((x_min, x_max), (0.0, rows as f64)))
+                let right_len = |i: usize| -> f64 {
+                    bp.right_flanks.as_ref()
+                        .and_then(|f| f.get(i))
+                        .map(|s| s.chars().count() as f64)
+                        .unwrap_or(0.0)
+                };
+
+                // For right-anchor, all trailing edges align at max(str_width + right_len).
+                // The right-align shift per row is max_right - row_right, which moves shorter
+                // rows rightward. x_lo / x_hi must account for this shift.
+                use crate::plot::BrickAnchor;
+                let right_edges: Vec<f64> = (0..n_rows).map(|i| str_width(i) + right_len(i)).collect();
+                let max_right = right_edges.iter().cloned().fold(0.0_f64, f64::max);
+                let ra_shift = |i: usize| -> f64 {
+                    if bp.anchor == BrickAnchor::Right { max_right - right_edges[i] } else { 0.0 }
+                };
+
+                let row_base_off = |i: usize| -> f64 {
+                    let per_row = if let Some(ref offsets) = bp.x_offsets {
+                        offsets.get(i).copied().flatten().unwrap_or(bp.x_offset)
+                    } else {
+                        bp.x_offset
+                    };
+                    per_row + bp.x_origin
+                };
+
+                // x extent: from leftmost flank to rightmost trailing edge across all rows.
+                let mut lo = f64::INFINITY;
+                let mut hi = f64::NEG_INFINITY;
+                for i in 0..n_rows {
+                    let eff_off = row_base_off(i) - ra_shift(i);
+                    lo = lo.min(-left_len(i) - eff_off);
+                    hi = hi.max(str_width(i) + right_len(i) - eff_off);
+                }
+                if !lo.is_finite() { lo = 0.0; }
+                if !hi.is_finite() { hi = 1.0; }
+
+                Some(((lo, hi), (0.0, rows as f64)))
             }
             Plot::Forest(fp) => {
                 if fp.rows.is_empty() { return None; }
@@ -657,6 +715,9 @@ impl Plot {
                 }
                 if !x_min.is_finite() { return None; }
                 Some(((x_min, x_max), (y_min, y_max)))
+            }
+            Plot::Scatter3D(_) | Plot::Surface3D(_) => {
+                Some(((-1.0, 1.0), (-1.0, 1.0)))
             }
             // Pixel-space plot — returns dummy bounds so Layout gets a valid range.
             Plot::Clustermap(_) => Some(((0.0, 1.0), (0.0, 1.0))),
@@ -725,6 +786,68 @@ impl Plot {
             Plot::Parallel(_) => Some(((-1.0, 1.0), (-1.0, 1.0))),
             // Pixel-space plot — no axis bounds needed
             Plot::Mosaic(_) => None,
+            Plot::Ecdf(ep) => {
+                if ep.groups.is_empty() { return None; }
+                let mut x_min = f64::INFINITY;
+                let mut x_max = f64::NEG_INFINITY;
+                for group in &ep.groups {
+                    for &v in &group.data {
+                        x_min = x_min.min(v);
+                        x_max = x_max.max(v);
+                    }
+                }
+                if !x_min.is_finite() { return None; }
+                Some(((x_min, x_max), (0.0, 1.0)))
+            }
+            Plot::QQ(qp) => {
+                use crate::plot::qq::QQMode;
+                use crate::render::render_utils::probit;
+                if qp.groups.is_empty() { return None; }
+                match qp.mode {
+                    QQMode::Normal => {
+                        let n_max = qp.groups.iter().map(|g| g.data.len()).max().unwrap_or(0);
+                        if n_max == 0 { return None; }
+                        let th_min = probit(0.5 / n_max as f64);
+                        let th_max = probit(1.0 - 0.5 / n_max as f64);
+                        let mut y_min = f64::INFINITY;
+                        let mut y_max = f64::NEG_INFINITY;
+                        for g in &qp.groups {
+                            for &v in &g.data {
+                                y_min = y_min.min(v);
+                                y_max = y_max.max(v);
+                            }
+                        }
+                        if !y_min.is_finite() { return None; }
+                        Some(((th_min, th_max), (y_min, y_max)))
+                    }
+                    QQMode::Genomic => {
+                        let n_max = qp.groups.iter().map(|g| g.data.len()).max().unwrap_or(0);
+                        if n_max == 0 { return None; }
+                        let x_max = (2.0 * n_max as f64).log10();
+                        let mut y_max: f64 = 0.0;
+                        for g in &qp.groups {
+                            for &p in &g.data {
+                                if p > 0.0 && p <= 1.0 {
+                                    y_max = y_max.max(-p.log10());
+                                }
+                            }
+                        }
+                        Some(((0.0, x_max), (0.0, y_max)))
+                    }
+                }
+            }
+            // Rendered in pixel space; dummy bounds satisfy Layout::auto_from_plots.
+            Plot::Network(_) => Some(((0.0, 1.0), (0.0, 1.0))),
+            Plot::Streamgraph(sg) => {
+                let geom = sg.compute_geometry()?;
+                let x_min = sg.x.iter().cloned().fold(f64::INFINITY, f64::min);
+                let x_max = sg.x.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+                let y_min = geom.baseline.iter().cloned().fold(f64::INFINITY, f64::min);
+                let y_max = geom.uppers.last()
+                    .map(|u| u.iter().cloned().fold(f64::NEG_INFINITY, f64::max))
+                    .unwrap_or(0.0);
+                Some(((x_min, x_max), (y_min, y_max)))
+            }
         }
     }
 
@@ -754,6 +877,11 @@ impl Plot {
                 rows * avg_cols + 10
             }
             Plot::Forest(f) => f.rows.len() * 4 + 5,
+            Plot::Scatter3D(s) => s.data.len() + 70,
+            Plot::Surface3D(s) => {
+                let n = s.nrows().saturating_sub(1) * s.ncols().saturating_sub(1);
+                n + 70
+            }
             Plot::Clustermap(c) => {
                 let cells: usize = c.data.iter().map(|r| r.len()).sum();
                 cells + 500
@@ -777,6 +905,21 @@ impl Plot {
                 let nc = mp.effective_col_order().len();
                 let nr = mp.effective_row_order().len();
                 nc * nr * 2 + nc + nr + 30
+            }
+            Plot::Ecdf(ep) => {
+                let n: usize = ep.groups.iter().map(|g| g.data.len()).sum();
+                let band = if ep.show_confidence_band { n * 4 } else { 0 };
+                let rug = if ep.show_rug { n } else { 0 };
+                ep.groups.len() * 2 + n * 2 + band + rug + 20
+            }
+            Plot::QQ(qp) => {
+                let n: usize = qp.groups.iter().map(|g| g.data.len()).sum();
+                let band = if qp.show_ci_band { n * 4 } else { 0 };
+                qp.groups.len() * 2 + n + band + 20
+            }
+            Plot::Network(n) => n.nodes.len() * 2 + n.edges.len() * 3 + 20,
+            Plot::Streamgraph(sg) => {
+                sg.series.len() * (sg.x.len() * 3 + 2) + 20
             }
             _ => 100,
         }
@@ -909,6 +1052,8 @@ impl Plot {
                     tick_labels: None,
                 })
             }
+            Plot::Surface3D(s) => colorbar_from_z(s.z_colormap.as_ref()?, s.data_ranges()?, s.box3d.z_label.clone()),
+            Plot::Scatter3D(s) => colorbar_from_z(s.z_colormap.as_ref()?, s.data_ranges()?, s.box3d.z_label.clone()),
             _ => None,
         }
     }

@@ -370,6 +370,75 @@ fn test_synteny_svg() {
     assert!(stdout.starts_with("<svg"), "output should start with <svg");
 }
 
+#[test]
+fn test_network_svg() {
+    let (stdout, stderr, code) = run_with_file(&[
+        "network", &data("network.tsv"),
+        "--source-col", "source", "--target-col", "target",
+        "--title", "Gene Regulatory Network",
+    ]);
+    assert_eq!(code, 0, "exit code should be 0; stderr: {stderr}");
+    assert!(stdout.starts_with("<svg"), "output should start with <svg");
+}
+
+#[test]
+fn test_network_has_circles() {
+    let (stdout, _stderr, code) = run_with_file(&[
+        "network", &data("network.tsv"),
+        "--source-col", "source", "--target-col", "target",
+        "--labels",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("<circle"), "network SVG should contain <circle elements for nodes");
+    assert!(stdout.contains("<text"), "network SVG with --labels should contain <text elements");
+}
+
+#[test]
+fn test_network_matrix_svg() {
+    let (stdout, stderr, code) = run_with_file(&[
+        "network", &data("network_matrix.tsv"),
+        "--matrix", "--directed", "--labels",
+        "--title", "Matrix Network",
+    ]);
+    assert_eq!(code, 0, "exit code should be 0; stderr: {stderr}");
+    assert!(stdout.starts_with("<svg"), "output should start with <svg");
+    assert!(stdout.contains("<circle"), "matrix network should have nodes");
+}
+
+#[test]
+fn test_network_kk_layout() {
+    let (stdout, stderr, code) = run_with_file(&[
+        "network", &data("network.tsv"),
+        "--source-col", "source", "--target-col", "target",
+        "--layout", "kk", "--labels",
+    ]);
+    assert_eq!(code, 0, "exit code should be 0; stderr: {stderr}");
+    assert!(stdout.starts_with("<svg"), "output should start with <svg");
+}
+
+#[test]
+fn test_network_directed_weighted() {
+    let (stdout, stderr, code) = run_with_file(&[
+        "network", &data("network.tsv"),
+        "--source-col", "source", "--target-col", "target",
+        "--weight-col", "weight", "--directed", "--labels",
+        "--group-col", "group", "--legend", "pathway",
+    ]);
+    assert_eq!(code, 0, "exit code should be 0; stderr: {stderr}");
+    assert!(stdout.contains("<path"), "directed network should have arrowhead paths");
+}
+
+#[test]
+fn test_network_bad_layout_errors() {
+    let (_stdout, stderr, code) = run_with_file(&[
+        "network", &data("network.tsv"),
+        "--source-col", "source", "--target-col", "target",
+        "--layout", "bogus",
+    ]);
+    assert_ne!(code, 0, "bad layout should fail");
+    assert!(stderr.contains("unknown layout"), "error should mention unknown layout");
+}
+
 // ─── Tier 2: Content verification tests ──────────────────────────────────────
 
 #[test]
@@ -664,6 +733,67 @@ fn test_forest_has_lines_and_circles() {
     assert!(stdout.contains("<rect"), "SVG should contain rect elements (point estimates)");
     assert!(stdout.contains("stroke-dasharray"), "SVG should contain dashed null line");
 }
+
+// ── scatter3d ────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_scatter3d_svg() {
+    let (stdout, stderr, code) = run_with_file(&[
+        "scatter3d", &data("scatter3d.tsv"),
+        "--x", "x", "--y", "y", "--z", "z",
+        "--title", "3D Scatter", "--x-label", "X", "--y-label", "Y", "--z-label", "Z",
+    ]);
+    assert_eq!(code, 0, "exit code should be 0; stderr: {stderr}");
+    assert!(stdout.starts_with("<svg"), "output should start with <svg");
+}
+
+#[test]
+fn test_scatter3d_has_circles_and_lines() {
+    let (stdout, stderr, code) = run_with_file(&[
+        "scatter3d", &data("scatter3d.tsv"),
+        "--x", "x", "--y", "y", "--z", "z",
+    ]);
+    assert_eq!(code, 0, "exit code should be 0; stderr: {stderr}");
+    assert!(stdout.contains("<circle"), "SVG should contain circle markers");
+    assert!(stdout.contains("<line"), "SVG should contain line elements (box edges)");
+}
+
+#[test]
+fn test_scatter3d_color_by() {
+    let (stdout, stderr, code) = run_with_file(&[
+        "scatter3d", &data("scatter3d.tsv"),
+        "--x", "x", "--y", "y", "--z", "z", "--color-by", "group",
+    ]);
+    assert_eq!(code, 0, "exit code should be 0; stderr: {stderr}");
+    assert!(stdout.starts_with("<svg"), "output should start with <svg");
+    assert!(stdout.contains("<circle"), "SVG should contain circle markers");
+}
+
+// ── surface3d ────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_surface3d_svg() {
+    let (stdout, stderr, code) = run_with_file(&[
+        "surface3d", &data("surface3d.tsv"),
+        "--x", "x", "--y", "y", "--z", "z",
+        "--z-color", "viridis",
+        "--title", "3D Surface",
+    ]);
+    assert_eq!(code, 0, "exit code should be 0; stderr: {stderr}");
+    assert!(stdout.starts_with("<svg"), "output should start with <svg");
+}
+
+#[test]
+fn test_surface3d_has_paths() {
+    let (stdout, stderr, code) = run_with_file(&[
+        "surface3d", &data("surface3d.tsv"),
+        "--x", "x", "--y", "y", "--z", "z",
+    ]);
+    assert_eq!(code, 0, "exit code should be 0; stderr: {stderr}");
+    assert!(stdout.contains("<path"), "SVG should contain path elements (surface faces)");
+}
+
+// ── misc ─────────────────────────────────────────────────────────────────────
 
 #[test]
 fn test_unknown_subcommand() {

@@ -24,10 +24,16 @@ mod sankey;
 mod phylo;
 mod synteny;
 mod density;
+mod ecdf;
+mod qq;
+mod streamgraph;
 mod ridgeline;
 mod polar;
 mod ternary;
 mod forest;
+mod scatter3d;
+mod surface3d;
+mod network;
 #[cfg(feature = "doom")]
 mod doom;
 
@@ -70,11 +76,22 @@ enum Commands {
     Synteny(synteny::SyntenyArgs),
     #[command(name = "density")]
     Density(density::DensityArgs),
+    #[command(name = "ecdf")]
+    Ecdf(ecdf::EcdfArgs),
+    #[command(name = "qq")]
+    QQ(qq::QQArgs),
+    #[command(name = "streamgraph")]
+    Streamgraph(streamgraph::StreamgraphArgs),
     #[command(name = "ridgeline")]
     Ridgeline(ridgeline::RidgelineArgs),
     Polar(polar::PolarArgs),
     Ternary(ternary::TernaryArgs),
     Forest(forest::ForestArgs),
+    #[command(name = "scatter3d")]
+    Scatter3D(scatter3d::Scatter3DArgs),
+    #[command(name = "surface3d")]
+    Surface3D(surface3d::Surface3DArgs),
+    Network(network::NetworkArgs),
     #[cfg(feature = "doom")]
     /// Generate a self-contained DOOM SVG playable in any browser.
     Doom(doom::DoomArgs),
@@ -115,10 +132,16 @@ fn main() {
         Commands::Phylo(args) => phylo::run(args),
         Commands::Synteny(args) => synteny::run(args),
         Commands::Density(args) => density::run(args),
+        Commands::Ecdf(args) => ecdf::run(args),
+        Commands::QQ(args) => qq::run(args),
+        Commands::Streamgraph(args) => streamgraph::run(args),
         Commands::Ridgeline(args) => ridgeline::run(args),
         Commands::Polar(args) => polar::run(args),
         Commands::Ternary(args) => ternary::run(args),
         Commands::Forest(args) => forest::run(args),
+        Commands::Scatter3D(args) => scatter3d::run(args),
+        Commands::Surface3D(args) => surface3d::run(args),
+        Commands::Network(args) => network::run(args),
         #[cfg(feature = "doom")]
         Commands::Doom(args) => doom::run(args),
         Commands::Man => unreachable!(),

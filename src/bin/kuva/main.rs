@@ -34,6 +34,7 @@ mod forest;
 mod scatter3d;
 mod surface3d;
 mod network;
+mod radar;
 #[cfg(feature = "doom")]
 mod doom;
 
@@ -92,6 +93,7 @@ enum Commands {
     #[command(name = "surface3d")]
     Surface3D(surface3d::Surface3DArgs),
     Network(network::NetworkArgs),
+    Radar(radar::RadarArgs),
     #[cfg(feature = "doom")]
     /// Generate a self-contained DOOM SVG playable in any browser.
     Doom(doom::DoomArgs),
@@ -142,6 +144,7 @@ fn main() {
         Commands::Scatter3D(args) => scatter3d::run(args),
         Commands::Surface3D(args) => surface3d::run(args),
         Commands::Network(args) => network::run(args),
+        Commands::Radar(args) => radar::run(args),
         #[cfg(feature = "doom")]
         Commands::Doom(args) => doom::run(args),
         Commands::Man => unreachable!(),

@@ -45,6 +45,7 @@ use crate::plot::mosaic::MosaicPlot;
 use crate::plot::qq::QQPlot;
 use crate::plot::network::NetworkPlot;
 use crate::plot::streamgraph::StreamgraphPlot;
+use crate::plot::radar::RadarPlot;
 use crate::plot::legend::ColorBarInfo;
 use crate::render::render_utils;
 
@@ -97,6 +98,7 @@ pub enum Plot {
     QQ(QQPlot),
     Network(NetworkPlot),
     Streamgraph(StreamgraphPlot),
+    Radar(RadarPlot),
 }
 
 impl From<ScatterPlot>    for Plot { fn from(p: ScatterPlot)    -> Self { Plot::Scatter(p) } }
@@ -146,6 +148,7 @@ impl From<EcdfPlot>        for Plot { fn from(p: EcdfPlot)        -> Self { Plot
 impl From<QQPlot>          for Plot { fn from(p: QQPlot)          -> Self { Plot::QQ(p) } }
 impl From<NetworkPlot>     for Plot { fn from(p: NetworkPlot)     -> Self { Plot::Network(p) } }
 impl From<StreamgraphPlot> for Plot { fn from(p: StreamgraphPlot) -> Self { Plot::Streamgraph(p) } }
+impl From<RadarPlot>       for Plot { fn from(p: RadarPlot)       -> Self { Plot::Radar(p) } }
 
 use crate::plot::plot3d::DataRanges3D;
 use crate::plot::heatmap::ColorMap;
@@ -838,6 +841,7 @@ impl Plot {
             }
             // Rendered in pixel space; dummy bounds satisfy Layout::auto_from_plots.
             Plot::Network(_) => Some(((0.0, 1.0), (0.0, 1.0))),
+            Plot::Radar(_) => Some(((0.0, 1.0), (0.0, 1.0))),
             Plot::Streamgraph(sg) => {
                 let geom = sg.compute_geometry()?;
                 let x_min = sg.x.iter().cloned().fold(f64::INFINITY, f64::min);
@@ -918,6 +922,7 @@ impl Plot {
                 qp.groups.len() * 2 + n + band + 20
             }
             Plot::Network(n) => n.nodes.len() * 2 + n.edges.len() * 3 + 20,
+            Plot::Radar(r) => r.series.len() * (r.axes.len() + 2) + r.grid_lines * r.axes.len() + 30,
             Plot::Streamgraph(sg) => {
                 sg.series.len() * (sg.x.len() * 3 + 2) + 20
             }

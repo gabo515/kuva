@@ -46,6 +46,7 @@ pub mod mosaic;
 pub mod qq;
 pub mod network;
 pub mod streamgraph;
+pub mod radar;
 
 pub mod legend;
 
@@ -99,5 +100,6 @@ pub use mosaic::{MosaicPlot, MosaicCell};
 pub use qq::{QQPlot, QQGroup, QQMode};
 pub use network::{NetworkPlot, NetworkNode, NetworkEdge, NetworkLayout, NodeShape};
 pub use streamgraph::{StreamgraphPlot, StreamBaseline, StreamOrder};
+pub use radar::{RadarPlot, RadarReference, RadarSeries};
 
 pub use legend::{Legend, LegendEntry, LegendShape, LegendPosition, LegendGroup};

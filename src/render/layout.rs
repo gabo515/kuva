@@ -598,6 +598,22 @@ impl Layout {
                 }
             }
 
+            if let Plot::Radar(rp) = plot {
+                if rp.show_legend {
+                    has_legend = true;
+                    for s in &rp.series {
+                        if let Some(ref lbl) = s.label {
+                            max_label_len = max_label_len.max(lbl.len());
+                        }
+                    }
+                    for r in &rp.references {
+                        if let Some(ref lbl) = r.label {
+                            max_label_len = max_label_len.max(lbl.len());
+                        }
+                    }
+                }
+            }
+
             if let Plot::Network(net) = plot {
                 if net.legend_label.is_some() {
                     has_legend = true;

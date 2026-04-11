@@ -8411,6 +8411,36 @@ pub fn collect_legend_entries(plots: &[Plot]) -> Vec<LegendEntry> {
                     }
                 }
             }
+            Plot::Radar(rp) => {
+                if rp.show_legend {
+                    use crate::render::palette::Palette;
+                    let pal = Palette::category10();
+                    for (i, s) in rp.series.iter().enumerate() {
+                        if let Some(ref lbl) = s.label {
+                            let color = s.color.clone()
+                                .unwrap_or_else(|| pal[i].to_string());
+                            entries.push(LegendEntry {
+                                label: lbl.clone(),
+                                color,
+                                shape: LegendShape::Line,
+                                dasharray: s.dasharray.clone(),
+                            });
+                        }
+                    }
+                    for ref_poly in &rp.references {
+                        if let Some(ref lbl) = ref_poly.label {
+                            let color = ref_poly.color.clone()
+                                .unwrap_or_else(|| "#999999".to_string());
+                            entries.push(LegendEntry {
+                                label: lbl.clone(),
+                                color,
+                                shape: LegendShape::Line,
+                                dasharray: Some("6,3".to_string()),
+                            });
+                        }
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -10217,7 +10247,7 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
             Plot::Pie(_) | Plot::UpSet(_) | Plot::Chord(_) | Plot::Sankey(_)
             | Plot::PhyloTree(_) | Plot::Synteny(_) | Plot::Polar(_) | Plot::Ternary(_)
             | Plot::Scatter3D(_) | Plot::Surface3D(_) | Plot::Clustermap(_) | Plot::Joint(_) | Plot::Venn(_) | Plot::Parallel(_)
-            | Plot::Mosaic(_) | Plot::Network(_)));
+            | Plot::Mosaic(_) | Plot::Network(_) | Plot::Radar(_)));
         if !skip_axes_for_meta {
             scene.axis_meta = Some(AxisMeta {
                 x_min: computed.x_range.0,
@@ -10234,7 +10264,7 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
         }
     }
 
-    let skip_axes = plots.iter().all(|p| matches!(p, Plot::Pie(_) | Plot::UpSet(_) | Plot::Chord(_) | Plot::Sankey(_) | Plot::PhyloTree(_) | Plot::Synteny(_) | Plot::Polar(_) | Plot::Ternary(_) | Plot::DicePlot(_) | Plot::Scatter3D(_) | Plot::Surface3D(_) | Plot::Clustermap(_) | Plot::Joint(_) | Plot::Venn(_) | Plot::Parallel(_) | Plot::Mosaic(_) | Plot::Network(_)));
+    let skip_axes = plots.iter().all(|p| matches!(p, Plot::Pie(_) | Plot::UpSet(_) | Plot::Chord(_) | Plot::Sankey(_) | Plot::PhyloTree(_) | Plot::Synteny(_) | Plot::Polar(_) | Plot::Ternary(_) | Plot::DicePlot(_) | Plot::Scatter3D(_) | Plot::Surface3D(_) | Plot::Clustermap(_) | Plot::Joint(_) | Plot::Venn(_) | Plot::Parallel(_) | Plot::Mosaic(_) | Plot::Network(_) | Plot::Radar(_)));
     if !skip_axes {
         add_axes_and_grid(&mut scene, &computed, &layout);
     }
@@ -10470,6 +10500,9 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
             }
             Plot::Streamgraph(sg) => {
                 add_streamgraph(sg, &mut scene, &computed);
+            }
+            Plot::Radar(rp) => {
+                add_radar(rp, &mut scene, &computed);
             }
         }
     }
@@ -12834,5 +12867,437 @@ fn add_network(net: &NetworkPlot, scene: &mut Scene, computed: &ComputedLayout) 
             });
         }
     }
+}
+
+// ── Radar / spider chart ──────────────────────────────────────────────────────
+
+fn add_radar(rp: &crate::plot::radar::RadarPlot, scene: &mut Scene, computed: &ComputedLayout) {
+    use crate::render::palette::Palette;
+    use std::f64::consts::PI;
+
+    let n = rp.axes.len();
+    if n < 3 { return; }
+    if rp.series.is_empty() && rp.references.is_empty() { return; }
+
+    let pal = Palette::category10();
+    let theme = &computed.theme;
+
+    // ── Layout ────────────────────────────────────────────────────────────────
+    let plot_w = computed.plot_width();
+    let plot_h = computed.height - computed.margin_top - computed.margin_bottom;
+    let cx = computed.margin_left + plot_w / 2.0;
+    let cy = computed.margin_top  + plot_h / 2.0;
+    let radius = (plot_w.min(plot_h) / 2.0) * 0.65;
+
+    // ── Per-axis data min/max ─────────────────────────────────────────────────
+    let mut axis_min = vec![f64::INFINITY; n];
+    let mut axis_max = vec![f64::NEG_INFINITY; n];
+    for s in &rp.series {
+        for (i, &v) in s.values.iter().enumerate().take(n) {
+            axis_min[i] = axis_min[i].min(v);
+            axis_max[i] = axis_max[i].max(v);
+        }
+        if let Some(errs) = &s.errors {
+            for (i, (&v, &e)) in s.values.iter().zip(errs.iter()).enumerate().take(n) {
+                axis_min[i] = axis_min[i].min(v - e);
+                axis_max[i] = axis_max[i].max(v + e);
+            }
+        }
+    }
+    for i in 0..n {
+        if !axis_min[i].is_finite() { axis_min[i] = 0.0; }
+        if !axis_max[i].is_finite() { axis_max[i] = 1.0; }
+        if axis_min[i] >= axis_max[i] { axis_max[i] = axis_min[i] + 1.0; }
+    }
+
+    let (shared_min, shared_max) = if let Some((lo, hi)) = rp.range {
+        (lo, hi)
+    } else {
+        let all_min = axis_min.iter().cloned().fold(f64::INFINITY, f64::min);
+        let all_max = axis_max.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        (all_min.min(0.0), all_max)
+    };
+    let shared_span = (shared_max - shared_min).max(f64::EPSILON);
+
+    // frac: map a value on axis `ax` to [0,1] radius fraction, respecting
+    // per-axis ranges, normalize, and inversion.
+    let frac = |value: f64, ax: usize| -> f64 {
+        let (lo, hi) = if let Some(Some((alo, ahi))) = rp.axis_ranges.get(ax) {
+            (*alo, *ahi)
+        } else if rp.normalize {
+            (axis_min[ax], axis_max[ax])
+        } else {
+            (shared_min, shared_max)
+        };
+        let span = (hi - lo).max(f64::EPSILON);
+        let f = ((value - lo) / span).clamp(0.0, 1.0);
+        if rp.inverted_axes.get(ax).copied().unwrap_or(false) { 1.0 - f } else { f }
+    };
+
+    let start_rad = rp.start_angle_deg.to_radians();
+    let angle = |i: usize| -> f64 { start_rad + (i as f64 * 2.0 * PI / n as f64) };
+
+    let axis_px = |i: usize, fr: f64| -> (f64, f64) {
+        let th = angle(i);
+        (round2(cx + fr * radius * th.cos()), round2(cy + fr * radius * th.sin()))
+    };
+
+    // ── Grid ─────────────────────────────────────────────────────────────────
+    if rp.show_grid {
+        let grid_color = &theme.grid_color;
+        let grid_sw = computed.grid_stroke_width;
+
+        // Radial axis lines
+        for i in 0..n {
+            let (ox, oy) = axis_px(i, 1.0);
+            scene.add(Primitive::Line {
+                x1: round2(cx), y1: round2(cy),
+                x2: ox, y2: oy,
+                stroke: Color::from(grid_color.as_str()),
+                stroke_width: grid_sw,
+                stroke_dasharray: None,
+            });
+        }
+
+        // Concentric rings (polygon or circular)
+        for k in 1..=rp.grid_lines {
+            let fr = k as f64 / rp.grid_lines as f64;
+
+            let ring_d = if rp.circular_grid {
+                let r = round2(fr * radius);
+                let cxr = round2(cx - r);
+                let cxl = round2(cx + r);
+                let cy2 = round2(cy);
+                format!(
+                    "M {},{} A {},{},0,1,0,{},{} A {},{},0,1,0,{},{} Z",
+                    cxr, cy2, r, r, cxl, cy2, r, r, cxr, cy2
+                )
+            } else {
+                let pts: Vec<(f64, f64)> = (0..n).map(|i| axis_px(i, fr)).collect();
+                radar_polygon_path(&pts)
+            };
+
+            scene.add(Primitive::Path(Box::new(PathData {
+                d: ring_d,
+                fill: None,
+                stroke: Color::from(grid_color.as_str()),
+                stroke_width: grid_sw,
+                opacity: None,
+                stroke_dasharray: Some("4,3".to_string()),
+            })));
+
+            // Ring value label next to axis 0
+            let label_val = if rp.normalize {
+                format!("{:.0}%", fr * 100.0)
+            } else {
+                let v = shared_min + fr * shared_span;
+                if v == v.round() && v.abs() < 1e6 {
+                    format!("{:.0}", v)
+                } else {
+                    format!("{:.2}", v)
+                }
+            };
+            let (lx, ly) = axis_px(0, fr);
+            let th0 = angle(0);
+            // Offset label slightly perpendicular (left of axis) so it clears the ring line
+            let perp_off_x = -th0.sin() * 4.0 + 3.0;
+            let perp_off_y = th0.cos() * 4.0;
+            scene.add(Primitive::Text {
+                x: round2(lx + perp_off_x),
+                y: round2(ly + perp_off_y),
+                content: label_val,
+                size: (computed.tick_size as f64 * 0.8) as u32,
+                anchor: TextAnchor::Start,
+                rotate: None,
+                bold: false,
+                color: Some(Color::from(theme.tick_color.as_str())),
+            });
+        }
+
+        // Axis tick marks
+        if rp.axis_ticks {
+            let tick_len = 5.0;
+            for i in 0..n {
+                let th = angle(i);
+                let (perp_x, perp_y) = (-th.sin(), th.cos());
+                for k in 1..=rp.grid_lines {
+                    let fr = k as f64 / rp.grid_lines as f64;
+                    let (px, py) = axis_px(i, fr);
+                    scene.add(Primitive::Line {
+                        x1: round2(px - perp_x * tick_len / 2.0),
+                        y1: round2(py - perp_y * tick_len / 2.0),
+                        x2: round2(px + perp_x * tick_len / 2.0),
+                        y2: round2(py + perp_y * tick_len / 2.0),
+                        stroke: Color::from(theme.tick_color.as_str()),
+                        stroke_width: 1.0,
+                        stroke_dasharray: None,
+                    });
+                }
+            }
+        }
+    }
+
+    // ── Axis labels ───────────────────────────────────────────────────────────
+    let label_r = 1.18;
+    let label_size = computed.tick_size;
+    let line_h = label_size as f64 * 1.2;
+
+    for i in 0..n {
+        let th = angle(i);
+        let lx = cx + label_r * radius * th.cos();
+        let ly = cy + label_r * radius * th.sin();
+        let anchor = if th.cos() > 0.2 {
+            TextAnchor::Start
+        } else if th.cos() < -0.2 {
+            TextAnchor::End
+        } else {
+            TextAnchor::Middle
+        };
+        // Vertical baseline adjustment: bottom labels shift down, top labels align at baseline
+        let base_dy = if th.sin() > 0.2 {
+            label_size as f64 * 0.9
+        } else if th.sin() < -0.2 {
+            0.0
+        } else {
+            label_size as f64 * 0.45
+        };
+
+        let lines = radar_wrap_label(&rp.axes[i], 12);
+        // Vertical placement of the text block:
+        //   Top labels (sin < −0.2): last line at ly (away from chart), earlier lines above.
+        //   Bottom labels (sin > 0.2): first line at ly+base_dy, subsequent lines below.
+        //   Side labels: block centred at ly+base_dy.
+        let start_y = if th.sin() < -0.2 {
+            // Anchor the BOTTOM of the block at ly so multi-line goes upward, not into chart.
+            round2(ly + base_dy - (lines.len() as f64 - 1.0) * line_h)
+        } else if th.sin() > 0.2 {
+            round2(ly + base_dy)
+        } else {
+            round2(ly + base_dy - (lines.len() as f64 - 1.0) * line_h / 2.0)
+        };
+
+        for (li, line) in lines.iter().enumerate() {
+            scene.add(Primitive::Text {
+                x: round2(lx),
+                y: round2(start_y + li as f64 * line_h),
+                content: line.clone(),
+                size: label_size,
+                anchor,
+                rotate: None,
+                bold: false,
+                color: None,
+            });
+        }
+    }
+
+    // ── Reference polygons (drawn before series so they stay behind) ──────────
+    for ref_poly in &rp.references {
+        let ref_color = ref_poly.color.as_deref().unwrap_or("#999999");
+        let pts: Vec<(f64, f64)> = ref_poly.values.iter().enumerate().take(n)
+            .map(|(i, &v)| axis_px(i, frac(v, i)))
+            .collect();
+        if pts.len() < 3 { continue; }
+        scene.add(Primitive::Path(Box::new(PathData {
+            d: radar_polygon_path(&pts),
+            fill: None,
+            stroke: Color::from(ref_color),
+            stroke_width: rp.stroke_width * 0.8,
+            opacity: None,
+            stroke_dasharray: Some("6,3".to_string()),
+        })));
+    }
+
+    // ── Series polygons ───────────────────────────────────────────────────────
+    for (si, series) in rp.series.iter().enumerate() {
+        let color = series.color.clone().unwrap_or_else(|| pal[si].to_string());
+
+        // Error band (shaded region between value±error)
+        if let Some(errors) = &series.errors {
+            let outer: Vec<(f64, f64)> = series.values.iter().enumerate().take(n)
+                .map(|(i, &v)| axis_px(i, frac(v + errors.get(i).copied().unwrap_or(0.0), i)))
+                .collect();
+            let inner: Vec<(f64, f64)> = series.values.iter().enumerate().take(n)
+                .map(|(i, &v)| axis_px(i, frac(v - errors.get(i).copied().unwrap_or(0.0), i)))
+                .collect();
+            if outer.len() >= 3 && inner.len() >= 3 {
+                scene.add(Primitive::Path(Box::new(PathData {
+                    d: radar_band_path(&outer, &inner),
+                    fill: Some(Color::from(color.as_str())),
+                    stroke: Color::from(color.as_str()),
+                    stroke_width: 0.5,
+                    opacity: Some((rp.opacity * 0.6).max(0.1)),
+                    stroke_dasharray: None,
+                })));
+            }
+        }
+
+        let pts: Vec<(f64, f64)> = series.values.iter().enumerate().take(n)
+            .map(|(i, &v)| axis_px(i, frac(v, i)))
+            .collect();
+
+        if pts.len() < 3 { continue; }
+        let path = radar_polygon_path(&pts);
+
+        if rp.filled {
+            scene.add(Primitive::Path(Box::new(PathData {
+                d: path.clone(),
+                fill: Some(Color::from(color.as_str())),
+                stroke: Color::from(color.as_str()),
+                stroke_width: rp.stroke_width,
+                opacity: Some(rp.opacity),
+                stroke_dasharray: series.dasharray.clone(),
+            })));
+        } else {
+            scene.add(Primitive::Path(Box::new(PathData {
+                d: path,
+                fill: None,
+                stroke: Color::from(color.as_str()),
+                stroke_width: rp.stroke_width,
+                opacity: None,
+                stroke_dasharray: series.dasharray.clone(),
+            })));
+        }
+
+        if let Some(r) = rp.dot_size {
+            for &(px, py) in &pts {
+                scene.add(Primitive::Circle {
+                    cx: px, cy: py, r,
+                    fill: Color::from(color.as_str()),
+                    fill_opacity: None,
+                    stroke: None,
+                    stroke_width: None,
+                });
+            }
+        }
+
+    }
+
+    // ── Vertex value labels with per-axis 1-D collision resolution ────────────
+    //
+    // All labels for axis i lie along the same radial direction θ, so collision
+    // is purely 1-D (distance along the axis).  We collect each label's natural
+    // radial position (fr * radius + base_offset), sort, then iteratively push
+    // adjacent labels apart until no two overlap, before rendering.
+    if rp.vertex_labels {
+        let label_sz   = (label_size as f64 * 0.75) as u32;
+        let min_gap    = label_sz as f64 * 1.4; // minimum px between label baselines
+        let base_off   = 9.0_f64;               // initial clearance past the vertex
+
+        // Collect (series_idx, natural_radial_px, formatted_value) per axis.
+        let mut axis_items: Vec<Vec<(usize, f64, String)>> = vec![Vec::new(); n];
+        for (si, series) in rp.series.iter().enumerate() {
+            for (i, &v) in series.values.iter().enumerate().take(n) {
+                let radial = frac(v, i) * radius + base_off;
+                axis_items[i].push((si, radial, radar_fmt_value(v)));
+            }
+        }
+
+        // 1-D push-apart: sort by radial position, then spread overlapping pairs.
+        for items in axis_items.iter_mut() {
+            items.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+            for _ in 0..30 {
+                let mut moved = false;
+                for j in 1..items.len() {
+                    let gap = items[j].1 - items[j - 1].1;
+                    if gap < min_gap {
+                        let push = (min_gap - gap) / 2.0;
+                        items[j - 1].1 -= push;
+                        items[j].1     += push;
+                        moved = true;
+                    }
+                }
+                if !moved { break; }
+            }
+            // Clamp: don't push any label closer to centre than base_off.
+            for item in items.iter_mut() {
+                item.1 = item.1.max(base_off);
+            }
+        }
+
+        // Render resolved labels.
+        for (i, items) in axis_items.iter().enumerate() {
+            let th = angle(i);
+            let anchor = if th.cos() > 0.1 { TextAnchor::Start }
+                else if th.cos() < -0.1 { TextAnchor::End }
+                else { TextAnchor::Middle };
+            for &(si, radial, ref text) in items {
+                let color = rp.series[si].color.clone()
+                    .unwrap_or_else(|| pal[si].to_string());
+                scene.add(Primitive::Text {
+                    x: round2(cx + radial * th.cos()),
+                    y: round2(cy + radial * th.sin() + label_sz as f64 * 0.35),
+                    content: text.clone(),
+                    size: label_sz,
+                    anchor,
+                    rotate: None,
+                    bold: false,
+                    color: Some(Color::from(color.as_str())),
+                });
+            }
+        }
+    }
+}
+
+/// Wrap a long label at word boundaries to at most `max_chars` per line.
+fn radar_wrap_label(s: &str, max_chars: usize) -> Vec<String> {
+    if s.len() <= max_chars {
+        return vec![s.to_string()];
+    }
+    let words: Vec<&str> = s.split_whitespace().collect();
+    if words.len() < 2 {
+        return vec![s.to_string()];
+    }
+    let mut lines: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for word in &words {
+        if current.is_empty() {
+            current = word.to_string();
+        } else if current.len() + 1 + word.len() <= max_chars {
+            current.push(' ');
+            current.push_str(word);
+        } else {
+            lines.push(current);
+            current = word.to_string();
+        }
+    }
+    if !current.is_empty() { lines.push(current); }
+    lines
+}
+
+/// Format a vertex value as a compact string.
+fn radar_fmt_value(v: f64) -> String {
+    if v == v.round() && v.abs() < 1e4 {
+        format!("{:.0}", v)
+    } else if v.abs() < 10.0 {
+        format!("{:.2}", v)
+    } else {
+        format!("{:.1}", v)
+    }
+}
+
+/// Build a closed SVG polygon path from pixel points.
+fn radar_polygon_path(pts: &[(f64, f64)]) -> String {
+    if pts.is_empty() { return String::new(); }
+    let mut d = format!("M {} {}", pts[0].0, pts[0].1);
+    for &(x, y) in &pts[1..] {
+        d.push_str(&format!(" L {} {}", x, y));
+    }
+    d.push_str(" Z");
+    d
+}
+
+/// Build a band path tracing `outer` forward then `inner` in reverse,
+/// forming the filled region between two concentric polygons.
+fn radar_band_path(outer: &[(f64, f64)], inner: &[(f64, f64)]) -> String {
+    if outer.is_empty() || inner.is_empty() { return String::new(); }
+    let mut d = format!("M {} {}", outer[0].0, outer[0].1);
+    for &(x, y) in &outer[1..] {
+        d.push_str(&format!(" L {} {}", x, y));
+    }
+    for &(x, y) in inner.iter().rev() {
+        d.push_str(&format!(" L {} {}", x, y));
+    }
+    d.push_str(" Z");
+    d
 }
 

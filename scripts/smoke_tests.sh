@@ -524,6 +524,25 @@ check "synteny proportional" \
         --blocks-file "$DATA/synteny_blocks.tsv" --proportional --legend "synteny" \
         --title "Synteny Map"
 
+# ── radar ──────────────────────────────────────────────────────────────────────
+check "radar basic" \
+    "$BIN" radar "$DATA/radar.tsv" \
+        --axes Sensitivity Specificity Precision F1 AUC \
+        --color-by tool --legend \
+        --title "Radar Chart"
+
+check "radar filled" \
+    "$BIN" radar "$DATA/radar.tsv" \
+        --axes Sensitivity Specificity Precision F1 AUC \
+        --color-by tool --filled --legend \
+        --title "Radar Chart Filled"
+
+check "radar normalize" \
+    "$BIN" radar "$DATA/radar.tsv" \
+        --axes Sensitivity Specificity Precision F1 AUC \
+        --color-by tool --normalize --legend \
+        --title "Radar Normalized"
+
 # ── polar ──────────────────────────────────────────────────────────────────────
 check "polar basic" \
     "$BIN" polar "$DATA/polar.tsv" --r r --theta theta \

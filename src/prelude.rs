@@ -114,6 +114,9 @@ pub use crate::plot::{
     StreamgraphPlot,
     StreamBaseline,
     StreamOrder,
+    RadarPlot,
+    RadarSeries,
+    RadarReference,
     // Style / config types used when building plots
     MarkerShape,
     LineStyle,

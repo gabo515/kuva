@@ -406,3 +406,43 @@ fn network_dense_clusters() {
     assert!(group_count >= 50, "dense graph should have many edge groups, got {group_count}");
     std::fs::write("test_outputs/network_dense_clusters.svg", svg).unwrap();
 }
+
+#[test]
+fn network_matrix_self_loop_directed() {
+    // Diagonal entries produce self-loops when directed=true.
+    // A=0 has a self-loop (diagonal 2.0); B=1 does not (diagonal 0.0).
+    let matrix = vec![
+        vec![2.0, 1.0],
+        vec![1.0, 0.0],
+    ];
+    let mut net = NetworkPlot::new()
+        .with_matrix(matrix, ["A", "B"])
+        .with_directed();
+    net.resolve_matrix();
+    let self_loops: Vec<_> = net.edges.iter()
+        .filter(|e| e.source == e.target)
+        .collect();
+    assert_eq!(self_loops.len(), 1, "directed matrix with one nonzero diagonal entry should produce exactly one self-loop");
+    assert_eq!(self_loops[0].source, 0, "self-loop should be on node A (index 0)");
+    assert!((self_loops[0].weight - 2.0).abs() < 1e-9, "self-loop weight should equal diagonal value");
+}
+
+#[test]
+fn network_matrix_self_loop_undirected() {
+    // Diagonal entries are intentionally ignored for undirected graphs
+    // (symmetric self-loops have no physical meaning).
+    let matrix = vec![
+        vec![5.0, 1.0, 1.0],
+        vec![1.0, 3.0, 1.0],
+        vec![1.0, 1.0, 7.0],
+    ];
+    let mut net = NetworkPlot::new()
+        .with_matrix(matrix, ["A", "B", "C"]);
+    net.resolve_matrix();
+    let self_loops: Vec<_> = net.edges.iter()
+        .filter(|e| e.source == e.target)
+        .collect();
+    assert_eq!(self_loops.len(), 0, "undirected matrix should produce no self-loops from diagonal");
+    // Should still have 3 off-diagonal edges: A-B, A-C, B-C
+    assert_eq!(net.edges.len(), 3, "undirected 3-node fully-connected matrix should have 3 edges");
+}

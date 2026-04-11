@@ -246,7 +246,10 @@ impl NetworkPlot {
                         source: indices[i], target: indices[j], weight: w, color: None, label: None,
                     });
                 }
-                // Self-loops from diagonal (only when directed).
+                // Self-loops from diagonal: only in directed mode.
+                // For undirected graphs the diagonal is meaningless (a node
+                // connected to itself has no physical interpretation when edges
+                // are symmetric), so we intentionally skip it.
                 if self.directed && i < matrix[i].len() {
                     let w = matrix[i][i];
                     if w.abs() >= f64::EPSILON {

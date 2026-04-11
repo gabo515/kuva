@@ -182,7 +182,7 @@ pub enum Primitive {
     ClipEnd,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum TextAnchor {
     Start,
     Middle,
@@ -12598,10 +12598,11 @@ fn add_network(net: &NetworkPlot, scene: &mut Scene, computed: &ComputedLayout) 
                 })));
             }
 
-            // Edge label at curve midpoint
+            // Edge label at curve midpoint, offset further into the curve's bulge
+            // (the control point direction) so it clears the edge line.
             if let Some(ref lbl) = edge.label {
-                let elx = (lx1 + 2.0 * mx + lx2) / 4.0;
-                let ely = (ly1 + 2.0 * my + ly2) / 4.0 - font_size as f64 * 0.4;
+                let elx = (lx1 + 2.0 * mx + lx2) / 4.0 + perp_x * font_size as f64 * 0.6;
+                let ely = (ly1 + 2.0 * my + ly2) / 4.0 + perp_y * font_size as f64 * 0.6;
                 scene.add(Primitive::Text {
                     x: round2(elx), y: round2(ely),
                     content: lbl.clone(), size: edge_label_size,
@@ -12636,10 +12637,12 @@ fn add_network(net: &NetworkPlot, scene: &mut Scene, computed: &ComputedLayout) 
                 });
             }
 
-            // Edge label at midpoint
+            // Edge label at midpoint, offset perpendicular to the edge
             if let Some(ref lbl) = edge.label {
-                let elx = (lx1 + lx2) / 2.0;
-                let ely = (ly1 + ly2) / 2.0 - font_size as f64 * 0.4;
+                let perp_x = -uy;
+                let perp_y = ux;
+                let elx = (lx1 + lx2) / 2.0 + perp_x * font_size as f64 * 0.6;
+                let ely = (ly1 + ly2) / 2.0 + perp_y * font_size as f64 * 0.6;
                 scene.add(Primitive::Text {
                     x: round2(elx), y: round2(ely),
                     content: lbl.clone(), size: edge_label_size,
@@ -12701,31 +12704,62 @@ fn add_network(net: &NetworkPlot, scene: &mut Scene, computed: &ComputedLayout) 
 
     // ── Draw labels (with optional repulsion) ─────────────────────────
     if net.show_labels {
-        // Compute initial label positions
-        let mut labels: Vec<(f64, f64, String, f64)> = net.nodes.iter().enumerate()
+        let n = px.len();
+        // Place each label in the direction away from the graph centroid so
+        // labels radiate outward and rarely land on top of other edges.
+        let cx_c = if n > 0 { px.iter().sum::<f64>() / n as f64 } else { 0.0 };
+        let cy_c = if n > 0 { py.iter().sum::<f64>() / n as f64 } else { 0.0 };
+
+        // Tuple: (anchor_x, center_y, text, approx_half_width, TextAnchor)
+        // anchor_x meaning:
+        //   Start  → left edge of text
+        //   End    → right edge of text
+        //   Middle → centre of text
+        let mut labels: Vec<(f64, f64, String, f64, TextAnchor)> = net.nodes.iter()
+            .enumerate()
             .map(|(i, node)| {
                 let r = node.size.unwrap_or(net.node_radius);
-                let lx = px[i] + r + 4.0;
-                let ly = py[i] + font_size as f64 * 0.35;
                 let lw = node.label.chars().count() as f64 * 0.6 * font_size as f64;
-                (lx, ly, node.label.clone(), lw)
+                let gap = r + 4.0;
+                // Unit vector from centroid to node.
+                let fdx = px[i] - cx_c;
+                let fdy = py[i] - cy_c;
+                let fmag = (fdx * fdx + fdy * fdy).sqrt().max(1e-6);
+                let fux = fdx / fmag;
+                let fuy = fdy / fmag;
+                // Choose anchor and x position based on horizontal direction.
+                let (lx, anchor) = if fux > 0.25 {
+                    (px[i] + fux * gap, TextAnchor::Start)
+                } else if fux < -0.25 {
+                    (px[i] + fux * gap, TextAnchor::End)
+                } else {
+                    (px[i], TextAnchor::Middle)
+                };
+                // Vertical: shift in the outward y direction; apply baseline offset.
+                let ly = py[i] + fuy * gap + font_size as f64 * 0.35;
+                (lx, ly, node.label.clone(), lw, anchor)
             })
             .collect();
 
         if net.repel_labels && labels.len() > 1 {
             let lh = font_size as f64;
-            // Simple iterative repulsion to push overlapping labels apart
+            // Convert to center-x for repulsion arithmetic, then convert back.
+            let center_x = |l: &(f64, f64, String, f64, TextAnchor)| match l.4 {
+                TextAnchor::Start  => l.0 + l.3 / 2.0,
+                TextAnchor::End    => l.0 - l.3 / 2.0,
+                TextAnchor::Middle => l.0,
+            };
             for _ in 0..50 {
                 let mut moved = false;
                 for i in 0..labels.len() {
                     for j in (i + 1)..labels.len() {
-                        let dx = labels[j].0 - labels[i].0;
+                        let cx_i = center_x(&labels[i]);
+                        let cx_j = center_x(&labels[j]);
+                        let dx = cx_j - cx_i;
                         let dy = labels[j].1 - labels[i].1;
-                        // Check bounding-box overlap
                         let overlap_x = (labels[i].3 + labels[j].3) / 2.0 - dx.abs();
                         let overlap_y = lh - dy.abs();
                         if overlap_x > 0.0 && overlap_y > 0.0 {
-                            // Push apart along the axis with less overlap
                             let push = 0.5;
                             if overlap_x < overlap_y {
                                 let sign = if dx >= 0.0 { 1.0 } else { -1.0 };
@@ -12742,20 +12776,24 @@ fn add_network(net: &NetworkPlot, scene: &mut Scene, computed: &ComputedLayout) 
                 }
                 if !moved { break; }
             }
-            // Clamp labels to plot bounds.
+            // Clamp to plot bounds, accounting for anchor and label width.
             let x_max = ox + pw + pad_right_extra;
             let y_max = oy + ph;
             for l in labels.iter_mut() {
-                l.0 = l.0.clamp(ox, x_max);
+                l.0 = match l.4 {
+                    TextAnchor::Start  => l.0.clamp(ox, (x_max - l.3).max(ox)),
+                    TextAnchor::End    => l.0.clamp(ox + l.3, x_max),
+                    TextAnchor::Middle => l.0.clamp(ox + l.3 / 2.0, (x_max - l.3 / 2.0).max(ox + l.3 / 2.0)),
+                };
                 l.1 = l.1.clamp(oy + font_size as f64, y_max);
             }
         }
 
-        for (lx, ly, text, _lw) in &labels {
+        for (lx, ly, text, _lw, anchor) in &labels {
             scene.add(Primitive::Text {
                 x: round2(*lx), y: round2(*ly),
                 content: text.clone(), size: font_size,
-                anchor: TextAnchor::Start, rotate: None, bold: false, color: None,
+                anchor: *anchor, rotate: None, bold: false, color: None,
             });
         }
     }

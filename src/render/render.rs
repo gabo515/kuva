@@ -13460,6 +13460,7 @@ fn add_hexbin_colorbar(hb: &HexbinPlot, scene: &mut Scene, computed: &ComputedLa
     });
 
     type MapFn = Arc<dyn Fn(f64) -> String + Send + Sync>;
+    #[allow(clippy::type_complexity)]
     let (map_min, map_max, cb_map_fn, tick_labels): (f64, f64, MapFn, Option<Vec<(f64, String)>>) =
         if hb.log_color {
             let log_max = (v_max - v_min + 1.0).max(1.0).log10().max(f64::EPSILON);

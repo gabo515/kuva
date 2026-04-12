@@ -55,6 +55,7 @@
 - [3D Scatter Plot](./plots/scatter3d.md)
 - [3D Surface Plot](./plots/surface3d.md)
 - [Twin-Y Plot](./plots/twin_y.md)
+- [Funnel Chart](./plots/funnel.md)
 
 # CLI
 
@@ -84,6 +85,7 @@
   - [treemap](./cli/treemap.md)
   - [sunburst](./cli/sunburst.md)
   - [bump](./cli/bump.md)
+  - [funnel](./cli/funnel.md)
   - [contour](./cli/contour.md)
   - [dot](./cli/dot.md)
   - [upset](./cli/upset.md)

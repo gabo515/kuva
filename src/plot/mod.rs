@@ -51,6 +51,7 @@ pub mod hexbin;
 pub mod treemap;
 pub mod sunburst;
 pub mod bump;
+pub mod funnel;
 
 pub mod legend;
 
@@ -109,5 +110,6 @@ pub use hexbin::{HexbinPlot, ZReduce};
 pub use treemap::{TreemapPlot, TreemapNode, TreemapColorMode, TreemapLayout};
 pub use sunburst::{SunburstPlot, SunburstColorMode};
 pub use bump::{BumpPlot, BumpSeries, CurveStyle, BumpTieBreak};
+pub use funnel::{FunnelPlot, FunnelStage, FunnelColorMode, FunnelOrientation};
 
 pub use legend::{Legend, LegendEntry, LegendShape, LegendPosition, LegendGroup};

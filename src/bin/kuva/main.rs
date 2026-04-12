@@ -39,6 +39,7 @@ mod hexbin;
 mod treemap;
 mod sunburst;
 mod bump;
+mod funnel;
 #[cfg(feature = "doom")]
 mod doom;
 
@@ -104,6 +105,8 @@ enum Commands {
     Sunburst(sunburst::SunburstArgs),
     /// Bump chart — rank of series across discrete time points.
     Bump(bump::BumpArgs),
+    /// Funnel chart — attrition / conversion through ordered stages.
+    Funnel(funnel::FunnelArgs),
     #[cfg(feature = "doom")]
     /// Generate a self-contained DOOM SVG playable in any browser.
     Doom(doom::DoomArgs),
@@ -159,6 +162,7 @@ fn main() {
         Commands::Treemap(args) => treemap::run(args),
         Commands::Sunburst(args) => sunburst::run(args),
         Commands::Bump(args) => bump::run(args),
+        Commands::Funnel(args) => funnel::run(args),
         #[cfg(feature = "doom")]
         Commands::Doom(args) => doom::run(args),
         Commands::Man => unreachable!(),

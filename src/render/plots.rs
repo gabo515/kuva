@@ -50,6 +50,7 @@ use crate::plot::hexbin::HexbinPlot;
 use crate::plot::treemap::TreemapPlot;
 use crate::plot::sunburst::SunburstPlot;
 use crate::plot::bump::BumpPlot;
+use crate::plot::funnel::FunnelPlot;
 use crate::plot::legend::ColorBarInfo;
 use crate::render::render_utils;
 
@@ -107,6 +108,7 @@ pub enum Plot {
     Treemap(TreemapPlot),
     Sunburst(SunburstPlot),
     Bump(BumpPlot),
+    Funnel(FunnelPlot),
 }
 
 impl From<ScatterPlot>    for Plot { fn from(p: ScatterPlot)    -> Self { Plot::Scatter(p) } }
@@ -161,6 +163,7 @@ impl From<HexbinPlot>      for Plot { fn from(p: HexbinPlot)      -> Self { Plot
 impl From<TreemapPlot>     for Plot { fn from(p: TreemapPlot)     -> Self { Plot::Treemap(p) } }
 impl From<SunburstPlot>    for Plot { fn from(p: SunburstPlot)    -> Self { Plot::Sunburst(p) } }
 impl From<BumpPlot>        for Plot { fn from(p: BumpPlot)        -> Self { Plot::Bump(p) } }
+impl From<FunnelPlot>      for Plot { fn from(p: FunnelPlot)      -> Self { Plot::Funnel(p) } }
 
 use crate::plot::plot3d::DataRanges3D;
 use crate::plot::heatmap::ColorMap;
@@ -862,6 +865,7 @@ impl Plot {
             // Pixel-space plots — dummy bounds so auto_from_plots sees them
             Plot::Treemap(_)  => Some(((-1.0, 1.0), (-1.0, 1.0))),
             Plot::Sunburst(_) => Some(((-1.0, 1.0), (-1.0, 1.0))),
+            Plot::Funnel(_)   => Some(((-1.0, 1.0), (-1.0, 1.0))),
             Plot::Bump(bp) => {
                 let n = bp.total_series_count();
                 let n_time = bp.n_time_points();
@@ -962,6 +966,7 @@ impl Plot {
             Plot::Treemap(tm) => tm.node_count() * 3 + 10,
             Plot::Sunburst(sb) => sb.node_count() * 2 + 10,
             Plot::Bump(bp) => bp.total_series_count() * bp.n_time_points() * 3 + 20,
+            Plot::Funnel(fp) => fp.stage_count() * 6 + 20,
             _ => 100,
         }
     }

@@ -78,6 +78,7 @@ use crate::plot::hexbin::{HexbinPlot, ZReduce};
 use crate::plot::treemap::{TreemapPlot, TreemapNode, TreemapColorMode, TreemapLayout};
 use crate::plot::sunburst::{SunburstPlot, SunburstColorMode};
 use crate::plot::bump::{BumpPlot, CurveStyle};
+use crate::plot::funnel::{FunnelPlot, FunnelStage, FunnelColorMode, FunnelOrientation};
 
 use crate::plot::Legend;
 use crate::plot::legend::{ColorBarInfo, LegendEntry, LegendGroup, LegendPosition, LegendShape};
@@ -8461,6 +8462,37 @@ pub fn collect_legend_entries(plots: &[Plot]) -> Vec<LegendEntry> {
                     }
                 }
             }
+            Plot::Funnel(fp) => {
+                if fp.legend_label.is_some() {
+                    use crate::render::palette::Palette;
+                    let cat10 = Palette::category10();
+                    let all_stages = {
+                        let mut v: Vec<(usize, &FunnelStage)> = fp.stages.iter().enumerate().collect();
+                        if let Some(ref mir) = fp.mirror {
+                            for (i, s) in mir.iter().enumerate() {
+                                if !v.iter().any(|(_, ls)| ls.label == s.label) {
+                                    v.push((i, s));
+                                }
+                            }
+                        }
+                        v
+                    };
+                    for (i, s) in all_stages {
+                        let color = s.color.clone().unwrap_or_else(|| {
+                            match fp.color_mode {
+                                FunnelColorMode::Uniform => cat10[0].to_string(),
+                                FunnelColorMode::ByStage | FunnelColorMode::Gradient => cat10[i % 10].to_string(),
+                            }
+                        });
+                        entries.push(LegendEntry {
+                            label: s.label.clone(),
+                            color,
+                            shape: LegendShape::Rect,
+                            dasharray: None,
+                        });
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -10267,7 +10299,7 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
             Plot::Pie(_) | Plot::UpSet(_) | Plot::Chord(_) | Plot::Sankey(_)
             | Plot::PhyloTree(_) | Plot::Synteny(_) | Plot::Polar(_) | Plot::Ternary(_)
             | Plot::Scatter3D(_) | Plot::Surface3D(_) | Plot::Clustermap(_) | Plot::Joint(_) | Plot::Venn(_) | Plot::Parallel(_)
-            | Plot::Mosaic(_) | Plot::Network(_) | Plot::Radar(_) | Plot::Treemap(_) | Plot::Sunburst(_)));
+            | Plot::Mosaic(_) | Plot::Network(_) | Plot::Radar(_) | Plot::Treemap(_) | Plot::Sunburst(_) | Plot::Funnel(_)));
         if !skip_axes_for_meta {
             scene.axis_meta = Some(AxisMeta {
                 x_min: computed.x_range.0,
@@ -10284,7 +10316,7 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
         }
     }
 
-    let skip_axes = plots.iter().all(|p| matches!(p, Plot::Pie(_) | Plot::UpSet(_) | Plot::Chord(_) | Plot::Sankey(_) | Plot::PhyloTree(_) | Plot::Synteny(_) | Plot::Polar(_) | Plot::Ternary(_) | Plot::DicePlot(_) | Plot::Scatter3D(_) | Plot::Surface3D(_) | Plot::Clustermap(_) | Plot::Joint(_) | Plot::Venn(_) | Plot::Parallel(_) | Plot::Mosaic(_) | Plot::Network(_) | Plot::Radar(_) | Plot::Treemap(_) | Plot::Sunburst(_)));
+    let skip_axes = plots.iter().all(|p| matches!(p, Plot::Pie(_) | Plot::UpSet(_) | Plot::Chord(_) | Plot::Sankey(_) | Plot::PhyloTree(_) | Plot::Synteny(_) | Plot::Polar(_) | Plot::Ternary(_) | Plot::DicePlot(_) | Plot::Scatter3D(_) | Plot::Surface3D(_) | Plot::Clustermap(_) | Plot::Joint(_) | Plot::Venn(_) | Plot::Parallel(_) | Plot::Mosaic(_) | Plot::Network(_) | Plot::Radar(_) | Plot::Treemap(_) | Plot::Sunburst(_) | Plot::Funnel(_)));
     if !skip_axes {
         add_axes_and_grid(&mut scene, &computed, &layout);
     }
@@ -10535,6 +10567,9 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
             }
             Plot::Bump(bp) => {
                 add_bump(bp, &mut scene, &computed, &layout);
+            }
+            Plot::Funnel(fp) => {
+                add_funnel(fp, &mut scene, &computed);
             }
         }
     }
@@ -14760,6 +14795,498 @@ fn add_bump(bp: &BumpPlot, scene: &mut Scene, computed: &ComputedLayout, layout:
 /// Render a single [`BumpPlot`] to a [`Scene`].
 pub fn render_bump(bp: BumpPlot, layout: Layout) -> Scene {
     let plots = vec![Plot::Bump(bp)];
+    render_multiple(plots, layout)
+}
+
+// ── FunnelPlot rendering ──────────────────────────────────────────────────────
+
+/// Darken a hex color by `factor` (0.0 = black, 1.0 = original).
+fn darken_hex(hex: &str, factor: f64) -> String {
+    fn parse_comp(s: &str, start: usize) -> u8 {
+        u8::from_str_radix(&s[start..start + 2], 16).unwrap_or(128)
+    }
+    let hex = hex.trim_start_matches('#');
+    if hex.len() < 6 { return format!("#{}", hex); }
+    let r = (parse_comp(hex, 0) as f64 * factor).round().clamp(0.0, 255.0) as u8;
+    let g = (parse_comp(hex, 2) as f64 * factor).round().clamp(0.0, 255.0) as u8;
+    let b = (parse_comp(hex, 4) as f64 * factor).round().clamp(0.0, 255.0) as u8;
+    format!("#{:02X}{:02X}{:02X}", r, g, b)
+}
+
+fn resolve_stage_color(
+    stage: &FunnelStage,
+    idx: usize,
+    n: usize,
+    color_mode: &FunnelColorMode,
+    base_color: &str,
+) -> String {
+    if let Some(ref c) = stage.color {
+        return c.clone();
+    }
+    match color_mode {
+        FunnelColorMode::Uniform => base_color.to_string(),
+        FunnelColorMode::ByStage => {
+            use crate::render::palette::Palette;
+            Palette::category10()[idx % 10].to_string()
+        }
+        FunnelColorMode::Gradient => {
+            let factor = if n <= 1 { 1.0 } else { 1.0 - 0.55 * (idx as f64 / (n - 1) as f64) };
+            darken_hex(base_color, factor)
+        }
+    }
+}
+
+/// Render a [`FunnelPlot`] onto the scene.  Must be in `skip_axes` list.
+fn add_funnel(fp: &FunnelPlot, scene: &mut Scene, computed: &ComputedLayout) {
+    use crate::render::palette::Palette;
+
+    if fp.stages.is_empty() { return; }
+
+    let pw = computed.width  - computed.margin_left - computed.margin_right;
+    let ph = computed.height - computed.margin_top  - computed.margin_bottom;
+    if pw <= 0.0 || ph <= 0.0 { return; }
+
+    let ox = computed.margin_left;
+    let oy = computed.margin_top;
+
+    let base_color = Palette::category10()[0].to_string();
+    let is_vertical = matches!(fp.orientation, FunnelOrientation::Vertical);
+    let is_mirror   = fp.mirror.is_some();
+
+    // ── Resolve max value across both sides ──────────────────────────────────
+    let max_val = fp.max_value();
+    if max_val <= f64::EPSILON { return; }
+
+    let n = fp.stages.len();
+    let font_size: u32 = 11;
+
+    if is_vertical {
+        // ── Vertical funnel ───────────────────────────────────────────────────
+        let gap = fp.stage_gap;
+        let total_gap = gap * (n.saturating_sub(1)) as f64;
+        let bar_h = ((ph - total_gap) / n as f64).max(4.0);
+        let max_bar_w = if is_mirror { pw / 2.0 - 4.0 } else { pw };
+        let center_x = ox + pw / 2.0;
+
+        // Side labels for mirror mode
+        if is_mirror {
+            if let Some(ref ll) = fp.left_label {
+                scene.add(Primitive::Text {
+                    x: ox + pw / 4.0, y: oy - 6.0,
+                    content: ll.clone(), size: font_size + 1,
+                    anchor: TextAnchor::Middle, rotate: None,
+                    bold: true, color: None,
+                });
+            }
+            if let Some(ref rl) = fp.right_label {
+                scene.add(Primitive::Text {
+                    x: ox + 3.0 * pw / 4.0, y: oy - 6.0,
+                    content: rl.clone(), size: font_size + 1,
+                    anchor: TextAnchor::Middle, rotate: None,
+                    bold: true, color: None,
+                });
+            }
+        }
+
+        // Draw center divider line for mirror mode
+        if is_mirror {
+            scene.add(Primitive::Line {
+                x1: center_x, y1: oy, x2: center_x, y2: oy + ph,
+                stroke: Color::from("#cccccc"),
+                stroke_width: 1.0,
+                stroke_dasharray: Some("4,3".to_string()),
+            });
+        }
+
+        for (i, stage) in fp.stages.iter().enumerate() {
+            let bar_y = oy + i as f64 * (bar_h + gap);
+            let frac  = stage.value / max_val;
+            let half_w = frac * max_bar_w / 2.0;
+            let color  = resolve_stage_color(stage, i, n, &fp.color_mode, &base_color);
+
+            // Left bar (or centered bar in standard mode)
+            let (bar_x, bar_w) = if is_mirror {
+                (center_x - half_w, half_w)
+            } else {
+                (center_x - frac * max_bar_w / 2.0, frac * max_bar_w)
+            };
+
+            scene.add(Primitive::Rect {
+                x: bar_x, y: bar_y, width: bar_w, height: bar_h,
+                fill: Color::from(color.as_str()),
+                stroke: None, stroke_width: None, opacity: None,
+            });
+
+            // Connector (trapezoid) between this bar and the next
+            if fp.show_connectors && i + 1 < n {
+                let next_frac  = fp.stages[i + 1].value / max_val;
+                let next_half_w = next_frac * max_bar_w / 2.0;
+                let cy0 = bar_y + bar_h;
+                let cy1 = bar_y + bar_h + gap;
+
+                let (lx0, rx0, lx1, rx1) = if is_mirror {
+                    (center_x - half_w,      center_x,
+                     center_x - next_half_w, center_x)
+                } else {
+                    (center_x - half_w, center_x + half_w,
+                     center_x - next_half_w, center_x + next_half_w)
+                };
+
+                let d = format!(
+                    "M {:.2},{:.2} L {:.2},{:.2} L {:.2},{:.2} L {:.2},{:.2} Z",
+                    lx0, cy0, rx0, cy0, rx1, cy1, lx1, cy1
+                );
+                scene.add(Primitive::Path(Box::new(PathData {
+                    d,
+                    fill: Some(Color::from(color.as_str())),
+                    stroke: Color::from("none"),
+                    stroke_width: 0.0,
+                    opacity: Some(fp.connector_opacity),
+                    stroke_dasharray: None,
+                })));
+
+                // Conversion rate label in connector area
+                if fp.show_conversion && gap >= 10.0 {
+                    let rate = if stage.value > f64::EPSILON {
+                        fp.stages[i + 1].value / stage.value * 100.0
+                    } else { 0.0 };
+                    let mid_y = cy0 + gap / 2.0;
+                    let mid_x = if is_mirror { center_x - (half_w + next_half_w) / 4.0 } else { center_x };
+                    scene.add(Primitive::Text {
+                        x: mid_x, y: mid_y + 4.0,
+                        content: format!("{:.1}%", rate),
+                        size: font_size - 1,
+                        anchor: TextAnchor::Middle, rotate: None,
+                        bold: false, color: Some(Color::from("#555555")),
+                    });
+                }
+            }
+
+            // Value label
+            if fp.show_values {
+                let label = if fp.show_percents {
+                    let pct = stage.value / fp.stages[0].value * 100.0;
+                    format!("{:.0} ({:.1}%)", stage.value, pct)
+                } else {
+                    format!("{:.0}", stage.value)
+                };
+
+                // Place inside bar if wide enough, else to the right
+                let text_fits = bar_w > 60.0 && bar_h > (font_size as f64 + 2.0);
+                let (lx, anchor, color_text) = if text_fits {
+                    (bar_x + bar_w / 2.0, TextAnchor::Middle, Color::from("#ffffff"))
+                } else {
+                    let rx = if is_mirror { bar_x } else { bar_x + bar_w + 4.0 };
+                    let anc = if is_mirror { TextAnchor::End } else { TextAnchor::Start };
+                    (rx, anc, Color::from("#333333"))
+                };
+                scene.add(Primitive::Text {
+                    x: lx, y: bar_y + bar_h / 2.0 + font_size as f64 * 0.35,
+                    content: label, size: font_size,
+                    anchor, rotate: None, bold: false,
+                    color: Some(color_text),
+                });
+            }
+
+            // Stage label (always on left of bar for vertical, right edge if mirror left)
+            {
+                let (lx, anchor) = if is_mirror {
+                    (center_x - max_bar_w / 2.0 - 6.0, TextAnchor::End)
+                } else {
+                    (bar_x - 6.0, TextAnchor::End)
+                };
+                scene.add(Primitive::Text {
+                    x: lx, y: bar_y + bar_h / 2.0 + font_size as f64 * 0.35,
+                    content: stage.label.clone(), size: font_size,
+                    anchor, rotate: None, bold: false, color: None,
+                });
+            }
+
+            // Mirror side rendering
+            if let Some(ref mirror_stages) = fp.mirror {
+                if let Some(ms) = mirror_stages.get(i) {
+                    let m_frac = ms.value / max_val;
+                    let m_half_w = m_frac * max_bar_w / 2.0;
+                    let m_color = resolve_stage_color(ms, i, mirror_stages.len(), &fp.color_mode, &base_color);
+
+                    scene.add(Primitive::Rect {
+                        x: center_x, y: bar_y, width: m_half_w, height: bar_h,
+                        fill: Color::from(m_color.as_str()),
+                        stroke: None, stroke_width: None, opacity: None,
+                    });
+
+                    // Mirror connector
+                    if fp.show_connectors && i + 1 < mirror_stages.len() {
+                        let next_m_frac   = mirror_stages[i + 1].value / max_val;
+                        let next_m_half_w = next_m_frac * max_bar_w / 2.0;
+                        let cy0 = bar_y + bar_h;
+                        let cy1 = bar_y + bar_h + gap;
+                        let d = format!(
+                            "M {:.2},{:.2} L {:.2},{:.2} L {:.2},{:.2} L {:.2},{:.2} Z",
+                            center_x,             cy0,
+                            center_x + m_half_w,  cy0,
+                            center_x + next_m_half_w, cy1,
+                            center_x,             cy1,
+                        );
+                        scene.add(Primitive::Path(Box::new(PathData {
+                            d,
+                            fill: Some(Color::from(m_color.as_str())),
+                            stroke: Color::from("none"),
+                            stroke_width: 0.0,
+                            opacity: Some(fp.connector_opacity),
+                            stroke_dasharray: None,
+                        })));
+
+                        if fp.show_conversion && gap >= 10.0 {
+                            let rate = if ms.value > f64::EPSILON {
+                                mirror_stages[i + 1].value / ms.value * 100.0
+                            } else { 0.0 };
+                            let mid_y = cy0 + gap / 2.0;
+                            let mid_x = center_x + (m_half_w + next_m_half_w) / 4.0;
+                            scene.add(Primitive::Text {
+                                x: mid_x, y: mid_y + 4.0,
+                                content: format!("{:.1}%", rate),
+                                size: font_size - 1,
+                                anchor: TextAnchor::Middle, rotate: None,
+                                bold: false, color: Some(Color::from("#555555")),
+                            });
+                        }
+                    }
+
+                    // Mirror value label
+                    if fp.show_values {
+                        let label = if fp.show_percents {
+                            let pct = if mirror_stages[0].value > f64::EPSILON {
+                                ms.value / mirror_stages[0].value * 100.0
+                            } else { 0.0 };
+                            format!("{:.0} ({:.1}%)", ms.value, pct)
+                        } else {
+                            format!("{:.0}", ms.value)
+                        };
+                        let m_bar_w = m_half_w;
+                        let text_fits = m_bar_w > 60.0 && bar_h > (font_size as f64 + 2.0);
+                        let (lx, anchor, color_text) = if text_fits {
+                            (center_x + m_bar_w / 2.0, TextAnchor::Middle, Color::from("#ffffff"))
+                        } else {
+                            (center_x + m_bar_w + 4.0, TextAnchor::Start, Color::from("#333333"))
+                        };
+                        scene.add(Primitive::Text {
+                            x: lx, y: bar_y + bar_h / 2.0 + font_size as f64 * 0.35,
+                            content: label, size: font_size,
+                            anchor, rotate: None, bold: false,
+                            color: Some(color_text),
+                        });
+                    }
+
+                    // Mirror stage label (right side)
+                    scene.add(Primitive::Text {
+                        x: center_x + max_bar_w / 2.0 + 6.0,
+                        y: bar_y + bar_h / 2.0 + font_size as f64 * 0.35,
+                        content: ms.label.clone(), size: font_size,
+                        anchor: TextAnchor::Start, rotate: None, bold: false, color: None,
+                    });
+                }
+            }
+        }
+    } else {
+        // ── Horizontal funnel ─────────────────────────────────────────────────
+        let gap = fp.stage_gap;
+        let total_gap = gap * (n.saturating_sub(1)) as f64;
+        let bar_w = ((pw - total_gap) / n as f64).max(4.0);
+        let max_bar_h = if is_mirror { ph / 2.0 - 4.0 } else { ph };
+        let center_y = oy + ph / 2.0;
+
+        // Side labels for mirror mode
+        if is_mirror {
+            if let Some(ref ll) = fp.left_label {
+                scene.add(Primitive::Text {
+                    x: ox - 8.0, y: oy + ph / 4.0,
+                    content: ll.clone(), size: font_size + 1,
+                    anchor: TextAnchor::End, rotate: Some(-90.0),
+                    bold: true, color: None,
+                });
+            }
+            if let Some(ref rl) = fp.right_label {
+                scene.add(Primitive::Text {
+                    x: ox - 8.0, y: oy + 3.0 * ph / 4.0,
+                    content: rl.clone(), size: font_size + 1,
+                    anchor: TextAnchor::End, rotate: Some(-90.0),
+                    bold: true, color: None,
+                });
+            }
+        }
+
+        // Draw center divider line for mirror mode
+        if is_mirror {
+            scene.add(Primitive::Line {
+                x1: ox, y1: center_y, x2: ox + pw, y2: center_y,
+                stroke: Color::from("#cccccc"),
+                stroke_width: 1.0,
+                stroke_dasharray: Some("4,3".to_string()),
+            });
+        }
+
+        for (i, stage) in fp.stages.iter().enumerate() {
+            let bar_x = ox + i as f64 * (bar_w + gap);
+            let frac  = stage.value / max_val;
+            let half_h = frac * max_bar_h / 2.0;
+            let color  = resolve_stage_color(stage, i, n, &fp.color_mode, &base_color);
+
+            let (bar_y, actual_bar_h) = if is_mirror {
+                (center_y - half_h, half_h)
+            } else {
+                (center_y - frac * max_bar_h / 2.0, frac * max_bar_h)
+            };
+
+            scene.add(Primitive::Rect {
+                x: bar_x, y: bar_y, width: bar_w, height: actual_bar_h,
+                fill: Color::from(color.as_str()),
+                stroke: None, stroke_width: None, opacity: None,
+            });
+
+            // Connector between adjacent bars
+            if fp.show_connectors && i + 1 < n {
+                let next_frac   = fp.stages[i + 1].value / max_val;
+                let next_half_h = next_frac * max_bar_h / 2.0;
+                let cx0 = bar_x + bar_w;
+                let cx1 = bar_x + bar_w + gap;
+
+                let (ty0, by0, ty1, by1) = if is_mirror {
+                    (center_y - half_h,      center_y,
+                     center_y - next_half_h, center_y)
+                } else {
+                    (center_y - half_h, center_y + half_h,
+                     center_y - next_half_h, center_y + next_half_h)
+                };
+
+                let d = format!(
+                    "M {:.2},{:.2} L {:.2},{:.2} L {:.2},{:.2} L {:.2},{:.2} Z",
+                    cx0, ty0, cx0, by0, cx1, by1, cx1, ty1
+                );
+                scene.add(Primitive::Path(Box::new(PathData {
+                    d,
+                    fill: Some(Color::from(color.as_str())),
+                    stroke: Color::from("none"),
+                    stroke_width: 0.0,
+                    opacity: Some(fp.connector_opacity),
+                    stroke_dasharray: None,
+                })));
+
+                if fp.show_conversion && gap >= 10.0 {
+                    let rate = if stage.value > f64::EPSILON {
+                        fp.stages[i + 1].value / stage.value * 100.0
+                    } else { 0.0 };
+                    let mid_x = cx0 + gap / 2.0;
+                    let mid_y = if is_mirror {
+                        center_y - (half_h + next_half_h) / 4.0
+                    } else {
+                        center_y
+                    };
+                    scene.add(Primitive::Text {
+                        x: mid_x, y: mid_y + 4.0,
+                        content: format!("{:.1}%", rate),
+                        size: font_size - 1,
+                        anchor: TextAnchor::Middle, rotate: Some(-90.0),
+                        bold: false, color: Some(Color::from("#555555")),
+                    });
+                }
+            }
+
+            // Value label (horizontal: inside bar if tall enough, else above)
+            if fp.show_values {
+                let label = if fp.show_percents {
+                    let pct = stage.value / fp.stages[0].value * 100.0;
+                    format!("{:.0} ({:.1}%)", stage.value, pct)
+                } else {
+                    format!("{:.0}", stage.value)
+                };
+                let text_fits = actual_bar_h > 20.0 && bar_w > 30.0;
+                let (lx, ly, anchor, color_text) = if text_fits {
+                    (bar_x + bar_w / 2.0, bar_y + actual_bar_h / 2.0 + font_size as f64 * 0.35,
+                     TextAnchor::Middle, Color::from("#ffffff"))
+                } else {
+                    (bar_x + bar_w / 2.0, bar_y - 4.0,
+                     TextAnchor::Middle, Color::from("#333333"))
+                };
+                scene.add(Primitive::Text {
+                    x: lx, y: ly, content: label, size: font_size,
+                    anchor, rotate: None, bold: false, color: Some(color_text),
+                });
+            }
+
+            // Stage label below bar
+            scene.add(Primitive::Text {
+                x: bar_x + bar_w / 2.0,
+                y: oy + ph + 14.0,
+                content: stage.label.clone(), size: font_size,
+                anchor: TextAnchor::Middle, rotate: None, bold: false, color: None,
+            });
+
+            // Mirror side
+            if let Some(ref mirror_stages) = fp.mirror {
+                if let Some(ms) = mirror_stages.get(i) {
+                    let m_frac   = ms.value / max_val;
+                    let m_half_h = m_frac * max_bar_h / 2.0;
+                    let m_color  = resolve_stage_color(ms, i, mirror_stages.len(), &fp.color_mode, &base_color);
+
+                    scene.add(Primitive::Rect {
+                        x: bar_x, y: center_y, width: bar_w, height: m_half_h,
+                        fill: Color::from(m_color.as_str()),
+                        stroke: None, stroke_width: None, opacity: None,
+                    });
+
+                    if fp.show_connectors && i + 1 < mirror_stages.len() {
+                        let next_m_frac   = mirror_stages[i + 1].value / max_val;
+                        let next_m_half_h = next_m_frac * max_bar_h / 2.0;
+                        let cx0 = bar_x + bar_w;
+                        let cx1 = bar_x + bar_w + gap;
+                        let d = format!(
+                            "M {:.2},{:.2} L {:.2},{:.2} L {:.2},{:.2} L {:.2},{:.2} Z",
+                            cx0, center_y, cx0, center_y + m_half_h,
+                            cx1, center_y + next_m_half_h, cx1, center_y,
+                        );
+                        scene.add(Primitive::Path(Box::new(PathData {
+                            d,
+                            fill: Some(Color::from(m_color.as_str())),
+                            stroke: Color::from("none"),
+                            stroke_width: 0.0,
+                            opacity: Some(fp.connector_opacity),
+                            stroke_dasharray: None,
+                        })));
+                    }
+
+                    if fp.show_values {
+                        let label = if fp.show_percents {
+                            let pct = if mirror_stages[0].value > f64::EPSILON {
+                                ms.value / mirror_stages[0].value * 100.0
+                            } else { 0.0 };
+                            format!("{:.0} ({:.1}%)", ms.value, pct)
+                        } else {
+                            format!("{:.0}", ms.value)
+                        };
+                        let text_fits = m_half_h > 20.0 && bar_w > 30.0;
+                        let (lx, ly, anchor, color_text) = if text_fits {
+                            (bar_x + bar_w / 2.0,
+                             center_y + m_half_h / 2.0 + font_size as f64 * 0.35,
+                             TextAnchor::Middle, Color::from("#ffffff"))
+                        } else {
+                            (bar_x + bar_w / 2.0, center_y + m_half_h + 14.0,
+                             TextAnchor::Middle, Color::from("#333333"))
+                        };
+                        scene.add(Primitive::Text {
+                            x: lx, y: ly, content: label, size: font_size,
+                            anchor, rotate: None, bold: false, color: Some(color_text),
+                        });
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Render a single [`FunnelPlot`] to a [`Scene`].
+pub fn render_funnel(fp: FunnelPlot, layout: Layout) -> Scene {
+    let plots = vec![Plot::Funnel(fp)];
     render_multiple(plots, layout)
 }
 

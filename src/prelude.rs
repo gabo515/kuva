@@ -129,6 +129,10 @@ pub use crate::plot::{
     BumpSeries,
     CurveStyle as BumpCurveStyle,
     BumpTieBreak,
+    FunnelPlot,
+    FunnelStage,
+    FunnelColorMode,
+    FunnelOrientation,
     // Style / config types used when building plots
     MarkerShape,
     LineStyle,
@@ -165,6 +169,7 @@ pub use crate::render::render::{
     render_treemap,
     render_sunburst,
     render_bump,
+    render_funnel,
 };
 
 // ── Figure (multi-plot grid) ─────────────────────────────────────────────────

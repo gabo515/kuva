@@ -76,6 +76,7 @@ use crate::plot::mosaic::MosaicPlot;
 use crate::plot::network::{NetworkPlot, NodeShape};
 use crate::plot::hexbin::{HexbinPlot, ZReduce};
 use crate::plot::treemap::{TreemapPlot, TreemapNode, TreemapColorMode, TreemapLayout};
+use crate::plot::sunburst::{SunburstPlot, SunburstColorMode};
 
 use crate::plot::Legend;
 use crate::plot::legend::{ColorBarInfo, LegendEntry, LegendGroup, LegendPosition, LegendShape};
@@ -10249,7 +10250,7 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
             Plot::Pie(_) | Plot::UpSet(_) | Plot::Chord(_) | Plot::Sankey(_)
             | Plot::PhyloTree(_) | Plot::Synteny(_) | Plot::Polar(_) | Plot::Ternary(_)
             | Plot::Scatter3D(_) | Plot::Surface3D(_) | Plot::Clustermap(_) | Plot::Joint(_) | Plot::Venn(_) | Plot::Parallel(_)
-            | Plot::Mosaic(_) | Plot::Network(_) | Plot::Radar(_) | Plot::Treemap(_)));
+            | Plot::Mosaic(_) | Plot::Network(_) | Plot::Radar(_) | Plot::Treemap(_) | Plot::Sunburst(_)));
         if !skip_axes_for_meta {
             scene.axis_meta = Some(AxisMeta {
                 x_min: computed.x_range.0,
@@ -10266,7 +10267,7 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
         }
     }
 
-    let skip_axes = plots.iter().all(|p| matches!(p, Plot::Pie(_) | Plot::UpSet(_) | Plot::Chord(_) | Plot::Sankey(_) | Plot::PhyloTree(_) | Plot::Synteny(_) | Plot::Polar(_) | Plot::Ternary(_) | Plot::DicePlot(_) | Plot::Scatter3D(_) | Plot::Surface3D(_) | Plot::Clustermap(_) | Plot::Joint(_) | Plot::Venn(_) | Plot::Parallel(_) | Plot::Mosaic(_) | Plot::Network(_) | Plot::Radar(_) | Plot::Treemap(_)));
+    let skip_axes = plots.iter().all(|p| matches!(p, Plot::Pie(_) | Plot::UpSet(_) | Plot::Chord(_) | Plot::Sankey(_) | Plot::PhyloTree(_) | Plot::Synteny(_) | Plot::Polar(_) | Plot::Ternary(_) | Plot::DicePlot(_) | Plot::Scatter3D(_) | Plot::Surface3D(_) | Plot::Clustermap(_) | Plot::Joint(_) | Plot::Venn(_) | Plot::Parallel(_) | Plot::Mosaic(_) | Plot::Network(_) | Plot::Radar(_) | Plot::Treemap(_) | Plot::Sunburst(_)));
     if !skip_axes {
         add_axes_and_grid(&mut scene, &computed, &layout);
     }
@@ -10512,6 +10513,9 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
             Plot::Treemap(tm) => {
                 add_treemap(tm, &mut scene, &computed);
             }
+            Plot::Sunburst(sb) => {
+                add_sunburst(sb, &mut scene, &computed);
+            }
         }
     }
 
@@ -10638,6 +10642,15 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
                 for plot in plots.iter() {
                     if let Plot::Treemap(tm) = plot {
                         add_treemap_colorbar(tm, &mut scene, &computed);
+                        special_cb_drawn = true;
+                        break;
+                    }
+                }
+            }
+            if !special_cb_drawn {
+                for plot in plots.iter() {
+                    if let Plot::Sunburst(sb) = plot {
+                        add_sunburst_colorbar(sb, &mut scene, &computed);
                         special_cb_drawn = true;
                         break;
                     }
@@ -14137,6 +14150,396 @@ fn add_treemap_colorbar(tm: &TreemapPlot, scene: &mut Scene, computed: &Computed
 /// Render a single [`TreemapPlot`] to a [`Scene`].
 pub fn render_treemap(tm: TreemapPlot, layout: Layout) -> Scene {
     let plots = vec![Plot::Treemap(tm)];
+    render_multiple(plots, layout)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sunburst rendering
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// One arc in the sunburst.
+struct SbArc {
+    label: String,
+    value: f64,
+    color_value: Option<f64>,
+    inherited_color: Option<String>,
+    explicit_color: Option<String>,
+    /// Start angle in compass degrees (0 = north, clockwise).
+    start_deg: f64,
+    /// Sweep in degrees (positive = clockwise).
+    sweep_deg: f64,
+    r_inner: f64,
+    r_outer: f64,
+    path: String,
+    is_leaf: bool,
+}
+
+/// Convert compass degrees to SVG radians: 0° → north (top), clockwise.
+#[inline]
+fn compass_rad(deg: f64) -> f64 {
+    (deg - 90.0_f64).to_radians()
+}
+
+/// Point on circle at compass angle `deg_compass`, radius `r`, centred at (cx, cy).
+#[inline]
+fn arc_point(cx: f64, cy: f64, r: f64, deg_compass: f64) -> (f64, f64) {
+    let a = compass_rad(deg_compass);
+    (cx + r * a.cos(), cy + r * a.sin())
+}
+
+/// Build the SVG `d` string for a sunburst arc sector.
+fn sunburst_arc_path(cx: f64, cy: f64, r_inner: f64, r_outer: f64,
+                     start_deg: f64, sweep_deg: f64) -> String {
+    let end_deg = start_deg + sweep_deg;
+
+    // Full circle: draw as two halves to avoid SVG arc degeneration
+    if sweep_deg.abs() >= 359.9 {
+        let (ox1, oy1) = arc_point(cx, cy, r_outer, start_deg);
+        let (ox2, oy2) = arc_point(cx, cy, r_outer, start_deg + 180.0);
+        if r_inner <= 0.5 {
+            return format!(
+                "M{cx},{cy} L{ox1},{oy1} A{ro},{ro} 0 1,1 {ox2},{oy2} A{ro},{ro} 0 1,1 {ox1},{oy1} Z",
+                ro = r_outer, cx = round2(cx), cy = round2(cy),
+                ox1 = round2(ox1), oy1 = round2(oy1),
+                ox2 = round2(ox2), oy2 = round2(oy2),
+            );
+        } else {
+            let (ix1, iy1) = arc_point(cx, cy, r_inner, start_deg);
+            let (ix2, iy2) = arc_point(cx, cy, r_inner, start_deg + 180.0);
+            return format!(
+                "M{ox1},{oy1} A{ro},{ro} 0 1,1 {ox2},{oy2} A{ro},{ro} 0 1,1 {ox1},{oy1} \
+                 M{ix1},{iy1} A{ri},{ri} 0 1,0 {ix2},{iy2} A{ri},{ri} 0 1,0 {ix1},{iy1} Z",
+                ro = r_outer, ri = r_inner,
+                ox1 = round2(ox1), oy1 = round2(oy1),
+                ox2 = round2(ox2), oy2 = round2(oy2),
+                ix1 = round2(ix1), iy1 = round2(iy1),
+                ix2 = round2(ix2), iy2 = round2(iy2),
+            );
+        }
+    }
+
+    let large_arc = if sweep_deg.abs() > 180.0 { 1 } else { 0 };
+
+    let (ox1, oy1) = arc_point(cx, cy, r_outer, start_deg);
+    let (ox2, oy2) = arc_point(cx, cy, r_outer, end_deg);
+
+    if r_inner <= 0.5 {
+        // Wedge to center
+        format!(
+            "M{cx},{cy} L{ox1},{oy1} A{ro},{ro} 0 {la},1 {ox2},{oy2} Z",
+            ro = r_outer, la = large_arc,
+            cx = round2(cx), cy = round2(cy),
+            ox1 = round2(ox1), oy1 = round2(oy1),
+            ox2 = round2(ox2), oy2 = round2(oy2),
+        )
+    } else {
+        // Annulus sector
+        let (ix1, iy1) = arc_point(cx, cy, r_inner, start_deg);
+        let (ix2, iy2) = arc_point(cx, cy, r_inner, end_deg);
+        format!(
+            "M{ox1},{oy1} A{ro},{ro} 0 {la},1 {ox2},{oy2} L{ix2},{iy2} A{ri},{ri} 0 {la},0 {ix1},{iy1} Z",
+            ro = r_outer, ri = r_inner, la = large_arc,
+            ox1 = round2(ox1), oy1 = round2(oy1),
+            ox2 = round2(ox2), oy2 = round2(oy2),
+            ix1 = round2(ix1), iy1 = round2(iy1),
+            ix2 = round2(ix2), iy2 = round2(iy2),
+        )
+    }
+}
+
+/// Collect all arcs across all depth levels.
+fn build_sunburst_arcs(sb: &SunburstPlot, avail_r: f64) -> Vec<SbArc> {
+    use crate::render::palette::Palette;
+    let cat10 = Palette::category10();
+
+    let active_roots: Vec<&TreemapNode> = sb.roots.iter()
+        .filter(|n| n.resolved_value() > f64::EPSILON)
+        .collect();
+    if active_roots.is_empty() { return vec![]; }
+
+    // Determine number of rings to draw
+    let max_tree_depth = sb.max_tree_depth();
+    let n_rings = if let Some(md) = sb.max_depth {
+        (md + 1).min(max_tree_depth + 1)
+    } else {
+        max_tree_depth + 1
+    };
+    let n_rings = n_rings.max(1);
+
+    let ring_w_total = (1.0 - sb.inner_radius_frac) * avail_r;
+    let ring_w = ring_w_total / n_rings as f64;
+
+    let total_root: f64 = active_roots.iter().map(|n| n.resolved_value()).sum();
+
+    let cv_slice: &[f64] = sb.color_values.as_deref().unwrap_or(&[]);
+
+    let mut arcs: Vec<SbArc> = Vec::new();
+
+    // Process one depth level at a time, BFS-style, collecting nodes at that depth.
+    // We do this iteratively by passing arcs from the previous depth.
+
+    struct PendingNode<'a> {
+        node: &'a TreemapNode,
+        start_deg: f64,
+        sweep_deg: f64,
+        inherited_color: Option<String>,
+    }
+
+    let mut pending: Vec<PendingNode> = Vec::new();
+    let mut leaf_idx = 0usize;
+
+    // Seed with root level
+    let mut cursor = sb.start_angle_deg;
+    for (i, node) in active_roots.iter().enumerate() {
+        let val = node.resolved_value();
+        let sweep = val / total_root * 360.0;
+        let root_color = cat10[i % cat10.len()].to_string();
+        pending.push(PendingNode {
+            node,
+            start_deg: cursor,
+            sweep_deg: sweep,
+            inherited_color: Some(root_color),
+        });
+        cursor += sweep;
+    }
+
+    // Process each pending node level by level
+    let mut next_pending: Vec<PendingNode> = Vec::new();
+    let mut current_depth = 0usize;
+
+    while !pending.is_empty() {
+        if let Some(md) = sb.max_depth {
+            if current_depth > md { break; }
+        }
+
+        let r_inner = sb.inner_radius_frac * avail_r + current_depth as f64 * ring_w;
+        let r_outer = (r_inner + ring_w - sb.ring_gap).max(r_inner + 1.0);
+
+        for pn in pending.drain(..) {
+            let node = pn.node;
+            let is_leaf = node.children.is_empty()
+                || sb.max_depth.map(|md| current_depth >= md).unwrap_or(false);
+
+            let color_value = if node.children.is_empty() {
+                let cv = cv_slice.get(leaf_idx).copied();
+                leaf_idx += 1;
+                cv
+            } else {
+                None
+            };
+
+            let path = node.label.clone();
+
+            arcs.push(SbArc {
+                label: node.label.clone(),
+                value: node.resolved_value(),
+                color_value,
+                inherited_color: pn.inherited_color.clone(),
+                explicit_color: node.color.clone(),
+                start_deg: pn.start_deg,
+                sweep_deg: pn.sweep_deg,
+                r_inner,
+                r_outer,
+                path,
+                is_leaf,
+            });
+
+            if !node.children.is_empty() && !is_leaf {
+                let child_total: f64 = node.children.iter()
+                    .map(|c| c.resolved_value())
+                    .sum();
+                if child_total > f64::EPSILON {
+                    let mut child_cursor = pn.start_deg;
+                    for child in &node.children {
+                        let cv = child.resolved_value();
+                        if cv <= f64::EPSILON { continue; }
+                        let child_sweep = cv / child_total * pn.sweep_deg;
+                        next_pending.push(PendingNode {
+                            node: child,
+                            start_deg: child_cursor,
+                            sweep_deg: child_sweep,
+                            inherited_color: pn.inherited_color.clone(),
+                        });
+                        child_cursor += child_sweep;
+                    }
+                }
+            }
+        }
+
+        std::mem::swap(&mut pending, &mut next_pending);
+        current_depth += 1;
+    }
+
+    arcs
+}
+
+/// Collect leaf values from sunburst for colorbar range computation.
+fn sunburst_leaf_values(sb: &SunburstPlot) -> Vec<f64> {
+    if let Some(ref cv) = sb.color_values {
+        return cv.clone();
+    }
+    fn collect(nodes: &[TreemapNode], out: &mut Vec<f64>) {
+        for n in nodes {
+            if n.children.is_empty() {
+                out.push(n.resolved_value());
+            } else {
+                collect(&n.children, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    collect(&sb.roots, &mut out);
+    out
+}
+
+fn compute_sunburst_value_range(sb: &SunburstPlot) -> (f64, f64) {
+    if let Some((lo, hi)) = sb.color_range { return (lo, hi); }
+    let vals = sunburst_leaf_values(sb);
+    if vals.is_empty() { return (0.0, 1.0); }
+    let lo = vals.iter().cloned().fold(f64::INFINITY, f64::min);
+    let hi = vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    (lo, hi)
+}
+
+/// Render a [`SunburstPlot`].  Must be added to `skip_axes` so no axes are drawn.
+fn add_sunburst(sb: &SunburstPlot, scene: &mut Scene, computed: &ComputedLayout) {
+    let pw = computed.width  - computed.margin_left - computed.margin_right;
+    let ph = computed.height - computed.margin_top  - computed.margin_bottom;
+    if pw <= 0.0 || ph <= 0.0 { return; }
+
+    let cx = computed.margin_left + pw / 2.0;
+    let cy = computed.margin_top  + ph / 2.0;
+    let avail_r = pw.min(ph) / 2.0 - 4.0;
+    if avail_r <= 0.0 { return; }
+
+    let arcs = build_sunburst_arcs(sb, avail_r);
+    if arcs.is_empty() { return; }
+
+    // Colour range for ByValue mode
+    let (v_min, v_max) = if matches!(sb.color_mode, SunburstColorMode::ByValue(_)) {
+        compute_sunburst_value_range(sb)
+    } else {
+        (0.0, 1.0)
+    };
+    let v_span = (v_max - v_min).max(f64::EPSILON);
+
+    for arc in &arcs {
+        let fill_color = match &sb.color_mode {
+            SunburstColorMode::ByParent => {
+                arc.inherited_color.as_deref().unwrap_or("#888888").to_string()
+            }
+            SunburstColorMode::ByValue(cmap) => {
+                if arc.is_leaf {
+                    let raw = arc.color_value.unwrap_or(arc.value);
+                    let norm = ((raw - v_min) / v_span).clamp(0.0, 1.0);
+                    cmap.map(norm)
+                } else {
+                    "#e0e0e0".to_string()
+                }
+            }
+            SunburstColorMode::Explicit => {
+                arc.explicit_color.as_deref().unwrap_or("#888888").to_string()
+            }
+        };
+
+        if sb.show_tooltips {
+            let tip = format!("{}\n{:.4}", arc.path, arc.value);
+            scene.add(Primitive::GroupStart {
+                transform: None,
+                title: Some(tip),
+                extra_attrs: None,
+            });
+        }
+
+        let path_d = sunburst_arc_path(cx, cy, arc.r_inner, arc.r_outer, arc.start_deg, arc.sweep_deg);
+        scene.add(Primitive::Path(Box::new(PathData {
+            d: path_d,
+            fill: Some(Color::from(fill_color.as_str())),
+            stroke: Color::from("#ffffff"),
+            stroke_width: 0.8,
+            opacity: None,
+            stroke_dasharray: None,
+        })));
+
+        // Label
+        if sb.show_labels && arc.sweep_deg >= sb.min_label_angle {
+            let mid_deg = arc.start_deg + arc.sweep_deg / 2.0;
+            let r_mid = (arc.r_inner + arc.r_outer) / 2.0;
+            let (lx, ly) = arc_point(cx, cy, r_mid, mid_deg);
+
+            let font_size = 11u32;
+            let char_w_est = font_size as f64 * 0.55;
+            // Available arc width at midpoint
+            let arc_len = arc.sweep_deg.to_radians() * r_mid;
+            let max_chars = ((arc_len * 0.88) / char_w_est).floor().max(0.0) as usize;
+            let label = if max_chars > 2 && arc.label.chars().count() > max_chars {
+                let truncated: String = arc.label.chars().take(max_chars.saturating_sub(1)).collect();
+                format!("{}…", truncated)
+            } else {
+                arc.label.clone()
+            };
+
+            let rotate = if sb.rotate_labels {
+                // Follow the arc tangent; flip labels in the bottom half so they read left-to-right
+                let rotate_deg = if mid_deg > 90.0 && mid_deg < 270.0 {
+                    mid_deg - 180.0
+                } else {
+                    mid_deg
+                };
+                Some(rotate_deg - 90.0)
+            } else {
+                None
+            };
+
+            scene.add(Primitive::Text {
+                x: round2(lx),
+                y: round2(ly),
+                content: label,
+                size: font_size,
+                anchor: TextAnchor::Middle,
+                rotate,
+                bold: false,
+                color: Some(Color::from("#ffffff")),
+            });
+        }
+
+        if sb.show_tooltips {
+            scene.add(Primitive::GroupEnd);
+        }
+    }
+    // Colorbar drawn after ClipEnd by add_sunburst_colorbar in render_multiple.
+}
+
+/// Draw the sunburst colorbar.  Must be called AFTER `ClipEnd`.
+fn add_sunburst_colorbar(sb: &SunburstPlot, scene: &mut Scene, computed: &ComputedLayout) {
+    use std::sync::Arc;
+    use crate::plot::legend::ColorBarInfo;
+
+    let cmap = match &sb.color_mode {
+        SunburstColorMode::ByValue(cmap) => cmap.clone(),
+        _ => return,
+    };
+    if !sb.show_colorbar { return; }
+
+    let (v_min, v_max) = compute_sunburst_value_range(sb);
+    let span = (v_max - v_min).max(f64::EPSILON);
+    let cmin = v_min;
+
+    let label = sb.colorbar_label.clone().unwrap_or_else(|| "Value".to_string());
+
+    let cb_info = ColorBarInfo {
+        map_fn: Arc::new(move |t: f64| cmap.map(((t - cmin) / span).clamp(0.0, 1.0))),
+        min_value: v_min,
+        max_value: v_max,
+        label: Some(label),
+        tick_labels: None,
+    };
+    add_colorbar(&cb_info, scene, computed);
+}
+
+/// Render a single [`SunburstPlot`] to a [`Scene`].
+pub fn render_sunburst(sb: SunburstPlot, layout: Layout) -> Scene {
+    let plots = vec![Plot::Sunburst(sb)];
     render_multiple(plots, layout)
 }
 

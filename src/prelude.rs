@@ -123,6 +123,8 @@ pub use crate::plot::{
     TreemapNode,
     TreemapColorMode,
     TreemapLayout,
+    SunburstPlot,
+    SunburstColorMode,
     // Style / config types used when building plots
     MarkerShape,
     LineStyle,
@@ -157,6 +159,7 @@ pub use crate::render::render::{
     render_parallel,
     render_mosaic,
     render_treemap,
+    render_sunburst,
 };
 
 // ── Figure (multi-plot grid) ─────────────────────────────────────────────────

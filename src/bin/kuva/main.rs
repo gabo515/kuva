@@ -37,6 +37,7 @@ mod network;
 mod radar;
 mod hexbin;
 mod treemap;
+mod sunburst;
 #[cfg(feature = "doom")]
 mod doom;
 
@@ -98,6 +99,8 @@ enum Commands {
     Radar(radar::RadarArgs),
     Hexbin(hexbin::HexbinArgs),
     Treemap(treemap::TreemapArgs),
+    /// Sunburst chart — radial hierarchy diagram.
+    Sunburst(sunburst::SunburstArgs),
     #[cfg(feature = "doom")]
     /// Generate a self-contained DOOM SVG playable in any browser.
     Doom(doom::DoomArgs),
@@ -151,6 +154,7 @@ fn main() {
         Commands::Radar(args) => radar::run(args),
         Commands::Hexbin(args) => hexbin::run(args),
         Commands::Treemap(args) => treemap::run(args),
+        Commands::Sunburst(args) => sunburst::run(args),
         #[cfg(feature = "doom")]
         Commands::Doom(args) => doom::run(args),
         Commands::Man => unreachable!(),

@@ -478,6 +478,7 @@ impl Layout {
             if matches!(plot, Plot::Heatmap(_) | Plot::Histogram2d(_))
                 || matches!(plot, Plot::Hexbin(hb) if hb.show_colorbar)
                 || matches!(plot, Plot::Treemap(tm) if matches!(tm.color_mode, crate::plot::treemap::TreemapColorMode::ByValue(_)) && tm.show_colorbar)
+                || matches!(plot, Plot::Sunburst(sb) if matches!(sb.color_mode, crate::plot::sunburst::SunburstColorMode::ByValue(_)) && sb.show_colorbar)
             {
                 has_colorbar = true;
             }

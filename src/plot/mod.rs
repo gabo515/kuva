@@ -49,6 +49,7 @@ pub mod streamgraph;
 pub mod radar;
 pub mod hexbin;
 pub mod treemap;
+pub mod sunburst;
 
 pub mod legend;
 
@@ -105,5 +106,6 @@ pub use streamgraph::{StreamgraphPlot, StreamBaseline, StreamOrder};
 pub use radar::{RadarPlot, RadarReference, RadarSeries};
 pub use hexbin::{HexbinPlot, ZReduce};
 pub use treemap::{TreemapPlot, TreemapNode, TreemapColorMode, TreemapLayout};
+pub use sunburst::{SunburstPlot, SunburstColorMode};
 
 pub use legend::{Legend, LegendEntry, LegendShape, LegendPosition, LegendGroup};

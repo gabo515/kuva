@@ -14865,8 +14865,26 @@ fn add_funnel(fp: &FunnelPlot, scene: &mut Scene, computed: &ComputedLayout) {
         let gap = fp.stage_gap;
         let total_gap = gap * (n.saturating_sub(1)) as f64;
         let bar_h = ((ph - total_gap) / n as f64).max(4.0);
-        let max_bar_w = if is_mirror { pw / 2.0 - 4.0 } else { pw };
-        let center_x = ox + pw / 2.0;
+
+        // Reserve horizontal space for stage label text so the widest bar's
+        // left edge never collides with the left margin.
+        let max_left_chars = fp.stages.iter().map(|s| s.label.len()).max().unwrap_or(0);
+        let left_label_w = max_left_chars as f64 * 7.5 + 14.0;
+
+        let (max_bar_w, center_x) = if is_mirror {
+            // Mirror: reserve left (main labels) and right (mirror labels)
+            let max_right_chars = fp.mirror.as_ref()
+                .and_then(|m| m.iter().map(|s| s.label.len()).max())
+                .unwrap_or(0);
+            let right_label_w = max_right_chars as f64 * 7.5 + 14.0;
+            let avail = (pw - left_label_w - right_label_w).max(40.0);
+            let half = avail / 2.0 - 4.0;
+            let cx = ox + left_label_w + avail / 2.0;
+            (half, cx)
+        } else {
+            let avail = (pw - left_label_w).max(40.0);
+            (avail, ox + left_label_w + avail / 2.0)
+        };
 
         // Side labels for mirror mode
         if is_mirror {

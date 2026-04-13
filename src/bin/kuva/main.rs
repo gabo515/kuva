@@ -40,6 +40,7 @@ mod treemap;
 mod sunburst;
 mod bump;
 mod funnel;
+mod rose;
 #[cfg(feature = "doom")]
 mod doom;
 
@@ -107,6 +108,8 @@ enum Commands {
     Bump(bump::BumpArgs),
     /// Funnel chart — attrition / conversion through ordered stages.
     Funnel(funnel::FunnelArgs),
+    /// Nightingale rose / coxcomb chart — polar bar chart.
+    Rose(rose::RoseArgs),
     #[cfg(feature = "doom")]
     /// Generate a self-contained DOOM SVG playable in any browser.
     Doom(doom::DoomArgs),
@@ -163,6 +166,7 @@ fn main() {
         Commands::Sunburst(args) => sunburst::run(args),
         Commands::Bump(args) => bump::run(args),
         Commands::Funnel(args) => funnel::run(args),
+        Commands::Rose(args) => rose::run(args),
         #[cfg(feature = "doom")]
         Commands::Doom(args) => doom::run(args),
         Commands::Man => unreachable!(),

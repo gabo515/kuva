@@ -1,0 +1,137 @@
+# Nightingale Rose Chart
+
+A **Nightingale rose** (coxcomb chart) is a polar bar chart where each sector's **area** or **radius** is proportional to its data value.  It was famously used by Florence Nightingale to visualise causes of soldier mortality.
+
+## Basic usage
+
+```rust,no_run
+use kuva::plot::rose::RosePlot;
+use kuva::render::{plots::Plot, layout::Layout, render::render_rose};
+use kuva::backend::svg::SvgBackend;
+
+let plot = RosePlot::new()
+    .with_slice("Jan", 30.0)
+    .with_slice("Feb", 20.0)
+    .with_slice("Mar", 45.0)
+    .with_slice("Apr", 38.0);
+
+let svg = SvgBackend.render_scene(&render_rose(plot, Layout::default()));
+std::fs::write("rose.svg", svg).unwrap();
+```
+
+Or bulk-add slices:
+
+```rust,no_run
+use kuva::plot::rose::RosePlot;
+
+let plot = RosePlot::new().with_slices([
+    ("Jan", 30.0), ("Feb", 20.0), ("Mar", 45.0), ("Apr", 38.0),
+]);
+```
+
+## Auto-binning bearing data
+
+Pass raw compass bearings (0–360°) and a bin count:
+
+```rust,no_run
+use kuva::plot::rose::RosePlot;
+
+let bearings = vec![10.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0, 355.0];
+let plot = RosePlot::new()
+    .with_bearing_data(bearings, 8)  // 8 compass octants
+    .with_compass_labels();          // N, NE, E, SE, ...
+```
+
+## Stacked mode
+
+Multiple series stacked within each sector:
+
+```rust,no_run
+use kuva::plot::rose::RosePlot;
+
+let plot = RosePlot::new()
+    .with_x_labels(["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"])
+    .with_stack("Preventable", vec![12.0, 11.0, 14.0, 10.0, 9.0, 7.0, 6.0, 5.0, 8.0, 10.0, 13.0, 15.0])
+    .with_stack("Wounds",      vec![ 3.0,  4.0,  2.0,  3.0, 2.0, 2.0, 1.0, 1.0, 2.0,  3.0,  3.0,  4.0])
+    .with_legend("Cause of death");
+```
+
+## Grouped mode
+
+Each series occupies its own sub-wedge within each sector:
+
+```rust,no_run
+use kuva::plot::rose::{RosePlot, RoseMode};
+
+let plot = RosePlot::new()
+    .with_mode(RoseMode::Grouped)
+    .with_x_labels(["Q1", "Q2", "Q3", "Q4"])
+    .with_group("Product A", vec![20.0, 35.0, 25.0, 40.0])
+    .with_group("Product B", vec![15.0, 22.0, 30.0, 28.0])
+    .with_legend("Sales");
+```
+
+## Encoding modes
+
+| Mode | Formula | Use case |
+|------|---------|----------|
+| `Area` (default) | `r = sqrt(base² + frac*(max²-base²))` | Perceptually accurate — areas proportional to values |
+| `Radius` | `r = base + frac*(max_r-base)` | Radius proportional to values (overestimates large sectors) |
+
+```rust,no_run
+use kuva::plot::rose::{RosePlot, RoseEncoding};
+
+let plot = RosePlot::new()
+    .with_encoding(RoseEncoding::Radius)
+    .with_slices([("A", 10.0), ("B", 30.0), ("C", 60.0)]);
+```
+
+## Compass labels
+
+Replace numeric labels with cardinal/intercardinal directions:
+
+```rust,no_run
+use kuva::plot::rose::{RosePlot, compass_labels_for_n};
+
+// Automatic from sector count (works for 4, 8, 16 sectors)
+let plot = RosePlot::new()
+    .with_bearing_data(some_bearings, 8)
+    .with_compass_labels();
+
+// Or set manually
+let labels = compass_labels_for_n(4);  // ["N", "E", "S", "W"]
+```
+
+## Inner radius / donut
+
+```rust,no_run
+use kuva::plot::rose::RosePlot;
+
+let plot = RosePlot::new()
+    .with_inner_radius(0.3)   // 30% of max_r is hollow
+    .with_slices([("A", 40.0), ("B", 60.0), ("C", 30.0)]);
+```
+
+## Builder reference
+
+| Method | Default | Description |
+|--------|---------|-------------|
+| `with_slice(label, value)` | — | Add one sector to the default series |
+| `with_slices(iter)` | — | Add multiple `(label, value)` sectors |
+| `with_x_labels(iter)` | — | Set all sector labels at once |
+| `with_stack(name, values)` | — | Add a stacked series; sets mode=Stacked |
+| `with_group(name, values)` | — | Add a grouped series; sets mode=Grouped |
+| `with_bearing_data(iter, n)` | — | Bin raw bearings into `n` sectors |
+| `with_compass_labels()` | — | Replace labels with compass directions |
+| `with_encoding(enc)` | `Area` | `RoseEncoding::Area` or `Radius` |
+| `with_mode(mode)` | `Stacked` | `RoseMode::Stacked` or `Grouped` |
+| `with_start_angle(deg)` | `0.0` | Degrees clockwise from north for sector 0 |
+| `with_clockwise(bool)` | `true` | Direction sectors are laid out |
+| `with_inner_radius(f)` | `0.0` | Donut hole fraction (0–0.95) |
+| `with_gap(deg)` | `1.0` | Angular gap between sectors in degrees |
+| `with_grid(bool)` | `true` | Concentric grid rings |
+| `with_grid_lines(n)` | `4` | Number of grid rings |
+| `with_spokes(bool)` | `true` | Radial spoke lines |
+| `with_show_labels(bool)` | `true` | Sector labels around the perimeter |
+| `with_show_values(bool)` | `false` | Value labels at sector tips |
+| `with_legend(label)` | `None` | Enable legend |

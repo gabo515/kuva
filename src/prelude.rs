@@ -133,6 +133,10 @@ pub use crate::plot::{
     FunnelStage,
     FunnelColorMode,
     FunnelOrientation,
+    RosePlot,
+    RoseSeries,
+    RoseEncoding,
+    RoseMode,
     // Style / config types used when building plots
     MarkerShape,
     LineStyle,
@@ -170,6 +174,7 @@ pub use crate::render::render::{
     render_sunburst,
     render_bump,
     render_funnel,
+    render_rose,
 };
 
 // ── Figure (multi-plot grid) ─────────────────────────────────────────────────

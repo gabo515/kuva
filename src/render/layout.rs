@@ -831,6 +831,24 @@ impl Layout {
                 max_label_len = max_label_len.max(label.len());
             }
             if cmap_3d { has_colorbar = true; }
+
+            if let Plot::Funnel(fp) = plot {
+                if fp.legend_label.is_some() {
+                    has_legend = true;
+                    for s in &fp.stages {
+                        max_label_len = max_label_len.max(s.label.len());
+                    }
+                }
+            }
+
+            if let Plot::Rose(rp) = plot {
+                if rp.legend_label.is_some() {
+                    has_legend = true;
+                    for s in &rp.series {
+                        max_label_len = max_label_len.max(s.name.len());
+                    }
+                }
+            }
         }
 
         // Save raw data range before padding (log scale needs it)

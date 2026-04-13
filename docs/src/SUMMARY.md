@@ -56,6 +56,7 @@
 - [3D Surface Plot](./plots/surface3d.md)
 - [Twin-Y Plot](./plots/twin_y.md)
 - [Funnel Chart](./plots/funnel.md)
+- [Nightingale Rose](./plots/rose.md)
 
 # CLI
 
@@ -86,6 +87,7 @@
   - [sunburst](./cli/sunburst.md)
   - [bump](./cli/bump.md)
   - [funnel](./cli/funnel.md)
+  - [rose](./cli/rose.md)
   - [contour](./cli/contour.md)
   - [dot](./cli/dot.md)
   - [upset](./cli/upset.md)

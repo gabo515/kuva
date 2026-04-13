@@ -79,6 +79,7 @@ use crate::plot::treemap::{TreemapPlot, TreemapNode, TreemapColorMode, TreemapLa
 use crate::plot::sunburst::{SunburstPlot, SunburstColorMode};
 use crate::plot::bump::{BumpPlot, CurveStyle};
 use crate::plot::funnel::{FunnelPlot, FunnelStage, FunnelColorMode, FunnelOrientation};
+use crate::plot::rose::{RosePlot, RoseEncoding, RoseMode};
 
 use crate::plot::Legend;
 use crate::plot::legend::{ColorBarInfo, LegendEntry, LegendGroup, LegendPosition, LegendShape};
@@ -8493,6 +8494,21 @@ pub fn collect_legend_entries(plots: &[Plot]) -> Vec<LegendEntry> {
                     }
                 }
             }
+            Plot::Rose(rp) => {
+                if rp.legend_label.is_some() {
+                    use crate::render::palette::Palette;
+                    let cat10 = Palette::category10();
+                    for (i, s) in rp.series.iter().enumerate() {
+                        let color = s.color.clone().unwrap_or_else(|| cat10[i % 10].to_string());
+                        entries.push(LegendEntry {
+                            label: s.name.clone(),
+                            color,
+                            shape: LegendShape::Rect,
+                            dasharray: None,
+                        });
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -10299,7 +10315,7 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
             Plot::Pie(_) | Plot::UpSet(_) | Plot::Chord(_) | Plot::Sankey(_)
             | Plot::PhyloTree(_) | Plot::Synteny(_) | Plot::Polar(_) | Plot::Ternary(_)
             | Plot::Scatter3D(_) | Plot::Surface3D(_) | Plot::Clustermap(_) | Plot::Joint(_) | Plot::Venn(_) | Plot::Parallel(_)
-            | Plot::Mosaic(_) | Plot::Network(_) | Plot::Radar(_) | Plot::Treemap(_) | Plot::Sunburst(_) | Plot::Funnel(_)));
+            | Plot::Mosaic(_) | Plot::Network(_) | Plot::Radar(_) | Plot::Treemap(_) | Plot::Sunburst(_) | Plot::Funnel(_) | Plot::Rose(_)));
         if !skip_axes_for_meta {
             scene.axis_meta = Some(AxisMeta {
                 x_min: computed.x_range.0,
@@ -10316,7 +10332,7 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
         }
     }
 
-    let skip_axes = plots.iter().all(|p| matches!(p, Plot::Pie(_) | Plot::UpSet(_) | Plot::Chord(_) | Plot::Sankey(_) | Plot::PhyloTree(_) | Plot::Synteny(_) | Plot::Polar(_) | Plot::Ternary(_) | Plot::DicePlot(_) | Plot::Scatter3D(_) | Plot::Surface3D(_) | Plot::Clustermap(_) | Plot::Joint(_) | Plot::Venn(_) | Plot::Parallel(_) | Plot::Mosaic(_) | Plot::Network(_) | Plot::Radar(_) | Plot::Treemap(_) | Plot::Sunburst(_) | Plot::Funnel(_)));
+    let skip_axes = plots.iter().all(|p| matches!(p, Plot::Pie(_) | Plot::UpSet(_) | Plot::Chord(_) | Plot::Sankey(_) | Plot::PhyloTree(_) | Plot::Synteny(_) | Plot::Polar(_) | Plot::Ternary(_) | Plot::DicePlot(_) | Plot::Scatter3D(_) | Plot::Surface3D(_) | Plot::Clustermap(_) | Plot::Joint(_) | Plot::Venn(_) | Plot::Parallel(_) | Plot::Mosaic(_) | Plot::Network(_) | Plot::Radar(_) | Plot::Treemap(_) | Plot::Sunburst(_) | Plot::Funnel(_) | Plot::Rose(_)));
     if !skip_axes {
         add_axes_and_grid(&mut scene, &computed, &layout);
     }
@@ -10570,6 +10586,9 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
             }
             Plot::Funnel(fp) => {
                 add_funnel(fp, &mut scene, &computed);
+            }
+            Plot::Rose(rp) => {
+                add_rose(rp, &mut scene, &computed);
             }
         }
     }
@@ -15305,6 +15324,318 @@ fn add_funnel(fp: &FunnelPlot, scene: &mut Scene, computed: &ComputedLayout) {
 /// Render a single [`FunnelPlot`] to a [`Scene`].
 pub fn render_funnel(fp: FunnelPlot, layout: Layout) -> Scene {
     let plots = vec![Plot::Funnel(fp)];
+    render_multiple(plots, layout)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Rose plot helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Compass angle (0 = north, clockwise) → SVG pixel (x, y).
+fn compass_xy(cx: f64, cy: f64, r: f64, deg: f64) -> (f64, f64) {
+    let rad = deg.to_radians();
+    (cx + r * rad.sin(), cy - r * rad.cos())
+}
+
+/// Encode a cumulative value as a pixel radius, respecting the inner hole and
+/// the encoding mode.
+///
+/// * `Area`   — `r = sqrt(base² + frac*(max²-base²))`
+/// * `Radius` — `r = base + frac*(max_r-base)`
+fn rose_r(cum: f64, max_val: f64, max_r: f64, base_r: f64, enc: &RoseEncoding) -> f64 {
+    if max_val <= f64::EPSILON || cum <= 0.0 { return base_r; }
+    let frac = (cum / max_val).clamp(0.0, 1.0);
+    match enc {
+        RoseEncoding::Area => {
+            (base_r * base_r + frac * (max_r * max_r - base_r * base_r)).sqrt()
+        }
+        RoseEncoding::Radius => base_r + frac * (max_r - base_r),
+    }
+}
+
+/// SVG path string for an annular sector (wedge).
+///
+/// `a1`/`a2` are compass degrees (clockwise from north).
+/// When `r_inner < 0.5`, draws a pie slice from the centre.
+fn rose_wedge(cx: f64, cy: f64, r_inner: f64, r_outer: f64, a1: f64, a2: f64, cw: bool) -> String {
+    let (ox1, oy1) = compass_xy(cx, cy, r_outer, a1);
+    let (ox2, oy2) = compass_xy(cx, cy, r_outer, a2);
+    let mut span = if cw { a2 - a1 } else { a1 - a2 };
+    while span < 0.0   { span += 360.0; }
+    while span >= 360.0 { span -= 360.0; }
+    let la   = if span > 180.0 { 1 } else { 0 };
+    let s_out = if cw { 1 } else { 0 };
+    let s_in  = 1 - s_out;
+    if r_inner < 0.5 {
+        format!(
+            "M {cx:.2},{cy:.2} L {ox1:.2},{oy1:.2} \
+             A {r_outer:.2},{r_outer:.2} 0 {la},{s_out} {ox2:.2},{oy2:.2} Z"
+        )
+    } else {
+        let (ix1, iy1) = compass_xy(cx, cy, r_inner, a1);
+        let (ix2, iy2) = compass_xy(cx, cy, r_inner, a2);
+        format!(
+            "M {ox1:.2},{oy1:.2} \
+             A {r_outer:.2},{r_outer:.2} 0 {la},{s_out} {ox2:.2},{oy2:.2} \
+             L {ix2:.2},{iy2:.2} \
+             A {r_inner:.2},{r_inner:.2} 0 {la},{s_in} {ix1:.2},{iy1:.2} Z"
+        )
+    }
+}
+
+/// Edge angles (a1, a2) for sector `idx` in stacked/single mode.
+fn rose_sector_angles(idx: usize, n: usize, start: f64, cw: bool, gap: f64) -> (f64, f64) {
+    let sd = 360.0 / n as f64;
+    let d  = if cw { 1.0 } else { -1.0 };
+    (start + d * (idx as f64 * sd + gap / 2.0),
+     start + d * ((idx + 1) as f64 * sd - gap / 2.0))
+}
+
+/// Centre angle of sector `idx`.
+fn rose_center_angle(idx: usize, n: usize, start: f64, cw: bool) -> f64 {
+    let sd = 360.0 / n as f64;
+    let d  = if cw { 1.0 } else { -1.0 };
+    start + d * (idx as f64 + 0.5) * sd
+}
+
+/// Edge angles for sub-wedge `ji` within sector `si` in grouped mode.
+fn rose_sub_angles(si: usize, ji: usize, n: usize, ns: usize, start: f64, cw: bool, gap: f64) -> (f64, f64) {
+    let sd      = 360.0 / n as f64;
+    let d       = if cw { 1.0 } else { -1.0 };
+    let usable  = sd - gap;
+    let sub_d   = usable / ns as f64;
+    let sub_gap = (sub_d * 0.08).clamp(0.3_f64, 1.5_f64);
+    let sector_start = start + d * (si as f64 * sd + gap / 2.0);
+    (sector_start + d * (ji as f64 * sub_d + sub_gap / 2.0),
+     sector_start + d * ((ji + 1) as f64 * sub_d - sub_gap / 2.0))
+}
+
+/// Format a grid ring value compactly.
+fn rose_fmt(v: f64) -> String {
+    if v <= 0.0          { return "0".to_string(); }
+    if v >= 1_000_000.0  { return format!("{:.1}M", v / 1_000_000.0); }
+    if v >= 1_000.0      { return format!("{:.1}k", v / 1_000.0); }
+    if v == v.floor()    { return format!("{:.0}", v); }
+    if v < 10.0          { return format!("{:.1}", v); }
+    format!("{:.0}", v)
+}
+
+/// Render a [`RosePlot`] onto the scene. Pixel-space; must be in skip_axes list.
+fn add_rose(rp: &RosePlot, scene: &mut Scene, computed: &ComputedLayout) {
+    use crate::render::palette::Palette;
+
+    let pw = computed.width  - computed.margin_left - computed.margin_right;
+    let ph = computed.height - computed.margin_top  - computed.margin_bottom;
+    if pw <= 0.0 || ph <= 0.0 { return; }
+
+    let cx = computed.margin_left + pw / 2.0;
+    let cy = computed.margin_top  + ph / 2.0;
+
+    let n = rp.n_sectors();
+    if n == 0 { return; }
+
+    let label_margin = if rp.show_labels { 34.0 } else { 8.0 };
+    let max_r  = (pw.min(ph) / 2.0 - label_margin).max(10.0);
+    let base_r = rp.inner_radius * max_r;
+    let max_total = rp.max_total();
+    let cat10 = Palette::category10();
+
+    // ── Grid rings ───────────────────────────────────────────────────────────
+    if rp.show_grid && rp.grid_lines > 0 {
+        for k in 1..=rp.grid_lines {
+            let gr = max_r * k as f64 / rp.grid_lines as f64;
+            let d = format!(
+                "M {:.2},{:.2} A {gr:.2},{gr:.2} 0 1,0 {:.2},{:.2} \
+                 A {gr:.2},{gr:.2} 0 1,0 {:.2},{:.2} Z",
+                cx - gr, cy, cx + gr, cy, cx - gr, cy
+            );
+            scene.add(Primitive::Path(Box::new(PathData {
+                d, fill: None,
+                stroke: Color::from("#cccccc"),
+                stroke_width: 0.7,
+                opacity: None,
+                stroke_dasharray: Some("3,3".to_string()),
+            })));
+
+            if max_total > f64::EPSILON {
+                let ring_val = match rp.encoding {
+                    RoseEncoding::Area => {
+                        let denom = max_r * max_r - base_r * base_r;
+                        if denom > f64::EPSILON {
+                            (gr * gr - base_r * base_r).max(0.0) / denom * max_total
+                        } else { 0.0 }
+                    }
+                    RoseEncoding::Radius => {
+                        let denom = max_r - base_r;
+                        if denom > f64::EPSILON {
+                            (gr - base_r).max(0.0) / denom * max_total
+                        } else { 0.0 }
+                    }
+                };
+                let (lx, ly) = compass_xy(cx, cy, gr, rp.start_angle);
+                scene.add(Primitive::Text {
+                    x: lx + 3.0, y: ly - 2.0,
+                    content: rose_fmt(ring_val),
+                    size: 8,
+                    anchor: TextAnchor::Start,
+                    rotate: None, bold: false,
+                    color: Some(Color::from("#aaaaaa")),
+                });
+            }
+        }
+    }
+
+    // ── Spokes ───────────────────────────────────────────────────────────────
+    if rp.show_spokes {
+        for i in 0..n {
+            let a = rose_center_angle(i, n, rp.start_angle, rp.clockwise);
+            let (sx, sy) = compass_xy(cx, cy, max_r, a);
+            let inner_r = if base_r > 0.5 { base_r } else { 0.0 };
+            let (bx, by) = compass_xy(cx, cy, inner_r, a);
+            scene.add(Primitive::Line {
+                x1: bx, y1: by, x2: sx, y2: sy,
+                stroke: Color::from("#dddddd"),
+                stroke_width: 0.5,
+                stroke_dasharray: None,
+            });
+        }
+    }
+
+    // ── Wedges ───────────────────────────────────────────────────────────────
+    if max_total > f64::EPSILON {
+        match &rp.mode {
+            RoseMode::Stacked => {
+                for i in 0..n {
+                    let (a1, a2) = rose_sector_angles(i, n, rp.start_angle, rp.clockwise, rp.gap);
+                    let mut cum = 0.0_f64;
+                    for (j, series) in rp.series.iter().enumerate() {
+                        let val = series.values.get(i).copied().unwrap_or(0.0).max(0.0);
+                        let r_inn = rose_r(cum, max_total, max_r, base_r, &rp.encoding);
+                        cum += val;
+                        let r_out = rose_r(cum, max_total, max_r, base_r, &rp.encoding);
+                        if r_out <= r_inn + 0.5 { continue; }
+                        let color = series.color.clone()
+                            .unwrap_or_else(|| cat10[j % 10].to_string());
+                        let d = rose_wedge(cx, cy, r_inn, r_out, a1, a2, rp.clockwise);
+                        scene.add(Primitive::Path(Box::new(PathData {
+                            d, fill: Some(Color::from(color.as_str())),
+                            stroke: Color::from("#ffffff"),
+                            stroke_width: 0.5,
+                            opacity: Some(0.75), stroke_dasharray: None,
+                        })));
+                    }
+                    if rp.show_values && cum > f64::EPSILON {
+                        let r_out_tip = rose_r(cum, max_total, max_r, base_r, &rp.encoding);
+                        let r_inn_tip = rose_r(cum - rp.series.iter().map(|s| s.values.get(i).copied().unwrap_or(0.0).max(0.0)).last().unwrap_or(0.0), max_total, max_r, base_r, &rp.encoding);
+                        let ac = rose_center_angle(i, n, rp.start_angle, rp.clockwise);
+                        let (lx, ly) = if rp.show_labels && r_out_tip - r_inn_tip > 16.0 {
+                            // Place inside the wedge tip to avoid colliding with sector labels
+                            compass_xy(cx, cy, r_out_tip - 8.0, ac)
+                        } else {
+                            compass_xy(cx, cy, r_out_tip + 8.0, ac)
+                        };
+                        scene.add(Primitive::Text {
+                            x: lx, y: ly + 4.0,
+                            content: rose_fmt(cum), size: 9,
+                            anchor: TextAnchor::Middle, rotate: None,
+                            bold: false, color: None,
+                        });
+                    }
+                }
+            }
+            RoseMode::Grouped => {
+                let ns = rp.series.len();
+                if ns == 0 { return; }
+                for i in 0..n {
+                    for (j, series) in rp.series.iter().enumerate() {
+                        let val = series.values.get(i).copied().unwrap_or(0.0).max(0.0);
+                        let r_out = rose_r(val, max_total, max_r, base_r, &rp.encoding);
+                        if r_out <= base_r + 0.5 { continue; }
+                        let (a1, a2) = rose_sub_angles(i, j, n, ns, rp.start_angle, rp.clockwise, rp.gap);
+                        let color = series.color.clone()
+                            .unwrap_or_else(|| cat10[j % 10].to_string());
+                        let d = rose_wedge(cx, cy, base_r, r_out, a1, a2, rp.clockwise);
+                        scene.add(Primitive::Path(Box::new(PathData {
+                            d, fill: Some(Color::from(color.as_str())),
+                            stroke: Color::from("#ffffff"),
+                            stroke_width: 0.5,
+                            opacity: Some(0.75), stroke_dasharray: None,
+                        })));
+                    }
+                    if rp.show_values {
+                        let max_val = rp.series.iter()
+                            .map(|s| s.values.get(i).copied().unwrap_or(0.0))
+                            .fold(0.0_f64, f64::max);
+                        if max_val > f64::EPSILON {
+                            let r_out_tip = rose_r(max_val, max_total, max_r, base_r, &rp.encoding);
+                            let ac = rose_center_angle(i, n, rp.start_angle, rp.clockwise);
+                            let (lx, ly) = if rp.show_labels && r_out_tip - base_r > 16.0 {
+                                compass_xy(cx, cy, r_out_tip - 8.0, ac)
+                            } else {
+                                compass_xy(cx, cy, r_out_tip + 8.0, ac)
+                            };
+                            scene.add(Primitive::Text {
+                                x: lx, y: ly + 4.0,
+                                content: rose_fmt(max_val), size: 9,
+                                anchor: TextAnchor::Middle, rotate: None,
+                                bold: false, color: None,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Outer ring border ────────────────────────────────────────────────────
+    {
+        let d = format!(
+            "M {:.2},{:.2} A {max_r:.2},{max_r:.2} 0 1,0 {:.2},{:.2} \
+             A {max_r:.2},{max_r:.2} 0 1,0 {:.2},{:.2} Z",
+            cx - max_r, cy, cx + max_r, cy, cx - max_r, cy
+        );
+        scene.add(Primitive::Path(Box::new(PathData {
+            d, fill: None,
+            stroke: Color::from("#aaaaaa"),
+            stroke_width: 0.8,
+            opacity: None, stroke_dasharray: None,
+        })));
+    }
+
+    // ── Inner hole border (donut) ────────────────────────────────────────────
+    if base_r > 0.5 {
+        let d = format!(
+            "M {:.2},{:.2} A {base_r:.2},{base_r:.2} 0 1,0 {:.2},{:.2} \
+             A {base_r:.2},{base_r:.2} 0 1,0 {:.2},{:.2} Z",
+            cx - base_r, cy, cx + base_r, cy, cx - base_r, cy
+        );
+        scene.add(Primitive::Path(Box::new(PathData {
+            d, fill: None,
+            stroke: Color::from("#aaaaaa"),
+            stroke_width: 0.8,
+            opacity: None, stroke_dasharray: None,
+        })));
+    }
+
+    // ── Sector labels ────────────────────────────────────────────────────────
+    if rp.show_labels {
+        for i in 0..n {
+            let label = rp.labels.get(i).cloned().unwrap_or_else(|| (i + 1).to_string());
+            let ac = rose_center_angle(i, n, rp.start_angle, rp.clockwise);
+            let (lx, ly) = compass_xy(cx, cy, max_r + 16.0, ac);
+            scene.add(Primitive::Text {
+                x: lx, y: ly + 4.0,
+                content: label, size: 11,
+                anchor: TextAnchor::Middle,
+                rotate: None, bold: false, color: None,
+            });
+        }
+    }
+}
+
+/// Render a single [`RosePlot`] to a [`Scene`].
+pub fn render_rose(rp: RosePlot, layout: Layout) -> Scene {
+    let plots = vec![Plot::Rose(rp)];
     render_multiple(plots, layout)
 }
 

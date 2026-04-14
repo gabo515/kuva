@@ -28,6 +28,7 @@ EXAMPLES=(
     line
     lollipop
     manhattan
+    network
     phylo
     pie
     sankey
@@ -45,6 +46,8 @@ EXAMPLES=(
     polar
     raincloud
     ternary
+    scatter3d
+    surface3d
     roc
     slope
     venn

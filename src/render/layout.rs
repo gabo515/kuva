@@ -256,6 +256,10 @@ pub struct Layout {
     /// rendered with equal aspect look circular; without it they look like
     /// ellipses whenever the x and y data ranges differ.
     pub equal_aspect: bool,
+    /// Number of vertical stagger tiers reserved above a BrickPlot notation track.
+    /// Set automatically by `auto_from_plots` when a `BrickPlot` with `notations`
+    /// is present.  `0` = no extra space.
+    pub brick_notation_tiers: usize,
     // Per-element text wrapping (`None` = no wrapping).  Set via `with_wrap()`
     // (all at once) or `with_title_wrap()` / `with_legend_wrap()` / etc.
     pub title_wrap: Option<usize>,
@@ -343,6 +347,7 @@ impl Layout {
             polar_r_label_angle: None,
             interactive: false,
             equal_aspect: false,
+            brick_notation_tiers: 0,
             title_wrap: None,
             x_label_wrap: None,
             y_label_wrap: None,
@@ -372,6 +377,7 @@ impl Layout {
         let mut has_manhattan: bool = false;
         let mut has_polar: bool = false;
         let mut max_label_len: usize = 0;
+        let mut brick_has_notations: bool = false;
 
         for plot in plots {
             if let Some(((xmin, xmax), (ymin, ymax))) = plot.bounds() {
@@ -446,13 +452,22 @@ impl Layout {
                 }
             }
             if let Plot::Brick(bp) = plot {
-                let labels = bp.names.to_vec();
+                // Reverse labels so that names[0] appears at the TOP of the plot.
+                // map_y maps larger y-data values to the top; row 0 is rendered at
+                // y_data = [N-1, N], so the axis label for names[0] must be at y = N-0.5.
+                let labels: Vec<String> = bp.names.iter().rev().cloned().collect();
                 y_labels = Some(labels);
                 has_legend = true;
                 if let Some(ref motifs) = bp.motifs {
+                    // +1 when mark_primary is set: the primary entry gets a trailing '*'
+                    let mark_bonus = if bp.mark_primary { 1 } else { 0 };
                     for v in motifs.values() {
-                        max_label_len = max_label_len.max(v.len());
+                        max_label_len = max_label_len.max(v.len() + mark_bonus);
                     }
+                }
+                // Reserve vertical space for per-block notation labels when enabled.
+                if bp.notations.as_ref().is_some_and(|n| n.iter().any(|o| o.is_some())) {
+                    brick_has_notations = true;
                 }
             }
 
@@ -472,7 +487,11 @@ impl Layout {
                 }
             }
 
-            if matches!(plot, Plot::Heatmap(_) | Plot::Histogram2d(_)) {
+            if matches!(plot, Plot::Heatmap(_) | Plot::Histogram2d(_))
+                || matches!(plot, Plot::Hexbin(hb) if hb.show_colorbar)
+                || matches!(plot, Plot::Treemap(tm) if matches!(tm.color_mode, crate::plot::treemap::TreemapColorMode::ByValue(_)) && tm.show_colorbar)
+                || matches!(plot, Plot::Sunburst(sb) if matches!(sb.color_mode, crate::plot::sunburst::SunburstColorMode::ByValue(_)) && sb.show_colorbar)
+            {
                 has_colorbar = true;
             }
 
@@ -511,6 +530,15 @@ impl Layout {
                 for label in sa.labels.iter().flatten() {
                     has_legend = true;
                     max_label_len = max_label_len.max(label.len());
+                }
+            }
+
+            if let Plot::Streamgraph(sg) = plot {
+                if sg.legend_label.is_some() {
+                    for label in sg.labels.iter().flatten() {
+                        has_legend = true;
+                        max_label_len = max_label_len.max(label.len());
+                    }
                 }
             }
 
@@ -582,6 +610,43 @@ impl Layout {
                     has_legend = true;
                     for node in &sp.nodes {
                         max_label_len = max_label_len.max(node.label.len());
+                    }
+                }
+            }
+
+            if let Plot::Radar(rp) = plot {
+                if rp.show_legend {
+                    has_legend = true;
+                    for s in &rp.series {
+                        if let Some(ref lbl) = s.label {
+                            max_label_len = max_label_len.max(lbl.len());
+                        }
+                    }
+                    for r in &rp.references {
+                        if let Some(ref lbl) = r.label {
+                            max_label_len = max_label_len.max(lbl.len());
+                        }
+                    }
+                }
+            }
+
+            if let Plot::Network(net) = plot {
+                if net.legend_label.is_some() {
+                    has_legend = true;
+                    // Measure group labels, or node labels if no groups.
+                    let mut seen_groups: Vec<&str> = Vec::new();
+                    for node in &net.nodes {
+                        if let Some(ref g) = node.group {
+                            if !seen_groups.contains(&g.as_str()) {
+                                max_label_len = max_label_len.max(g.len());
+                                seen_groups.push(g);
+                            }
+                        }
+                    }
+                    if seen_groups.is_empty() {
+                        for node in &net.nodes {
+                            max_label_len = max_label_len.max(node.label.len());
+                        }
                     }
                 }
             }
@@ -678,6 +743,29 @@ impl Layout {
                 }
             }
 
+            if let Plot::Bump(bp) = plot {
+                let n = bp.total_series_count();
+                let n_time = bp.n_time_points();
+                // x_categories: one per time point (labels or "1", "2", ...)
+                let x_cats: Vec<String> = if !bp.x_labels.is_empty() {
+                    bp.x_labels.clone()
+                } else {
+                    (1..=n_time).map(|i| i.to_string()).collect()
+                };
+                x_labels = Some(x_cats);
+                // y_categories: rank labels with rank-1 at top.
+                // axis.rs draws y_categories[i] at y_val=i+1; rank r is plotted at y_data=n+1-r.
+                // So y_categories[i] at y_val=i+1 corresponds to rank n-i → label "n-i".
+                y_labels = Some((1..=n).rev().map(|r| r.to_string()).collect());
+                if bp.legend {
+                    has_legend = true;
+                    let series = bp.resolved_series();
+                    for s in &series {
+                        max_label_len = max_label_len.max(s.name.len());
+                    }
+                }
+            }
+
             if let Plot::Polar(pp) = plot {
                 has_polar = true;
                 if pp.show_legend {
@@ -724,6 +812,58 @@ impl Layout {
                         max_label_len = max_label_len.max(row.len());
                     }
                 }
+            }
+
+            if let Plot::Ecdf(ep) = plot {
+                if ep.legend_label.is_some() {
+                    has_legend = true;
+                    for g in &ep.groups {
+                        max_label_len = max_label_len.max(g.label.len());
+                    }
+                }
+            }
+
+            if let Plot::QQ(qp) = plot {
+                if qp.legend_label.is_some() {
+                    has_legend = true;
+                    for g in &qp.groups {
+                        max_label_len = max_label_len.max(g.label.len());
+                    }
+                }
+            }
+
+            // 3D plot types: check for legend label and z-colormap
+            let (legend_3d, cmap_3d) = match plot {
+                Plot::Scatter3D(sp) => (sp.legend_label.as_deref(), sp.z_colormap.is_some()),
+                Plot::Surface3D(sp) => (sp.legend_label.as_deref(), sp.z_colormap.is_some()),
+                _ => (None, false),
+            };
+            if let Some(label) = legend_3d {
+                has_legend = true;
+                max_label_len = max_label_len.max(label.len());
+            }
+            if cmap_3d { has_colorbar = true; }
+
+            if let Plot::Funnel(fp) = plot {
+                if fp.legend_label.is_some() {
+                    has_legend = true;
+                    for s in &fp.stages {
+                        max_label_len = max_label_len.max(s.label.len());
+                    }
+                }
+            }
+
+            if let Plot::Rose(rp) = plot {
+                if rp.legend_label.is_some() {
+                    has_legend = true;
+                    for s in &rp.series {
+                        max_label_len = max_label_len.max(s.name.len());
+                    }
+                }
+            }
+
+            if let Plot::Calendar(cp) = plot {
+                if cp.show_legend { has_legend = true; }
             }
         }
 
@@ -773,6 +913,9 @@ impl Layout {
         let mut layout = Self::new((x_min, x_max), (y_min, y_max));
         layout.data_x_range = Some(raw_x);
         layout.data_y_range = Some(raw_y);
+        if brick_has_notations {
+            layout.brick_notation_tiers = 4; // matches N_TIERS in add_brickplot
+        }
         if let Some(labels) = x_labels {
             layout = layout.with_x_categories(labels);
         }
@@ -790,7 +933,7 @@ impl Layout {
 
         if has_legend {
             layout = layout.with_show_legend();
-            let dynamic_width = max_label_len as f64 * 7.2 + 35.0;
+            let dynamic_width = max_label_len as f64 * 8.0 + 40.0;
             layout.legend_width = dynamic_width.max(80.0);
 
             // Position legend die face needs 3 cells wide — ensure legend_width fits.
@@ -1359,8 +1502,9 @@ impl Layout {
                 Plot::Strip(p)       => if let Some(l) = &p.legend_label { max_secondary_label = max_secondary_label.max(l.len()); }
                 Plot::Waterfall(p)   => if let Some(l) = &p.legend_label { max_secondary_label = max_secondary_label.max(l.len()); }
                 Plot::Candlestick(p) => if let Some(l) = &p.legend_label { max_secondary_label = max_secondary_label.max(l.len()); }
-                Plot::StackedArea(p) => for l in p.labels.iter().flatten() { max_secondary_label = max_secondary_label.max(l.len()); }
-                Plot::Bar(p)         => if let Some(ll) = &p.legend_label { for l in ll { max_secondary_label = max_secondary_label.max(l.len()); } }
+                Plot::StackedArea(p)  => for l in p.labels.iter().flatten() { max_secondary_label = max_secondary_label.max(l.len()); }
+                Plot::Streamgraph(p)  => for l in p.labels.iter().flatten() { max_secondary_label = max_secondary_label.max(l.len()); }
+                Plot::Bar(p)          => if let Some(ll) = &p.legend_label { for l in ll { max_secondary_label = max_secondary_label.max(l.len()); } }
                 _ => {}
             }
         }
@@ -1501,6 +1645,9 @@ pub struct ComputedLayout {
     pub dice_x_label_pos: Option<(f64, f64)>,
     /// Override y-axis label position (x, y_centre, rotated) for DicePlot.
     pub dice_y_label_pos: Option<(f64, f64)>,
+    /// Y position for the plot title, computed from the pre-notation base margin so that
+    /// BrickPlot notation tiers don't push the title into the middle of the annotation zone.
+    pub title_y: f64,
     // Per-element text wrapping (propagated from Layout).
     pub title_wrap: Option<usize>,
     pub x_label_wrap: Option<usize>,
@@ -1518,7 +1665,10 @@ impl ComputedLayout {
         // Compute tick mark length early — needed for margin_left and tick_label_margin.
         let tick_mark_major_px = layout.tick_length.map(|l| l * s).unwrap_or(5.0 * s);
 
-        // Top: title height + padding, or small padding if no title
+        // Top: title height + padding, or small padding if no title.
+        // Compute the base margin first (title + padding only), then add notation tiers on top.
+        // title_y uses the base margin so that notation tiers don't push the title downward
+        // into the middle of the per-block label zone.
         let title_lines = if let (Some(ref title), Some(max_chars)) = (&layout.title, layout.title_wrap) {
             render_utils::wrap_text(title, max_chars).len()
         } else if layout.title.is_some() {
@@ -1526,11 +1676,18 @@ impl ComputedLayout {
         } else {
             0
         };
-        let mut margin_top = if title_lines > 0 {
+        let base_margin_top = if title_lines > 0 {
             title_size * title_lines as f64 + label_size + 12.0 * s
         } else {
             10.0 * s
         };
+        let title_y = base_margin_top / 2.0;
+        let mut margin_top = base_margin_top;
+        // BrickPlot per-block notation labels are drawn above the top row.
+        if layout.brick_notation_tiers > 0 {
+            let body = layout.body_size as f64 * s;
+            margin_top += (layout.brick_notation_tiers as f64 + 0.5) * body * 1.1 + 4.0 * s;
+        }
         // Bottom: tick_mark + gap(5) + tick_label + gap(5) + axis_label + padding(10)
         // When ticks are suppressed AND no rotation is requested (e.g. pure numeric axes),
         // keep only minimal space. When rotation IS set (e.g. Manhattan chromosome labels drawn
@@ -1869,6 +2026,7 @@ impl ComputedLayout {
             equal_aspect: layout.equal_aspect,
             dice_x_label_pos: None,
             dice_y_label_pos: None,
+            title_y,
             title_wrap: layout.title_wrap,
             x_label_wrap: layout.x_label_wrap,
             y_label_wrap: layout.y_label_wrap,

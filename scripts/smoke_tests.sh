@@ -361,6 +361,21 @@ check "hist2d colorbar sci format" \
     "$BIN" hist2d "$DATA/hist2d.tsv" --x x --y y --bins-x 20 --bins-y 20 \
         --colorbar-tick-format sci --title "hist2d sci colorbar" --x-label "X" --y-label "Y"
 
+# ── hexbin ────────────────────────────────────────────────────────────────────
+check "hexbin basic" \
+    "$BIN" hexbin "$DATA/hexbin.tsv" --x x --y y \
+        --title "Hexbin Plot" --x-label "X" --y-label "Y"
+
+check "hexbin n-bins and colormap" \
+    "$BIN" hexbin "$DATA/hexbin.tsv" --x x --y y \
+        --n-bins 15 --colormap inferno \
+        --title "Hexbin Inferno" --x-label "X" --y-label "Y"
+
+check "hexbin z-mean flat-top" \
+    "$BIN" hexbin "$DATA/hexbin.tsv" --x x --y y --z z --reduce mean \
+        --flat-top --stroke "#444444" \
+        --title "Hexbin Z Mean" --x-label "X" --y-label "Y"
+
 # ── contour ───────────────────────────────────────────────────────────────────
 check "contour basic" \
     "$BIN" contour "$DATA/contour.tsv" --x x --y y --z density \
@@ -396,6 +411,28 @@ check "chord basic" \
 check "chord gap legend" \
     "$BIN" chord "$DATA/chord.tsv" --gap 3.0 --opacity 0.6 --legend "connectivity" \
         --title "Cell Type Co-occurrence"
+
+# ── network ───────────────────────────────────────────────────────────────────
+check "network basic" \
+    "$BIN" network "$DATA/network.tsv" --source-col source --target-col target \
+        --labels --title "Gene Regulatory Network"
+
+check "network directed weighted legend" \
+    "$BIN" network "$DATA/network.tsv" --source-col source --target-col target \
+        --weight-col weight --group-col group --directed --labels \
+        --legend "pathway" --title "Gene Regulatory Network"
+
+check "network circle layout" \
+    "$BIN" network "$DATA/network.tsv" --source-col source --target-col target \
+        --layout circle --labels --title "Circle Layout"
+
+check "network kk layout" \
+    "$BIN" network "$DATA/network.tsv" --source-col source --target-col target \
+        --layout kk --labels --title "Kamada-Kawai Layout"
+
+check "network matrix" \
+    "$BIN" network "$DATA/network_matrix.tsv" --matrix --directed --labels \
+        --title "Matrix Input"
 
 # ── sankey ────────────────────────────────────────────────────────────────────
 check "sankey basic" \
@@ -455,6 +492,33 @@ check "density x-range bounded" \
         --x-label "Expression" --y-label "Density" \
         --title "Density bounded range"
 
+# ── ecdf ──────────────────────────────────────────────────────────────────────
+check "ecdf basic" \
+    "$BIN" ecdf "$DATA/samples.tsv" \
+        --value expression --x-label "Expression" --y-label "F(x)" \
+        --title "ECDF"
+
+check "ecdf color-by with confidence band" \
+    "$BIN" ecdf "$DATA/samples.tsv" \
+        --value expression --color-by group --confidence-band \
+        --title "ECDF by group"
+
+check "ecdf complementary with rug" \
+    "$BIN" ecdf "$DATA/samples.tsv" \
+        --value expression --complementary --rug \
+        --x-label "Expression" --y-label "1 - F(x)" \
+        --title "CCDF with rug"
+
+check "ecdf percentile lines and markers" \
+    "$BIN" ecdf "$DATA/samples.tsv" \
+        --value expression --percentile-lines 0.25,0.5,0.75 --markers \
+        --title "ECDF with percentiles"
+
+check "ecdf smooth" \
+    "$BIN" ecdf "$DATA/samples.tsv" \
+        --value expression --color-by group --smooth \
+        --title "Smooth ECDF"
+
 # ── ridgeline ─────────────────────────────────────────────────────────────────
 check "ridgeline basic" \
     "$BIN" ridgeline "$DATA/samples.tsv" \
@@ -474,6 +538,25 @@ check "synteny proportional" \
     "$BIN" synteny "$DATA/synteny_seqs.tsv" \
         --blocks-file "$DATA/synteny_blocks.tsv" --proportional --legend "synteny" \
         --title "Synteny Map"
+
+# ── radar ──────────────────────────────────────────────────────────────────────
+check "radar basic" \
+    "$BIN" radar "$DATA/radar.tsv" \
+        --axes Sensitivity Specificity Precision F1 AUC \
+        --color-by tool --legend \
+        --title "Radar Chart"
+
+check "radar filled" \
+    "$BIN" radar "$DATA/radar.tsv" \
+        --axes Sensitivity Specificity Precision F1 AUC \
+        --color-by tool --filled --legend \
+        --title "Radar Chart Filled"
+
+check "radar normalize" \
+    "$BIN" radar "$DATA/radar.tsv" \
+        --axes Sensitivity Specificity Precision F1 AUC \
+        --color-by tool --normalize --legend \
+        --title "Radar Normalized"
 
 # ── polar ──────────────────────────────────────────────────────────────────────
 check "polar basic" \
@@ -513,6 +596,107 @@ check "ternary legend" \
     "$BIN" ternary "$DATA/ternary.tsv" --a a --b b --c c --color-by group \
         --legend \
         --title "Ternary Legend"
+
+# ── scatter3d ─────────────────────────────────────────────────────────────────
+check "scatter3d basic" \
+    "$BIN" scatter3d "$DATA/scatter3d.tsv" --x x --y y --z z \
+        --title "3D Scatter" --x-label "X" --y-label "Y" --z-label "Z"
+
+check "scatter3d color-by" \
+    "$BIN" scatter3d "$DATA/scatter3d.tsv" --x x --y y --z z --color-by group \
+        --title "3D Scatter Grouped"
+
+check "scatter3d z-colormap" \
+    "$BIN" scatter3d "$DATA/scatter3d.tsv" --x x --y y --z z \
+        --z-color viridis \
+        --title "3D Scatter Z-Color"
+
+check "scatter3d depth-shade" \
+    "$BIN" scatter3d "$DATA/scatter3d.tsv" --x x --y y --z z \
+        --depth-shade \
+        --title "3D Scatter Depth Shade"
+
+check "scatter3d no-grid no-box" \
+    "$BIN" scatter3d "$DATA/scatter3d.tsv" --x x --y y --z z \
+        --no-grid --no-box \
+        --title "3D Scatter No Grid"
+
+check "scatter3d alternate view" \
+    "$BIN" scatter3d "$DATA/scatter3d.tsv" --x x --y y --z z \
+        --azimuth -120 --elevation 20 \
+        --title "3D Scatter Alt View"
+
+# ── surface3d ─────────────────────────────────────────────────────────────────
+check "surface3d basic" \
+    "$BIN" surface3d "$DATA/surface3d.tsv" --x x --y y --z z \
+        --z-color viridis \
+        --title "3D Surface" --x-label "X" --y-label "Y" --z-label "Z"
+
+check "surface3d high-res" \
+    "$BIN" surface3d "$DATA/surface3d.tsv" --x x --y y --z z \
+        --z-color inferno --resolution 20 \
+        --title "3D Surface (Upsampled)"
+
+check "surface3d no-wireframe" \
+    "$BIN" surface3d "$DATA/surface3d.tsv" --x x --y y --z z \
+        --z-color viridis --no-wireframe \
+        --title "3D Surface No Wireframe"
+
+check "surface3d alpha" \
+    "$BIN" surface3d "$DATA/surface3d.tsv" --x x --y y --z z \
+        --alpha 0.7 --color steelblue \
+        --title "3D Surface Alpha"
+
+check "surface3d no-grid no-box" \
+    "$BIN" surface3d "$DATA/surface3d.tsv" --x x --y y --z z \
+        --z-color viridis --no-grid --no-box \
+        --title "3D Surface No Grid"
+
+check "surface3d alternate view" \
+    "$BIN" surface3d "$DATA/surface3d.tsv" --x x --y y --z z \
+        --z-color viridis --azimuth 45 --elevation 45 \
+        --title "3D Surface Alt View"
+
+# ── qq ───────────────────────────────────────────────────────────────────────
+check "qq normal basic" \
+    "$BIN" qq "$DATA/samples.tsv" \
+        --value expression \
+        --title "Normal Q-Q"
+
+check "qq normal multigroup" \
+    "$BIN" qq "$DATA/samples.tsv" \
+        --value expression --color-by group \
+        --title "Multi-group Normal Q-Q"
+
+check "qq genomic basic" \
+    "$BIN" qq "$DATA/gene_stats.tsv" \
+        --value pvalue --genomic \
+        --title "Genomic Q-Q"
+
+check "qq genomic with ci band and lambda" \
+    "$BIN" qq "$DATA/gene_stats.tsv" \
+        --value pvalue --genomic --ci-band --lambda \
+        --title "Genomic Q-Q with CI and lambda"
+
+# ── streamgraph ───────────────────────────────────────────────────────────────
+check "streamgraph wiggle (default)" \
+    "$BIN" streamgraph "$DATA/streamgraph.tsv" \
+        --title "Microbiome streamgraph"
+
+check "streamgraph symmetric" \
+    "$BIN" streamgraph "$DATA/streamgraph.tsv" \
+        --baseline symmetric \
+        --title "Symmetric streamgraph"
+
+check "streamgraph normalized" \
+    "$BIN" streamgraph "$DATA/streamgraph.tsv" \
+        --normalize \
+        --title "Normalised streamgraph"
+
+check "streamgraph linear with stroke" \
+    "$BIN" streamgraph "$DATA/streamgraph.tsv" \
+        --linear --stroke \
+        --title "Linear streamgraph"
 
 # ── interactive ───────────────────────────────────────────────────────────────
 check "scatter interactive" \

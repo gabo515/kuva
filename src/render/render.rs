@@ -84,6 +84,7 @@ use crate::plot::calendar::{
     CalendarPlot, CalendarAgg, WeekStart,
     to_jd, from_jd, period_grid_pos, period_max_cols, dow_mon0,
 };
+use crate::plot::pyramid::{PopulationPyramid, PyramidMode};
 
 use crate::plot::Legend;
 use crate::plot::legend::{ColorBarInfo, LegendEntry, LegendGroup, LegendPosition, LegendShape};
@@ -8565,6 +8566,45 @@ pub fn collect_legend_entries(plots: &[Plot]) -> Vec<LegendEntry> {
                     }
                 }
             }
+            Plot::Pyramid(pp) => {
+                if pp.show_legend {
+                    use crate::render::palette::Palette;
+                    let cat10 = Palette::category10();
+                    if pp.series.len() <= 1 {
+                        // Single-series: one entry per side
+                        let left_color = pp.series.first()
+                            .and_then(|s| s.color.clone())
+                            .unwrap_or_else(|| pp.left_color.clone());
+                        let right_color = pp.series.first()
+                            .and_then(|s| s.color.clone())
+                            .unwrap_or_else(|| pp.right_color.clone());
+                        entries.push(LegendEntry {
+                            label: pp.left_label.clone(),
+                            color: left_color,
+                            shape: LegendShape::Rect,
+                            dasharray: None,
+                        });
+                        entries.push(LegendEntry {
+                            label: pp.right_label.clone(),
+                            color: right_color,
+                            shape: LegendShape::Rect,
+                            dasharray: None,
+                        });
+                    } else {
+                        // Multi-series: one entry per series
+                        for (i, s) in pp.series.iter().enumerate() {
+                            let color = s.color.clone()
+                                .unwrap_or_else(|| cat10[i % cat10.len()].to_string());
+                            entries.push(LegendEntry {
+                                label: s.label.clone(),
+                                color,
+                                shape: LegendShape::Rect,
+                                dasharray: None,
+                            });
+                        }
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -10649,6 +10689,9 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
             }
             Plot::Calendar(cp) => {
                 add_calendar(cp, &mut scene, &computed);
+            }
+            Plot::Pyramid(pp) => {
+                add_pyramid(pp, &mut scene, &computed);
             }
         }
     }
@@ -16039,3 +16082,209 @@ pub fn render_calendar(cp: CalendarPlot, layout: Layout) -> Scene {
     render_multiple(plots, layout)
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  PopulationPyramid
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Render a [`PopulationPyramid`] onto the scene.
+///
+/// Uses the standard axis system: y-axis is categorical (age groups), x-axis is
+/// symmetric around 0 with absolute-value tick labels.
+fn add_pyramid(pp: &PopulationPyramid, scene: &mut Scene, computed: &ComputedLayout) {
+    use crate::render::palette::Palette;
+
+    if pp.series.is_empty() { return; }
+    let n_groups = pp.n_groups();
+    if n_groups == 0 { return; }
+
+    let n_series = pp.series.len();
+    let cat10 = Palette::category10();
+
+    // Normalisation denominator: when normalize=true, values are expressed as
+    // percent of total population. We divide raw values by (total / 100).
+    let denom = if pp.normalize {
+        pp.total_population().max(1e-10) / 100.0
+    } else {
+        1.0
+    };
+
+    let is_grouped = matches!(pp.mode, PyramidMode::Grouped);
+    let group_gap = pp.group_gap;
+    let bar_gap = pp.bar_gap;
+
+    // Fraction of each age-group row height occupied by bars
+    let slot_frac = 1.0 - group_gap;
+
+    // Height in data coords of a single series sub-band
+    let sub_h = if is_grouped && n_series > 1 {
+        (slot_frac - (n_series as f64 - 1.0) * bar_gap) / n_series as f64
+    } else {
+        slot_frac
+    };
+
+    // Pixel x of the centre divider (x_data = 0)
+    let center_x = computed.map_x(0.0);
+
+    for (j, series) in pp.series.iter().enumerate() {
+        // Resolve bar color for this series
+        let series_color = series.color.clone()
+            .unwrap_or_else(|| cat10[j % cat10.len()].to_string());
+
+        let opacity = match pp.mode {
+            PyramidMode::Overlap => Some(series.opacity),
+            PyramidMode::Grouped => None,
+        };
+
+        for (i, (_, left_raw, right_raw)) in series.groups.iter().enumerate() {
+            let left_val  = left_raw  / denom;
+            let right_val = right_raw / denom;
+
+            // y_center for this age group (group 0 at the bottom → y=1)
+            let y_center = i as f64 + 1.0;
+
+            // Sub-band y extent (data coords)
+            let (y_bot, y_top) = if is_grouped && n_series > 1 {
+                let bot = y_center - slot_frac / 2.0 + j as f64 * (sub_h + bar_gap);
+                (bot, bot + sub_h)
+            } else {
+                (y_center - slot_frac / 2.0, y_center + slot_frac / 2.0)
+            };
+
+            // Map to pixel coords (map_y inverts: larger data y → smaller pixel y)
+            let px_y_top = computed.map_y(y_top);
+            let px_y_bot = computed.map_y(y_bot);
+            let px_rect_y = px_y_top.min(px_y_bot);
+            let px_rect_h = (px_y_top - px_y_bot).abs();
+
+            // Left bar
+            if left_val > 0.0 {
+                let left_color = if n_series == 1 {
+                    series.color.as_deref().unwrap_or(&pp.left_color).to_string()
+                } else {
+                    series_color.clone()
+                };
+                let px_x_left = computed.map_x(-left_val);
+                let bar_x = px_x_left.min(center_x);
+                let bar_w = (center_x - px_x_left).abs();
+                scene.add(Primitive::Rect {
+                    x: bar_x,
+                    y: px_rect_y,
+                    width: bar_w,
+                    height: px_rect_h,
+                    fill: Color::from(left_color.as_str()),
+                    stroke: None,
+                    stroke_width: None,
+                    opacity,
+                });
+
+                if pp.show_values && px_rect_h >= 10.0 && bar_w >= 16.0 {
+                    let mid_y = px_rect_y + px_rect_h / 2.0 + 4.0;
+                    let label = if pp.normalize {
+                        format!("{:.1}%", left_val)
+                    } else {
+                        format!("{:.0}", left_val)
+                    };
+                    scene.add(Primitive::Text {
+                        x: bar_x + 4.0,
+                        y: mid_y,
+                        content: label,
+                        size: 9,
+                        anchor: TextAnchor::Start,
+                        rotate: None,
+                        bold: false,
+                        color: Some(Color::from("#ffffff")),
+                    });
+                }
+            }
+
+            // Right bar
+            if right_val > 0.0 {
+                let right_color = if n_series == 1 {
+                    series.color.as_deref().unwrap_or(&pp.right_color).to_string()
+                } else {
+                    series_color.clone()
+                };
+                let px_x_right = computed.map_x(right_val);
+                let bar_x = center_x.min(px_x_right);
+                let bar_w = (px_x_right - center_x).abs();
+                scene.add(Primitive::Rect {
+                    x: bar_x,
+                    y: px_rect_y,
+                    width: bar_w,
+                    height: px_rect_h,
+                    fill: Color::from(right_color.as_str()),
+                    stroke: None,
+                    stroke_width: None,
+                    opacity,
+                });
+
+                if pp.show_values && px_rect_h >= 10.0 && bar_w >= 16.0 {
+                    let mid_y = px_rect_y + px_rect_h / 2.0 + 4.0;
+                    let label = if pp.normalize {
+                        format!("{:.1}%", right_val)
+                    } else {
+                        format!("{:.0}", right_val)
+                    };
+                    scene.add(Primitive::Text {
+                        x: bar_x + bar_w - 4.0,
+                        y: mid_y,
+                        content: label,
+                        size: 9,
+                        anchor: TextAnchor::End,
+                        rotate: None,
+                        bold: false,
+                        color: Some(Color::from("#ffffff")),
+                    });
+                }
+            }
+        }
+    }
+
+    // Side labels above the left and right halves
+    let ox  = computed.margin_left;
+    let pw  = computed.width - computed.margin_left - computed.margin_right;
+    let top = computed.margin_top - 6.0;
+
+    if !pp.left_label.is_empty() {
+        scene.add(Primitive::Text {
+            x: ox + pw / 4.0,
+            y: top,
+            content: pp.left_label.clone(),
+            size: 12,
+            anchor: TextAnchor::Middle,
+            rotate: None,
+            bold: true,
+            color: None,
+        });
+    }
+    if !pp.right_label.is_empty() {
+        scene.add(Primitive::Text {
+            x: ox + 3.0 * pw / 4.0,
+            y: top,
+            content: pp.right_label.clone(),
+            size: 12,
+            anchor: TextAnchor::Middle,
+            rotate: None,
+            bold: true,
+            color: None,
+        });
+    }
+
+    // Centre divider line
+    scene.add(Primitive::Line {
+        x1: center_x,
+        y1: computed.margin_top,
+        x2: center_x,
+        y2: computed.height - computed.margin_bottom,
+        stroke: Color::from("#aaaaaa"),
+        stroke_width: 1.0,
+        stroke_dasharray: None,
+    });
+}
+
+/// Render a single [`PopulationPyramid`] to a [`Scene`].
+pub fn render_pyramid(pp: PopulationPyramid, layout: Layout) -> Scene {
+    let plots = vec![Plot::Pyramid(pp)];
+    render_multiple(plots, layout)
+}

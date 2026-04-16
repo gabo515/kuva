@@ -381,6 +381,7 @@ impl Layout {
         let mut has_polar: bool = false;
         let mut max_label_len: usize = 0;
         let mut brick_has_notations: bool = false;
+        let mut pyramid_normalize: Option<bool> = None;
 
         for plot in plots {
             if let Some(((xmin, xmax), (ymin, ymax))) = plot.bounds() {
@@ -868,6 +869,25 @@ impl Layout {
             if let Plot::Calendar(cp) = plot {
                 if cp.show_legend { has_legend = true; }
             }
+
+            if let Plot::Pyramid(pp) = plot {
+                // y-categories: age groups, bottom (index 0) → top (last)
+                y_labels = Some(pp.age_labels());
+                // Record normalization flag for post-loop tick format setup
+                pyramid_normalize = Some(pp.normalize);
+                if pp.show_legend {
+                    has_legend = true;
+                    if pp.series.len() <= 1 {
+                        max_label_len = max_label_len
+                            .max(pp.left_label.len())
+                            .max(pp.right_label.len());
+                    } else {
+                        for s in &pp.series {
+                            max_label_len = max_label_len.max(s.label.len());
+                        }
+                    }
+                }
+            }
         }
 
         // Save raw data range before padding (log scale needs it)
@@ -976,6 +996,28 @@ impl Layout {
         // UpSet plots manage their own axes; disable the standard grid.
         if plots.iter().any(|p| matches!(p, Plot::UpSet(_))) {
             layout.show_grid = false;
+        }
+
+        // Population pyramid: absolute-value x-tick format
+        if let Some(is_pct) = pyramid_normalize {
+            layout.x_tick_format = TickFormat::Custom(Arc::new(move |v| {
+                let a = v.abs();
+                if is_pct {
+                    if a == 0.0 { "0%".to_string() }
+                    else if a >= 10.0 { format!("{:.0}%", a) }
+                    else { format!("{:.1}%", a) }
+                } else if a == 0.0 {
+                    "0".to_string()
+                } else if a >= 1_000_000.0 {
+                    format!("{:.1}M", a / 1_000_000.0)
+                } else if a >= 1_000.0 {
+                    format!("{:.1}k", a / 1_000.0)
+                } else if a >= 10.0 {
+                    format!("{:.0}", a)
+                } else {
+                    format!("{:.1}", a)
+                }
+            }));
         }
 
         // For normalized histograms the y range is always [0, 1].  Clamp the

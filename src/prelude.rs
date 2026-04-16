@@ -137,6 +137,9 @@ pub use crate::plot::{
     RoseSeries,
     RoseEncoding,
     RoseMode,
+    PopulationPyramid,
+    PyramidSeries,
+    PyramidMode,
     // Style / config types used when building plots
     MarkerShape,
     LineStyle,
@@ -175,6 +178,7 @@ pub use crate::render::render::{
     render_bump,
     render_funnel,
     render_rose,
+    render_pyramid,
 };
 
 // ── Figure (multi-plot grid) ─────────────────────────────────────────────────

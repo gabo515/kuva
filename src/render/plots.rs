@@ -53,6 +53,7 @@ use crate::plot::bump::BumpPlot;
 use crate::plot::funnel::FunnelPlot;
 use crate::plot::rose::RosePlot;
 use crate::plot::calendar::CalendarPlot;
+use crate::plot::pyramid::PopulationPyramid;
 use crate::plot::legend::ColorBarInfo;
 use crate::render::render_utils;
 
@@ -113,6 +114,7 @@ pub enum Plot {
     Funnel(FunnelPlot),
     Rose(RosePlot),
     Calendar(CalendarPlot),
+    Pyramid(PopulationPyramid),
 }
 
 impl From<ScatterPlot>    for Plot { fn from(p: ScatterPlot)    -> Self { Plot::Scatter(p) } }
@@ -169,7 +171,8 @@ impl From<SunburstPlot>    for Plot { fn from(p: SunburstPlot)    -> Self { Plot
 impl From<BumpPlot>        for Plot { fn from(p: BumpPlot)        -> Self { Plot::Bump(p) } }
 impl From<FunnelPlot>      for Plot { fn from(p: FunnelPlot)      -> Self { Plot::Funnel(p) } }
 impl From<RosePlot>        for Plot { fn from(p: RosePlot)        -> Self { Plot::Rose(p) } }
-impl From<CalendarPlot>    for Plot { fn from(p: CalendarPlot)    -> Self { Plot::Calendar(p) } }
+impl From<CalendarPlot>       for Plot { fn from(p: CalendarPlot)       -> Self { Plot::Calendar(p) } }
+impl From<PopulationPyramid>  for Plot { fn from(p: PopulationPyramid)  -> Self { Plot::Pyramid(p) } }
 
 use crate::plot::plot3d::DataRanges3D;
 use crate::plot::colormap::ColorMap;
@@ -883,6 +886,13 @@ impl Plot {
                     Some(((0.5, n_time as f64 + 0.5), (0.5, n as f64 + 0.5)))
                 }
             }
+            Plot::Pyramid(pp) => {
+                let n = pp.n_groups();
+                if n == 0 { return None; }
+                let max_val = pp.max_value();
+                if max_val <= 0.0 { return None; }
+                Some(((-max_val, max_val), (0.5, n as f64 + 0.5)))
+            }
             // Rendered in pixel space; dummy bounds satisfy Layout::auto_from_plots.
             Plot::Network(_) => Some(((0.0, 1.0), (0.0, 1.0))),
             Plot::Radar(_) => Some(((0.0, 1.0), (0.0, 1.0))),
@@ -977,6 +987,7 @@ impl Plot {
             Plot::Funnel(fp) => fp.stage_count() * 6 + 20,
             Plot::Rose(rp) => rp.n_sectors() * rp.series.len().max(1) * 2 + rp.grid_lines * 2 + rp.n_sectors() + 20,
             Plot::Calendar(cp) => cp.data.len() + 100,
+            Plot::Pyramid(pp) => pp.series.len() * pp.n_groups() * 4 + 20,
             _ => 100,
         }
     }

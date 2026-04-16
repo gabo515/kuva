@@ -55,6 +55,7 @@ pub mod bump;
 pub mod funnel;
 pub mod rose;
 pub mod calendar;
+pub mod pyramid;
 
 pub mod legend;
 
@@ -117,5 +118,6 @@ pub use bump::{BumpPlot, BumpSeries, CurveStyle, BumpTieBreak};
 pub use funnel::{FunnelPlot, FunnelStage, FunnelColorMode, FunnelOrientation};
 pub use rose::{RosePlot, RoseSeries, RoseEncoding, RoseMode};
 pub use calendar::{CalendarPlot, CalendarAgg, CalendarPeriod, WeekStart};
+pub use pyramid::{PopulationPyramid, PyramidSeries, PyramidMode};
 
 pub use legend::{Legend, LegendEntry, LegendShape, LegendPosition, LegendGroup};

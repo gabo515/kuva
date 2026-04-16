@@ -122,8 +122,17 @@ impl BoxPlot {
     }
 
     /// Set the box width as a fraction of the category slot (default `0.8`).
+    /// Complement of [`with_gap`](Self::with_gap): `width = 1.0 - gap`.
     pub fn with_width(mut self, width: f64) -> Self {
         self.width = width;
+        self
+    }
+
+    /// Set the gap between boxes as a fraction of the category slot (default `0.2`).
+    ///
+    /// Complement of [`with_width`](Self::with_width): `gap = 1.0 - width`.
+    pub fn with_gap(mut self, gap: f64) -> Self {
+        self.width = (1.0 - gap).clamp(0.0, 1.0);
         self
     }
 

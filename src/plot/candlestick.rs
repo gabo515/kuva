@@ -252,8 +252,19 @@ impl CandlestickPlot {
     /// gives a body that fills 70 % of the available space. In numeric mode
     /// (`with_candle_at`) this value is in data units — set it to be smaller
     /// than the spacing between candles.
+    ///
+    /// Complement of [`with_gap`](Self::with_gap): `width = 1.0 - gap`.
     pub fn with_candle_width(mut self, width: f64) -> Self {
         self.candle_width = width;
+        self
+    }
+
+    /// Set the gap between candles as a fraction of the slot (default `0.3`).
+    ///
+    /// Only meaningful in categorical mode. Complement of
+    /// [`with_candle_width`](Self::with_candle_width): `gap = 1.0 - width`.
+    pub fn with_gap(mut self, gap: f64) -> Self {
+        self.candle_width = (1.0 - gap).clamp(0.0, 1.0);
         self
     }
 

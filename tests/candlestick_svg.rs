@@ -127,3 +127,55 @@ fn candlestick_legend() {
 
     assert!(svg.contains("AAPL"), "Legend label 'AAPL' should appear in SVG");
 }
+
+#[test]
+fn candlestick_with_gap() {
+    // with_gap(g) is the complement of with_candle_width(1-g).
+    // Smaller gap → wider candle bodies → wider rect elements in the SVG.
+    fn render_gap(gap: f64) -> String {
+        let plot = CandlestickPlot::new()
+            .with_candle("Mon", 100.0, 110.0, 95.0, 108.0)
+            .with_candle("Tue", 108.0, 115.0, 105.0, 106.0)
+            .with_candle("Wed", 106.0, 112.0, 104.0, 110.0)
+            .with_gap(gap);
+        let layout = Layout::auto_from_plots(&[Plot::Candlestick(
+            CandlestickPlot::new()
+                .with_candle("Mon", 100.0, 110.0, 95.0, 108.0)
+                .with_candle("Tue", 108.0, 115.0, 105.0, 106.0)
+                .with_candle("Wed", 106.0, 112.0, 104.0, 110.0)
+                .with_gap(gap),
+        )])
+        .with_width(600.0)
+        .with_height(400.0);
+        let scene = render_multiple(vec![Plot::Candlestick(plot)], layout);
+        SvgBackend.render_scene(&scene)
+    }
+
+    let svg_narrow = render_gap(0.6); // candle_width = 0.4  → narrow candles
+    let svg_wide   = render_gap(0.1); // candle_width = 0.9  → wide candles
+
+    std::fs::write("test_outputs/candlestick_bar_narrow.svg", &svg_narrow).unwrap();
+    std::fs::write("test_outputs/candlestick_bar_wide.svg",   &svg_wide).unwrap();
+
+    // Extract the width of the first <rect> element that looks like a candle body:
+    // > 10px (not a tick/wick artifact) and < 300px (not the clip/background rect).
+    fn first_rect_width(svg: &str) -> f64 {
+        for rect_chunk in svg.split("<rect").skip(1) {
+            if let Some(after) = rect_chunk.split("width=\"").nth(1) {
+                let s = after.split('"').next().unwrap_or("");
+                if let Ok(v) = s.parse::<f64>() {
+                    if v > 10.0 && v < 300.0 { return v; }
+                }
+            }
+        }
+        panic!("no candle body rect found in SVG");
+    }
+
+    let w_narrow = first_rect_width(&svg_narrow);
+    let w_wide   = first_rect_width(&svg_wide);
+
+    assert!(
+        w_wide > w_narrow,
+        "wide candles ({w_wide:.1}px) should be wider than narrow candles ({w_narrow:.1}px)"
+    );
+}

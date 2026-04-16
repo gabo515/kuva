@@ -144,3 +144,50 @@ fn test_waterfall_all_negative() {
     assert!(svg.contains("<svg"));
     assert!(svg.contains("#cc4444"));
 }
+
+#[test]
+fn test_waterfall_with_gap() {
+    // with_gap(g) is the complement of with_bar_width(1-g).
+    // Wider bars (small gap) should produce wider rect widths in the SVG.
+    fn render_gap(gap: f64) -> String {
+        let wf = WaterfallPlot::new()
+            .with_delta("A", 100.0)
+            .with_delta("B", -40.0)
+            .with_total("Total")
+            .with_gap(gap);
+        let plots = vec![Plot::Waterfall(wf)];
+        let layout = Layout::auto_from_plots(&plots)
+            .with_width(600.0)
+            .with_height(400.0);
+        let scene = render_multiple(plots, layout);
+        SvgBackend.render_scene(&scene)
+    }
+
+    let svg_narrow = render_gap(0.6); // bar_width = 0.4  → narrow bars
+    let svg_wide   = render_gap(0.1); // bar_width = 0.9  → wide bars
+
+    std::fs::write("test_outputs/waterfall_bar_narrow.svg", &svg_narrow).unwrap();
+    std::fs::write("test_outputs/waterfall_bar_wide.svg",   &svg_wide).unwrap();
+
+    // Extract the width of the first <rect> element that looks like a bar:
+    // > 10px (not a tick artifact) and < 300px (not the clip/background rect).
+    fn first_rect_width(svg: &str) -> f64 {
+        for rect_chunk in svg.split("<rect").skip(1) {
+            if let Some(after) = rect_chunk.split("width=\"").nth(1) {
+                let s = after.split('"').next().unwrap_or("");
+                if let Ok(v) = s.parse::<f64>() {
+                    if v > 10.0 && v < 300.0 { return v; }
+                }
+            }
+        }
+        panic!("no bar rect found in SVG");
+    }
+
+    let w_narrow = first_rect_width(&svg_narrow);
+    let w_wide   = first_rect_width(&svg_wide);
+
+    assert!(
+        w_wide > w_narrow,
+        "wide bars ({w_wide:.1}px) should be wider than narrow bars ({w_narrow:.1}px)"
+    );
+}

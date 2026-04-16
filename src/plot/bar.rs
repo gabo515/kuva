@@ -119,8 +119,18 @@ impl BarPlot {
     /// Set the bar width as a fraction of the available category slot (default `0.8`).
     ///
     /// Values between `0.0` and `1.0`. A width of `1.0` means bars touch.
+    /// Complement of [`with_gap`](Self::with_gap): `width = 1.0 - gap`.
     pub fn with_width(mut self, width: f64) -> Self {
         self.width = width;
+        self
+    }
+
+    /// Set the gap between bars as a fraction of the category slot (default `0.2`).
+    ///
+    /// Complement of [`with_width`](Self::with_width): `gap = 1.0 - width`.
+    /// A gap of `0.0` means bars touch; `0.5` leaves half the slot as space.
+    pub fn with_gap(mut self, gap: f64) -> Self {
+        self.width = (1.0 - gap).clamp(0.0, 1.0);
         self
     }
 

@@ -197,6 +197,11 @@ pub struct BrickPlot {
     /// `None` entries render nothing above that row.
     /// E.g. `Some("(CAG)12(GAA)1".to_string())`.
     pub notations: Option<Vec<Option<String>>>,
+    /// Desired pixel height per brick row. When set, `auto_from_plots` computes
+    /// the canvas height as `row_height_px * num_rows + margin_overhead`, and
+    /// `Figure` computes per-grid-row heights so that panels with different read
+    /// counts still have identically-sized bricks.
+    pub row_height_px: Option<f64>,
 }
 
 impl Default for BrickPlot {
@@ -225,6 +230,7 @@ impl BrickPlot {
             mark_primary: false,
             consensus_row: None,
             notations: None,
+            row_height_px: None,
         }
     }
 
@@ -828,5 +834,37 @@ impl BrickPlot {
     pub fn with_values(mut self) -> Self {
         self.show_values = true;
         self
+    }
+
+    /// Set the desired pixel height per brick row.
+    ///
+    /// When set, `auto_from_plots` computes the canvas height so that each row
+    /// is exactly `px` pixels tall. In a [`Figure`](crate::render::figure::Figure),
+    /// panels in the same grid row auto-size so that all brick rows across
+    /// different read-count plots remain identically sized — making hap1 (3 reads)
+    /// and hap2 (50 reads) render with the same brick dimensions on a shared x-axis.
+    ///
+    /// ```rust,no_run
+    /// # use kuva::plot::BrickPlot;
+    /// # use kuva::plot::brick::BrickTemplate;
+    /// let tmpl = BrickTemplate::new().dna();
+    /// let brick = BrickPlot::new()
+    ///     .with_sequences(vec!["ACGT", "ACGTACGT", "ACGT"])
+    ///     .with_names(vec!["r1", "r2", "r3"])
+    ///     .with_template(tmpl.template)
+    ///     .with_row_height(20.0);   // 20 px per row → canvas auto-sized to 3*20 + margins
+    /// ```
+    pub fn with_row_height(mut self, px: f64) -> Self {
+        self.row_height_px = Some(px);
+        self
+    }
+
+    /// Return the number of rows (reads) in this brick plot.
+    pub fn num_rows(&self) -> usize {
+        if let Some(ref exp) = self.strigar_exp {
+            exp.len()
+        } else {
+            self.sequences.len()
+        }
     }
 }

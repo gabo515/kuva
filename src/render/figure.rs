@@ -1,4 +1,4 @@
-use crate::render::layout::{Layout, DEFAULT_FONT_FAMILY};
+use crate::render::layout::{Layout, ComputedLayout, DEFAULT_FONT_FAMILY};
 use crate::render::plots::Plot;
 use crate::render::render::{Primitive, Scene, TextAnchor, render_multiple, render_twin_y, collect_legend_entries, render_legend_at};
 use crate::plot::legend::{LegendEntry, LegendGroup};
@@ -375,34 +375,8 @@ impl Figure {
         }
 
         let figure_title_height = if title.is_some() { 30.0 } else { 0.0 };
-        let grid_width = cols as f64 * cell_width
-            + (cols as f64 - 1.0) * spacing
-            + 2.0 * padding;
-        let grid_height = rows as f64 * cell_height
-            + (rows as f64 - 1.0) * spacing
-            + 2.0 * padding
-            + figure_title_height;
 
-        let (total_width, total_height) = match shared_legend.as_ref() {
-            Some(FigureLegendPosition::Right) if legend_entries.as_ref().is_some_and(|e| !e.is_empty()) => {
-                (grid_width + legend_width + legend_spacing, grid_height)
-            }
-            Some(FigureLegendPosition::Bottom) if legend_entries.as_ref().is_some_and(|e| !e.is_empty()) => {
-                (grid_width, grid_height + legend_height + legend_spacing)
-            }
-            _ => (grid_width, grid_height),
-        };
-
-        let mut master = Scene::new(total_width, total_height);
-        // Inherit font_family and theme from first user layout if set
-        let figure_theme = user_layouts.first().map(|l| l.theme.clone()).unwrap_or_default();
-        master.font_family = user_layouts.first().and_then(|l| l.font_family.clone())
-            .or(figure_theme.font_family.clone())
-            .or(Some(DEFAULT_FONT_FAMILY.to_string()));
-        master.background_color = Some(figure_theme.background.clone());
-        master.text_color = Some(figure_theme.text_color.clone());
-
-        // Build a layout for each structure slot
+        // Build a layout for each structure slot (needed before per-row height calc).
         let mut layouts: Vec<Layout> = Vec::new();
         for i in 0..structure.len() {
             let layout = if i < user_layouts.len() {
@@ -427,6 +401,77 @@ impl Figure {
             }
         }
 
+        // Compute per-grid-row heights.  A grid row's height is the default
+        // `cell_height` unless any cell in that row contains a BrickPlot with
+        // `row_height_px`, in which case we compute:
+        //   canvas_height = row_height_px * num_rows + actual_margin_top + actual_margin_bottom
+        //
+        // Margins are extracted from a provisional ComputedLayout (margins do not
+        // depend on canvas size) so they account for suppress_x_ticks, axis labels,
+        // font sizes, etc. — giving exact row heights rather than relying on a fixed
+        // margin estimate.
+        let mut per_row_heights: Vec<f64> = vec![cell_height; rows];
+        for (i, group) in structure.iter().enumerate() {
+            let rect = cell_rect(group, cols);
+            let grid_row = rect.0;
+            if i < plots.len() && i < layouts.len() {
+                for plot in &plots[i] {
+                    if let Plot::Brick(bp) = plot {
+                        if let Some(rh) = bp.row_height_px {
+                            let n = bp.num_rows();
+                            if n > 0 {
+                                // Compute actual margins from the post-shared-axis layout.
+                                // Margins do not depend on canvas height, so this is exact.
+                                let cl = ComputedLayout::from_layout(&layouts[i]);
+                                let overhead = cl.margin_top + cl.margin_bottom;
+                                let desired = rh * n as f64 + overhead;
+                                // Always set — desired is typically smaller than
+                                // the default cell_height, so "> cell_height" would
+                                // silently skip every brick row height request.
+                                per_row_heights[grid_row] = desired;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Prefix sums for fast cell_y calculation.
+        let row_y_starts: Vec<f64> = {
+            let mut starts = vec![0.0f64; rows + 1];
+            for r in 0..rows {
+                starts[r + 1] = starts[r] + per_row_heights[r] + spacing;
+            }
+            starts
+        };
+
+        let grid_width = cols as f64 * cell_width
+            + (cols as f64 - 1.0) * spacing
+            + 2.0 * padding;
+        let grid_height = per_row_heights.iter().sum::<f64>()
+            + (rows as f64 - 1.0) * spacing
+            + 2.0 * padding
+            + figure_title_height;
+
+        let (total_width, total_height) = match shared_legend.as_ref() {
+            Some(FigureLegendPosition::Right) if legend_entries.as_ref().is_some_and(|e| !e.is_empty()) => {
+                (grid_width + legend_width + legend_spacing, grid_height)
+            }
+            Some(FigureLegendPosition::Bottom) if legend_entries.as_ref().is_some_and(|e| !e.is_empty()) => {
+                (grid_width, grid_height + legend_height + legend_spacing)
+            }
+            _ => (grid_width, grid_height),
+        };
+
+        let mut master = Scene::new(total_width, total_height);
+        // Inherit font_family and theme from first user layout if set
+        let figure_theme = user_layouts.first().map(|l| l.theme.clone()).unwrap_or_default();
+        master.font_family = user_layouts.first().and_then(|l| l.font_family.clone())
+            .or(figure_theme.font_family.clone())
+            .or(Some(DEFAULT_FONT_FAMILY.to_string()));
+        master.background_color = Some(figure_theme.background.clone());
+        master.text_color = Some(figure_theme.text_color.clone());
+
         // Pad plots with empty vecs so indexing is safe
         while plots.len() < structure.len() {
             plots.push(Vec::new());
@@ -438,9 +483,13 @@ impl Figure {
             let row_span = rect.2 - rect.0 + 1;
 
             let cell_x = padding + rect.1 as f64 * (cell_width + spacing);
-            let cell_y = padding + figure_title_height + rect.0 as f64 * (cell_height + spacing);
+            let cell_y = padding + figure_title_height + row_y_starts[rect.0];
             let cell_w = col_span as f64 * cell_width + (col_span as f64 - 1.0) * spacing;
-            let cell_h = row_span as f64 * cell_height + (row_span as f64 - 1.0) * spacing;
+            // Multi-row spans: sum all spanned row heights + inter-row spacings.
+            let cell_h = (rect.0..rect.0 + row_span)
+                .map(|r| per_row_heights[r])
+                .sum::<f64>()
+                + (row_span as f64 - 1.0) * spacing;
 
             let slot_plots = std::mem::take(&mut plots[i]);
 

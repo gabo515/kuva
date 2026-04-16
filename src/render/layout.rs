@@ -1020,6 +1020,25 @@ impl Layout {
             }
         }
 
+        // BrickPlot::with_row_height — auto-size canvas height so each row is
+        // exactly `row_height_px` pixels tall.  We compute the real margin
+        // overhead from ComputedLayout (margins do not depend on canvas size)
+        // rather than using a fixed estimate, so the result is exact.
+        // Only the first BrickPlot with `row_height_px` takes effect.
+        for plot in plots.iter() {
+            if let Plot::Brick(bp) = plot {
+                if let Some(rh) = bp.row_height_px {
+                    let n = bp.num_rows();
+                    if n > 0 {
+                        let cl = ComputedLayout::from_layout(&layout);
+                        let overhead = cl.margin_top + cl.margin_bottom;
+                        layout.height = Some(rh * n as f64 + overhead);
+                        break;
+                    }
+                }
+            }
+        }
+
         layout
     }
 

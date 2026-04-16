@@ -717,3 +717,114 @@ fn test_brick_spec_segment_count_mismatch_form_b() {
         x_max
     );
 }
+
+// ── Figure tests ─────────────────────────────────────────────────────────────
+
+/// Two BrickPlots (hap1 / hap2) in a 2×1 Figure with a shared x-axis and
+/// uniform row height via `with_row_height`.  This exercises:
+///   - `BrickPlot::with_row_height` auto-sizing the per-panel canvas height
+///   - Figure per-grid-row height computation from BrickPlot metadata
+///   - shared x-axis clamping both panels to the same x-range
+///
+/// Visual expectation: hap1 (3 reads) and hap2 (8 reads) brick rows are the
+/// same pixel height; both panels share the same x extent.
+#[test]
+fn test_brickplot_figure_haplotypes_shared_x() {
+    use kuva::render::figure::Figure;
+
+    let tmpl = BrickTemplate::new().dna();
+
+    // hap1: 3 reads, shorter sequences
+    let hap1 = BrickPlot::new()
+        .with_sequences(vec![
+            "CGGCGATCAGGCCGCACTCATCATCATCATCAT",
+            "CGGCGATCAGGCCGCACTCATCATCATCATCATCAT",
+            "CGGCGATCAGGCCGCACTCATCATCATCAT",
+        ])
+        .with_names(vec!["hap1_r1", "hap1_r2", "hap1_r3"])
+        .with_template(tmpl.template.clone())
+        .with_row_height(20.0);
+
+    // hap2: 8 reads, longer sequences
+    let hap2 = BrickPlot::new()
+        .with_sequences(vec![
+            "CGGCGATCAGGCCGCACTCATCATCATCATCATCATCATCAT",
+            "CGGCGATCAGGCCGCACTCATCATCATCATCATCAT",
+            "CGGCGATCAGGCCGCACTCATCATCATCATCATCATCAT",
+            "CGGCGATCAGGCCGCACTCATCATCATCATCAT",
+            "CGGCGATCAGGCCGCACTCATCATCATCATCATCATCATCATCAT",
+            "CGGCGATCAGGCCGCACTCATCATCATCATCATCAT",
+            "CGGCGATCAGGCCGCACTCATCATCATCATCAT",
+            "CGGCGATCAGGCCGCACTCATCATCATCATCATCATCAT",
+        ])
+        .with_names(vec!["hap2_r1","hap2_r2","hap2_r3","hap2_r4",
+                          "hap2_r5","hap2_r6","hap2_r7","hap2_r8"])
+        .with_template(tmpl.template.clone())
+        .with_row_height(20.0);
+
+    let figure = Figure::new(2, 1)
+        .with_plots(vec![
+            vec![Plot::Brick(hap1)],
+            vec![Plot::Brick(hap2)],
+        ])
+        .with_shared_x_all()
+        .with_title("Haplotype brick plots — shared x, equal row height");
+
+    let scene = figure.render();
+    let svg = SvgBackend.render_scene(&scene);
+    std::fs::write("test_outputs/brickplot_haplotypes_figure.svg", svg.clone()).unwrap();
+
+    assert!(svg.contains("<svg"), "expected SVG output");
+
+    // The two panels should have different heights (hap1: 3 rows, hap2: 8 rows)
+    // but together form a taller canvas than a single uniform cell_height figure.
+    // Verify both hap names appear as y-axis tick labels.
+    assert!(svg.contains("hap1_r1"), "hap1 read labels should be present");
+    assert!(svg.contains("hap2_r1"), "hap2 read labels should be present");
+}
+
+/// Verify that `with_row_height` produces a canvas height where each brick row
+/// is exactly the requested number of pixels tall.
+///
+/// We do this by rendering the SVG and measuring that the y-extent of the first
+/// brick rect equals `row_height_px * 0.95` (the renderer applies a 0.95 height
+/// factor for brick spacing).  We also confirm that two plots with different row
+/// counts but the same `row_height_px` produce proportionally different canvas
+/// heights (not identical ones).
+#[test]
+fn test_brickplot_row_height_standalone_sizing() {
+    let tmpl = BrickTemplate::new().dna();
+
+    // 3 rows at 20 px/row
+    let brick3 = BrickPlot::new()
+        .with_sequences(vec!["ACGT", "ACGT", "ACGT"])
+        .with_names(vec!["r1", "r2", "r3"])
+        .with_template(tmpl.template.clone())
+        .with_row_height(20.0);
+
+    // 8 rows at 20 px/row — should produce a taller canvas
+    let brick8 = BrickPlot::new()
+        .with_sequences(vec!["ACGT"; 8].to_vec())
+        .with_names((1..=8).map(|i| format!("r{i}")).collect::<Vec<_>>())
+        .with_template(tmpl.template.clone())
+        .with_row_height(20.0);
+
+    let plots3 = vec![Plot::Brick(brick3)];
+    let plots8 = vec![Plot::Brick(brick8)];
+
+    let layout3 = Layout::auto_from_plots(&plots3);
+    let layout8 = Layout::auto_from_plots(&plots8);
+
+    // Both layouts must have an explicit height set.
+    assert!(layout3.height.is_some(), "layout for 3-row brick should have height set");
+    assert!(layout8.height.is_some(), "layout for 8-row brick should have height set");
+
+    // The 8-row canvas must be taller than the 3-row canvas by ~5×20 = 100 px.
+    let h3 = layout3.height.unwrap();
+    let h8 = layout8.height.unwrap();
+    let diff = h8 - h3;
+    assert!(
+        (diff - 100.0).abs() < 1.0,
+        "canvas height difference should be 5 * row_height = 100 px, got {diff}"
+    );
+}

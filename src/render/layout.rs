@@ -260,6 +260,13 @@ pub struct Layout {
     /// Set automatically by `auto_from_plots` when a `BrickPlot` with `notations`
     /// is present.  `0` = no extra space.
     pub brick_notation_tiers: usize,
+    // Per-element text wrapping (`None` = no wrapping).  Set via `with_wrap()`
+    // (all at once) or `with_title_wrap()` / `with_legend_wrap()` / etc.
+    pub title_wrap: Option<usize>,
+    pub x_label_wrap: Option<usize>,
+    pub y_label_wrap: Option<usize>,
+    pub y2_label_wrap: Option<usize>,
+    pub legend_wrap: Option<usize>,
 }
 
 impl Layout {
@@ -341,6 +348,11 @@ impl Layout {
             interactive: false,
             equal_aspect: false,
             brick_notation_tiers: 0,
+            title_wrap: None,
+            x_label_wrap: None,
+            y_label_wrap: None,
+            y2_label_wrap: None,
+            legend_wrap: None,
         }
     }
 
@@ -1241,6 +1253,49 @@ impl Layout {
         self
     }
 
+    /// Word-wrap all text elements (title, axis labels, legend) at `max_chars`
+    /// characters.  Call this before per-element overrides (`with_title_wrap`,
+    /// `with_legend_wrap`, etc.) so they take precedence.
+    pub fn with_wrap(mut self, max_chars: usize) -> Self {
+        let v = if max_chars > 0 { Some(max_chars) } else { None };
+        self.title_wrap = v;
+        self.x_label_wrap = v;
+        self.y_label_wrap = v;
+        self.y2_label_wrap = v;
+        self.legend_wrap = v;
+        self
+    }
+
+    /// Word-wrap the plot title at `max_chars` characters.
+    pub fn with_title_wrap(mut self, max_chars: usize) -> Self {
+        self.title_wrap = if max_chars > 0 { Some(max_chars) } else { None };
+        self
+    }
+
+    /// Word-wrap the x-axis label at `max_chars` characters.
+    pub fn with_x_label_wrap(mut self, max_chars: usize) -> Self {
+        self.x_label_wrap = if max_chars > 0 { Some(max_chars) } else { None };
+        self
+    }
+
+    /// Word-wrap the y-axis label at `max_chars` characters.
+    pub fn with_y_label_wrap(mut self, max_chars: usize) -> Self {
+        self.y_label_wrap = if max_chars > 0 { Some(max_chars) } else { None };
+        self
+    }
+
+    /// Word-wrap the secondary y-axis label at `max_chars` characters.
+    pub fn with_y2_label_wrap(mut self, max_chars: usize) -> Self {
+        self.y2_label_wrap = if max_chars > 0 { Some(max_chars) } else { None };
+        self
+    }
+
+    /// Word-wrap legend labels and titles at `max_chars` characters.
+    pub fn with_legend_wrap(mut self, max_chars: usize) -> Self {
+        self.legend_wrap = if max_chars > 0 { Some(max_chars) } else { None };
+        self
+    }
+
     pub fn with_log_x(mut self) -> Self {
         self.log_x = true;
         self
@@ -1593,6 +1648,12 @@ pub struct ComputedLayout {
     /// Y position for the plot title, computed from the pre-notation base margin so that
     /// BrickPlot notation tiers don't push the title into the middle of the annotation zone.
     pub title_y: f64,
+    // Per-element text wrapping (propagated from Layout).
+    pub title_wrap: Option<usize>,
+    pub x_label_wrap: Option<usize>,
+    pub y_label_wrap: Option<usize>,
+    pub y2_label_wrap: Option<usize>,
+    pub legend_wrap: Option<usize>,
 }
 
 impl ComputedLayout {
@@ -1608,16 +1669,21 @@ impl ComputedLayout {
         // Compute the base margin first (title + padding only), then add notation tiers on top.
         // title_y uses the base margin so that notation tiers don't push the title downward
         // into the middle of the per-block label zone.
-        let base_margin_top = if layout.title.is_some() {
-            title_size + label_size + 12.0 * s
+        let title_lines = if let (Some(ref title), Some(max_chars)) = (&layout.title, layout.title_wrap) {
+            render_utils::wrap_text(title, max_chars).len()
+        } else if layout.title.is_some() {
+            1
+        } else {
+            0
+        };
+        let base_margin_top = if title_lines > 0 {
+            title_size * title_lines as f64 + label_size + 12.0 * s
         } else {
             10.0 * s
         };
         let title_y = base_margin_top / 2.0;
         let mut margin_top = base_margin_top;
         // BrickPlot per-block notation labels are drawn above the top row.
-        // Reserve (N_TIERS + 0.5) * line_height extra pixels so labels — including the
-        // ascenders of the topmost tier — are never clipped by the canvas edge or title.
         if layout.brick_notation_tiers > 0 {
             let body = layout.body_size as f64 * s;
             margin_top += (layout.brick_notation_tiers as f64 + 0.5) * body * 1.1 + 4.0 * s;
@@ -1641,6 +1707,13 @@ impl ComputedLayout {
         } else {
             tick_size + label_size + tick_mark_major_px + 20.0 * s
         };
+        // Extra bottom margin for wrapped x-axis label.
+        if let (Some(ref xlabel), Some(max_chars)) = (&layout.x_label, layout.x_label_wrap) {
+            let x_label_lines = render_utils::wrap_text(xlabel, max_chars).len();
+            if x_label_lines > 1 {
+                margin_bottom += (x_label_lines - 1) as f64 * label_size;
+            }
+        }
         // Left: axis label + y tick label text width + gaps.
         // Compute the actual maximum tick label pixel width from real tick strings so the
         // left margin is exactly as wide as needed and the Y axis label snugs up against
@@ -1679,12 +1752,18 @@ impl ComputedLayout {
                 .max().unwrap_or(3) as f64;
             (max_chars * tick_size * 0.6).max(tick_size * 2.0)
         };
+        let y_label_lines = if let (Some(ref ylabel), Some(max_chars)) = (&layout.y_label, layout.y_label_wrap) {
+            render_utils::wrap_text(ylabel, max_chars).len()
+        } else {
+            1
+        };
         let mut margin_left = if layout.suppress_y_ticks {
             10.0 * s
         } else {
             // 16px = 3 edge + 5 label-to-ticklabels gap + 8 tick_label_margin base;
             // tick_mark_major_px is added separately so the margin grows with tick length.
-            label_size + y_tick_label_px + 16.0 * s + tick_mark_major_px
+            // Extra label_size per wrapped line beyond the first.
+            label_size * y_label_lines as f64 + y_tick_label_px + 16.0 * s + tick_mark_major_px
         };
         // Estimate the overhang of the rightmost numeric x-tick label.
         // Tick labels are centred on their tick position (TextAnchor::Middle), so the
@@ -1728,21 +1807,44 @@ impl ComputedLayout {
             }
         }
 
+        let y2_label_lines = if let (Some(ref y2label), Some(max_chars)) = (&layout.y2_label, layout.y2_label_wrap) {
+            render_utils::wrap_text(y2label, max_chars).len()
+        } else {
+            1
+        };
         let y2_axis_width = if layout.y2_range.is_some() && !layout.suppress_y2_ticks {
-            label_size + tick_size * 3.0 + 15.0 * s
+            label_size * y2_label_lines as f64 + tick_size * 3.0 + 15.0 * s
         } else {
             0.0
         };
         margin_right += y2_axis_width;
 
+        // Effective legend width: capped when legend_wrap is set.
+        let effective_legend_width = if let Some(max_chars) = layout.legend_wrap {
+            let cap = max_chars as f64 * 7.2 * s + 35.0 * s;
+            (layout.legend_width * s).min(cap).max(80.0 * s)
+        } else {
+            layout.legend_width * s
+        };
+
         if layout.show_legend {
             // Estimate legend height for OutsideTop/Bottom margin adjustments.
             let legend_line_h = 18.0 * s;
+            let wrap_line_count = |text: &str| -> usize {
+                if let Some(mc) = layout.legend_wrap {
+                    render_utils::wrap_text(text, mc).len()
+                } else {
+                    1
+                }
+            };
             let legend_h_estimate = if let Some(ref groups) = layout.legend_groups {
-                let n = groups.iter().map(|g| g.entries.len() + 1).sum::<usize>();
+                let n: usize = groups.iter().map(|g| {
+                    wrap_line_count(&g.title) + g.entries.iter().map(|e| wrap_line_count(&e.label)).sum::<usize>()
+                }).sum();
                 n as f64 * legend_line_h + 20.0 * s
             } else if let Some(ref entries) = layout.legend_entries {
-                entries.len() as f64 * legend_line_h + 20.0 * s
+                let n: usize = entries.iter().map(|e| wrap_line_count(&e.label)).sum();
+                n as f64 * legend_line_h + 20.0 * s
             } else {
                 80.0 * s // conservative default for auto-collected entries
             };
@@ -1750,12 +1852,12 @@ impl ComputedLayout {
                 LegendPosition::OutsideRightTop
                 | LegendPosition::OutsideRightMiddle
                 | LegendPosition::OutsideRightBottom => {
-                    margin_right += layout.legend_width * s;
+                    margin_right += effective_legend_width;
                 }
                 LegendPosition::OutsideLeftTop
                 | LegendPosition::OutsideLeftMiddle
                 | LegendPosition::OutsideLeftBottom => {
-                    margin_left += layout.legend_width * s;
+                    margin_left += effective_legend_width;
                 }
                 LegendPosition::OutsideTopLeft
                 | LegendPosition::OutsideTopCenter
@@ -1765,7 +1867,7 @@ impl ComputedLayout {
                 LegendPosition::OutsideBottomLeft
                 | LegendPosition::OutsideBottomCenter
                 | LegendPosition::OutsideBottomRight => {
-                    margin_bottom += legend_h_estimate;
+                    margin_bottom += legend_h_estimate + 10.0 * s;
                 }
                 // Inside*, Custom, DataCoords: overlay or user controls — no margin change
                 _ => {}
@@ -1870,7 +1972,7 @@ impl ComputedLayout {
             y_ticks,
             legend_position: layout.legend_position,
             stats_position: layout.stats_position,
-            legend_width: layout.legend_width * s,
+            legend_width: effective_legend_width,
             legend_height_override: layout.legend_height.map(|h| h * s),
             y_tick_label_px,
             log_x: layout.log_x,
@@ -1925,6 +2027,11 @@ impl ComputedLayout {
             dice_x_label_pos: None,
             dice_y_label_pos: None,
             title_y,
+            title_wrap: layout.title_wrap,
+            x_label_wrap: layout.x_label_wrap,
+            y_label_wrap: layout.y_label_wrap,
+            y2_label_wrap: layout.y2_label_wrap,
+            legend_wrap: layout.legend_wrap,
         };
         s.recompute_transforms();
         s

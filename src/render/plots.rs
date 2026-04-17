@@ -55,6 +55,7 @@ use crate::plot::rose::RosePlot;
 use crate::plot::calendar::CalendarPlot;
 use crate::plot::pyramid::PopulationPyramid;
 use crate::plot::waffle::WafflePlot;
+use crate::plot::horizon::HorizonPlot;
 use crate::plot::legend::ColorBarInfo;
 use crate::render::render_utils;
 
@@ -117,6 +118,7 @@ pub enum Plot {
     Calendar(CalendarPlot),
     Pyramid(PopulationPyramid),
     Waffle(WafflePlot),
+    Horizon(HorizonPlot),
 }
 
 impl From<ScatterPlot>    for Plot { fn from(p: ScatterPlot)    -> Self { Plot::Scatter(p) } }
@@ -176,6 +178,7 @@ impl From<RosePlot>        for Plot { fn from(p: RosePlot)        -> Self { Plot
 impl From<CalendarPlot>       for Plot { fn from(p: CalendarPlot)       -> Self { Plot::Calendar(p) } }
 impl From<PopulationPyramid>  for Plot { fn from(p: PopulationPyramid)  -> Self { Plot::Pyramid(p) } }
 impl From<WafflePlot>         for Plot { fn from(p: WafflePlot)         -> Self { Plot::Waffle(p) } }
+impl From<HorizonPlot>        for Plot { fn from(p: HorizonPlot)        -> Self { Plot::Horizon(p) } }
 
 use crate::plot::plot3d::DataRanges3D;
 use crate::plot::colormap::ColorMap;
@@ -897,6 +900,12 @@ impl Plot {
                 Some(((-max_val, max_val), (0.5, n as f64 + 0.5)))
             }
             Plot::Waffle(_) => Some(((-1.0, 1.0), (-1.0, 1.0))),
+            Plot::Horizon(hp) => {
+                let n = hp.series.len();
+                if n == 0 { return None; }
+                let (x_min, x_max) = hp.x_range()?;
+                Some(((x_min, x_max), (0.5, n as f64 + 0.5)))
+            }
             // Rendered in pixel space; dummy bounds satisfy Layout::auto_from_plots.
             Plot::Network(_) => Some(((0.0, 1.0), (0.0, 1.0))),
             Plot::Radar(_) => Some(((0.0, 1.0), (0.0, 1.0))),
@@ -993,6 +1002,11 @@ impl Plot {
             Plot::Calendar(cp) => cp.data.len() + 100,
             Plot::Pyramid(pp) => pp.series.len() * pp.n_groups() * 4 + 20,
             Plot::Waffle(wp) => wp.rows * wp.cols + 10,
+            Plot::Horizon(hp) => {
+                let n = hp.series.len();
+                let pts_per_series = hp.series.first().map(|s| s.x.len()).unwrap_or(100);
+                n * hp.n_bands * 2 * pts_per_series / 10 + 20
+            }
             _ => 100,
         }
     }

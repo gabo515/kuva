@@ -271,6 +271,10 @@ pub struct Layout {
     pub y2_label_wrap: Option<usize>,
     /// Word-wrap legend labels and titles at this many characters; `None` disables wrapping.
     pub legend_wrap: Option<usize>,
+    /// Extra right-margin pixels reserved for HorizonPlot row annotations
+    /// (value labels and sign-color indicators).  Set automatically by
+    /// `auto_from_plots`; zero when no annotations are requested.
+    pub horizon_right_annot_px: f64,
 }
 
 impl Layout {
@@ -357,6 +361,7 @@ impl Layout {
             y_label_wrap: None,
             y2_label_wrap: None,
             legend_wrap: None,
+            horizon_right_annot_px: 0.0,
         }
     }
 
@@ -383,6 +388,7 @@ impl Layout {
         let mut max_label_len: usize = 0;
         let mut brick_has_notations: bool = false;
         let mut pyramid_normalize: Option<bool> = None;
+        let mut horizon_right_annot_px: f64 = 0.0;
 
         for plot in plots {
             if let Some(((xmin, xmax), (ymin, ymax))) = plot.bounds() {
@@ -897,6 +903,26 @@ impl Layout {
                 }
             }
 
+            if let Plot::Horizon(hp) = plot {
+                if !hp.series.is_empty() {
+                    // y_categories: series[0] at top → reversed list
+                    y_labels = Some(hp.series.iter().rev().map(|s| s.label.clone()).collect());
+                    if hp.show_legend {
+                        has_legend = true;
+                        for s in &hp.series {
+                            max_label_len = max_label_len.max(s.label.len());
+                        }
+                    }
+                    if hp.show_value_labels || hp.show_sign_colors {
+                        // Reserve right-margin space for per-row annotations.
+                        // Estimate: sign char ("+"/"-") + up to 7-digit value, at tick_size width.
+                        // We don't know tick_size here yet (it's scale-dependent), so use a
+                        // pixel constant; the ComputedLayout scale factor is applied later.
+                        horizon_right_annot_px = 68.0;
+                    }
+                }
+            }
+
             if let Plot::Waffle(wp) = plot {
                 if wp.legend_label.is_some() {
                     has_legend = true;
@@ -961,6 +987,7 @@ impl Layout {
         let mut layout = Self::new((x_min, x_max), (y_min, y_max));
         layout.data_x_range = Some(raw_x);
         layout.data_y_range = Some(raw_y);
+        layout.horizon_right_annot_px = horizon_right_annot_px;
         if brick_has_notations {
             layout.brick_notation_tiers = 4; // matches N_TIERS in add_brickplot
         }
@@ -1130,6 +1157,23 @@ impl Layout {
                             layout.height = Some(natural_grid_h + overhead + bottom_pad);
                         }
                         break; // only the first WafflePlot drives the sizing
+                    }
+                }
+            }
+        }
+
+        // HorizonPlot — auto-size canvas height when row_height is set.
+        if layout.height.is_none() {
+            for plot in plots.iter() {
+                if let Plot::Horizon(hp) = plot {
+                    if let Some(rh) = hp.row_height {
+                        let n = hp.series.len();
+                        if n > 0 {
+                            let cl = ComputedLayout::from_layout(&layout);
+                            let overhead = cl.margin_top + cl.margin_bottom;
+                            layout.height = Some(rh * n as f64 + overhead);
+                            break;
+                        }
                     }
                 }
             }
@@ -1913,7 +1957,7 @@ impl ComputedLayout {
             let label = layout.x_tick_format.format(val);
             label.len() as f64 * tick_size * 0.6 * 0.5
         };
-        let mut margin_right = label_size.max(x_last_tick_half_w);
+        let mut margin_right = label_size.max(x_last_tick_half_w) + layout.horizon_right_annot_px;
 
         // For rotated x-axis category labels the text extends horizontally from its anchor.
         // Negative angle → TextAnchor::End → extends left  → first label can clip left edge.

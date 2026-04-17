@@ -57,6 +57,7 @@ pub mod rose;
 pub mod calendar;
 pub mod pyramid;
 pub mod waffle;
+pub mod horizon;
 
 pub mod legend;
 
@@ -121,5 +122,6 @@ pub use rose::{RosePlot, RoseSeries, RoseEncoding, RoseMode};
 pub use calendar::{CalendarPlot, CalendarAgg, CalendarPeriod, WeekStart};
 pub use pyramid::{PopulationPyramid, PyramidSeries, PyramidMode};
 pub use waffle::{WafflePlot, WaffleCategory, FillOrder, CellShape};
+pub use horizon::{HorizonPlot, HorizonSeries};
 
 pub use legend::{Legend, LegendEntry, LegendShape, LegendPosition, LegendGroup};

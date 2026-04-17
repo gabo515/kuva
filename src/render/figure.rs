@@ -785,6 +785,7 @@ fn clone_layout(l: &Layout) -> Layout {
     new.y_label_wrap = l.y_label_wrap;
     new.y2_label_wrap = l.y2_label_wrap;
     new.legend_wrap = l.legend_wrap;
+    new.horizon_right_annot_px = l.horizon_right_annot_px;
     new
 }
 

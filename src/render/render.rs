@@ -86,6 +86,7 @@ use crate::plot::calendar::{
 };
 use crate::plot::pyramid::{PopulationPyramid, PyramidMode};
 use crate::plot::waffle::{WafflePlot, WaffleCategory, FillOrder, CellShape};
+use crate::plot::horizon::HorizonPlot;
 
 use crate::plot::Legend;
 use crate::plot::legend::{ColorBarInfo, LegendEntry, LegendGroup, LegendPosition, LegendShape};
@@ -8625,6 +8626,18 @@ pub fn collect_legend_entries(plots: &[Plot]) -> Vec<LegendEntry> {
                     }
                 }
             }
+            Plot::Horizon(hp) => {
+                if hp.show_legend {
+                    for s in &hp.series {
+                        entries.push(LegendEntry {
+                            label: s.label.clone(),
+                            color: s.pos_color.clone(),
+                            shape: LegendShape::Rect,
+                            dasharray: None,
+                        });
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -10716,6 +10729,9 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
             Plot::Waffle(wp) => {
                 add_waffle(wp, &mut scene, &computed);
             }
+            Plot::Horizon(hp) => {
+                add_horizon(hp, &mut scene, &computed);
+            }
         }
     }
 
@@ -10737,6 +10753,13 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
     for plot in plots.iter() {
         if let Plot::Brick(bp) = plot {
             add_brickplot_notations(bp, &mut scene, &computed);
+        }
+    }
+
+    // HorizonPlot row annotations sit in the right margin — emit after ClipEnd.
+    for plot in plots.iter() {
+        if let Plot::Horizon(hp) = plot {
+            add_horizon_annots(hp, &mut scene, &computed);
         }
     }
 
@@ -16478,5 +16501,321 @@ fn add_waffle(wp: &WafflePlot, scene: &mut Scene, computed: &ComputedLayout) {
 /// Render a single [`WafflePlot`] to a [`Scene`].
 pub fn render_waffle(wp: WafflePlot, layout: Layout) -> Scene {
     let plots = vec![Plot::Waffle(wp)];
+    render_multiple(plots, layout)
+}
+
+/// Parse a CSS hex color `#RRGGBB` or `#RGB` into `(r, g, b)` bytes.
+/// Falls back to `(66, 146, 198)` (default blue) on parse failure.
+fn parse_hex_color(hex: &str) -> (u8, u8, u8) {
+    let h = hex.trim_start_matches('#');
+    match h.len() {
+        6 => {
+            let r = u8::from_str_radix(&h[0..2], 16).unwrap_or(66);
+            let g = u8::from_str_radix(&h[2..4], 16).unwrap_or(146);
+            let b = u8::from_str_radix(&h[4..6], 16).unwrap_or(198);
+            (r, g, b)
+        }
+        3 => {
+            let r = u8::from_str_radix(&h[0..1], 16).unwrap_or(4).wrapping_mul(17);
+            let g = u8::from_str_radix(&h[1..2], 16).unwrap_or(9).wrapping_mul(17);
+            let b = u8::from_str_radix(&h[2..3], 16).unwrap_or(12).wrapping_mul(17);
+            (r, g, b)
+        }
+        _ => (66, 146, 198),
+    }
+}
+
+/// Render a horizon chart.  Not pixel-space: uses standard x-axis, row-based y positions.
+fn add_horizon(hp: &HorizonPlot, scene: &mut Scene, computed: &ComputedLayout) {
+    let n = hp.series.len();
+    if n == 0 { return; }
+    if hp.n_bands == 0 { return; }
+
+    // pixel height of one data-unit on the y axis (one category slot)
+    let cell_h_px = (computed.map_y(0.0) - computed.map_y(1.0)).abs();
+
+    // Shared band widths (derived once across all series)
+    let pos_bw = hp.pos_band_width();
+    let neg_bw = hp.neg_band_width();
+
+    let mut rb = ryu::Buffer::new();
+
+    for (i, series) in hp.series.iter().enumerate() {
+        if series.x.is_empty() || series.y.is_empty() { continue; }
+        let pts = series.x.len().min(series.y.len());
+
+        // Series 0 = top → data y = N; series n-1 = bottom → data y = 1
+        let y_center_data = (n - i) as f64;
+        let y_center_px = computed.map_y(y_center_data);
+
+        // Bottom of this row = baseline for filled areas
+        let row_baseline_px = y_center_px + cell_h_px * 0.5;
+        let row_h_px = cell_h_px;
+
+        // --- Positive bands ---
+        let (pr, pg, pb) = parse_hex_color(&series.pos_color);
+        for band in 1..=hp.n_bands {
+            let band_lo = (band - 1) as f64 * pos_bw;
+            let band_hi = band as f64 * pos_bw;
+
+            // Opacity: lightest band has alpha 1/n_bands, darkest has alpha 1.0
+            let alpha = band as f64 / hp.n_bands as f64;
+            let color_str = format!("rgb({},{},{})", pr, pg, pb);
+
+            // Build path
+            let mut has_fill = false;
+            let mut path = String::with_capacity(pts * 24);
+
+            // Check if any point has non-zero height in this band before building path
+            let any_pos = (0..pts).any(|j| {
+                let raw_v = (series.y[j] - hp.baseline).max(0.0);
+                (raw_v - band_lo) > 1e-12
+            });
+            if !any_pos { continue; }
+
+            for j in 0..pts {
+                let raw_v = (series.y[j] - hp.baseline).max(0.0);
+                let in_band = (raw_v - band_lo).clamp(0.0, pos_bw).min(band_hi - band_lo);
+                let px_h = if pos_bw > 0.0 { in_band / pos_bw * row_h_px } else { 0.0 };
+
+                let sx = round2(computed.map_x(series.x[j]));
+                let sy = round2(row_baseline_px - px_h);
+
+                if !has_fill {
+                    path.push('M');
+                    has_fill = true;
+                } else {
+                    path.push('L');
+                }
+                path.push(' ');
+                path.push_str(rb.format(sx));
+                path.push(' ');
+                path.push_str(rb.format(sy));
+                path.push(' ');
+            }
+
+            if !has_fill { continue; }
+
+            // Close via baseline
+            let last_x = round2(computed.map_x(series.x[pts - 1]));
+            let first_x = round2(computed.map_x(series.x[0]));
+            let base_y = round2(row_baseline_px);
+            {
+                let s_last_x  = rb.format(last_x).to_string();
+                let s_base_y1 = rb.format(base_y).to_string();
+                let s_first_x = rb.format(first_x).to_string();
+                let s_base_y2 = rb.format(base_y).to_string();
+                path.push_str(&format!("L {} {} L {} {} Z", s_last_x, s_base_y1, s_first_x, s_base_y2));
+            }
+
+            scene.add(Primitive::Path(Box::new(PathData {
+                d: path,
+                fill: Some(Color::from(color_str.as_str())),
+                stroke: Color::from("none"),
+                stroke_width: 0.0,
+                opacity: Some(alpha),
+                stroke_dasharray: None,
+            })));
+        }
+
+        // --- Negative bands ---
+        let has_negatives = series.y.iter().any(|&v| v < hp.baseline);
+        if has_negatives {
+            let (nr, ng, nb) = parse_hex_color(&series.neg_color);
+            for band in 1..=hp.n_bands {
+                let band_lo = (band - 1) as f64 * neg_bw;
+
+                let alpha = band as f64 / hp.n_bands as f64;
+                let color_str = format!("rgb({},{},{})", nr, ng, nb);
+
+                let mut has_fill = false;
+                let mut path = String::with_capacity(pts * 24);
+
+                // Check if any point has non-zero height in this band
+                let any_neg = (0..pts).any(|j| {
+                    let raw_v = (hp.baseline - series.y[j]).max(0.0);
+                    (raw_v - band_lo) > 1e-12
+                });
+                if !any_neg { continue; }
+
+                for j in 0..pts {
+                    let raw_v = (hp.baseline - series.y[j]).max(0.0);
+                    let in_band = (raw_v - band_lo).clamp(0.0, neg_bw);
+                    let px_h = if neg_bw > 0.0 { in_band / neg_bw * row_h_px } else { 0.0 };
+
+                    let sx = round2(computed.map_x(series.x[j]));
+                    let sy = round2(row_baseline_px - px_h);
+
+                    if !has_fill {
+                        path.push('M');
+                        has_fill = true;
+                    } else {
+                        path.push('L');
+                    }
+                    path.push(' ');
+                    path.push_str(rb.format(sx));
+                    path.push(' ');
+                    path.push_str(rb.format(sy));
+                    path.push(' ');
+                }
+
+                if !has_fill { continue; }
+
+                let last_x = round2(computed.map_x(series.x[pts - 1]));
+                let first_x = round2(computed.map_x(series.x[0]));
+                let base_y = round2(row_baseline_px);
+                {
+                    let s_last_x  = rb.format(last_x).to_string();
+                    let s_base_y1 = rb.format(base_y).to_string();
+                    let s_first_x = rb.format(first_x).to_string();
+                    let s_base_y2 = rb.format(base_y).to_string();
+                    path.push_str(&format!("L {} {} L {} {} Z", s_last_x, s_base_y1, s_first_x, s_base_y2));
+                }
+
+                scene.add(Primitive::Path(Box::new(PathData {
+                    d: path,
+                    fill: Some(Color::from(color_str.as_str())),
+                    stroke: Color::from("none"),
+                    stroke_width: 0.0,
+                    opacity: Some(alpha),
+                    stroke_dasharray: None,
+                })));
+            }
+        }
+
+        // Row separator line
+        let sep_y = round2(row_baseline_px);
+        scene.add(Primitive::Line {
+            x1: computed.margin_left,
+            y1: sep_y,
+            x2: computed.width - computed.margin_right,
+            y2: sep_y,
+            stroke: Color::from(&computed.theme.axis_color),
+            stroke_width: computed.axis_stroke_width * 0.5,
+            stroke_dasharray: None,
+        });
+
+    }
+}
+
+/// Draw HorizonPlot row-end value/sign annotations.
+///
+/// Must be called AFTER `ClipEnd` so text in the right margin is not clipped.
+fn add_horizon_annots(hp: &HorizonPlot, scene: &mut Scene, computed: &ComputedLayout) {
+    if !hp.show_value_labels { return; }
+    let n = hp.series.len();
+    if n == 0 { return; }
+
+    let cell_h_px = (computed.map_y(0.0) - computed.map_y(1.0)).abs();
+    let pos_bw = hp.pos_band_width();
+    let neg_bw = hp.neg_band_width();
+    let annot_x = computed.width - computed.margin_right + 6.0;
+    let font_size = computed.tick_size;
+    let axis_color = Color::from(&computed.theme.axis_color);
+
+    for (i, series) in hp.series.iter().enumerate() {
+        if series.x.is_empty() || series.y.is_empty() { continue; }
+
+        let y_center_data = (n - i) as f64;
+        let y_center_px = computed.map_y(y_center_data);
+        let row_baseline_px = y_center_px + cell_h_px * 0.5;
+        let row_h_px = cell_h_px;
+
+        let pos_scale = pos_bw * hp.n_bands as f64;
+        let has_pos = series.y.iter().any(|&v| v > hp.baseline + 1e-12);
+        let has_neg = series.y.iter().any(|&v| v < hp.baseline - 1e-12);
+
+        let (pos_y, neg_y) = if has_pos && has_neg {
+            (row_baseline_px - row_h_px * 0.78, row_baseline_px - row_h_px * 0.22)
+        } else {
+            (row_baseline_px - row_h_px * 0.5, row_baseline_px - row_h_px * 0.5)
+        };
+
+        if has_pos {
+            let val_str = TickFormat::Auto.format(pos_scale);
+            if hp.show_sign_colors {
+                let (pr, pg, pb) = parse_hex_color(&series.pos_color);
+                let sign_color = Color::Rgb(pr, pg, pb);
+                scene.add(Primitive::Text {
+                    x: annot_x,
+                    y: pos_y,
+                    content: "+".to_string(),
+                    size: font_size,
+                    anchor: TextAnchor::Start,
+                    rotate: None,
+                    bold: false,
+                    color: Some(sign_color),
+                });
+                let char_w = font_size as f64 * 0.65;
+                scene.add(Primitive::Text {
+                    x: annot_x + char_w,
+                    y: pos_y,
+                    content: val_str,
+                    size: font_size,
+                    anchor: TextAnchor::Start,
+                    rotate: None,
+                    bold: false,
+                    color: Some(axis_color.clone()),
+                });
+            } else {
+                scene.add(Primitive::Text {
+                    x: annot_x,
+                    y: pos_y,
+                    content: format!("+{}", val_str),
+                    size: font_size,
+                    anchor: TextAnchor::Start,
+                    rotate: None,
+                    bold: false,
+                    color: Some(axis_color.clone()),
+                });
+            }
+        }
+
+        if has_neg {
+            let neg_scale = neg_bw * hp.n_bands as f64;
+            let val_str = TickFormat::Auto.format(neg_scale);
+            if hp.show_sign_colors {
+                let (nr, ng, nb) = parse_hex_color(&series.neg_color);
+                let sign_color = Color::Rgb(nr, ng, nb);
+                scene.add(Primitive::Text {
+                    x: annot_x,
+                    y: neg_y,
+                    content: "-".to_string(),
+                    size: font_size,
+                    anchor: TextAnchor::Start,
+                    rotate: None,
+                    bold: false,
+                    color: Some(sign_color),
+                });
+                let char_w = font_size as f64 * 0.65;
+                scene.add(Primitive::Text {
+                    x: annot_x + char_w,
+                    y: neg_y,
+                    content: val_str,
+                    size: font_size,
+                    anchor: TextAnchor::Start,
+                    rotate: None,
+                    bold: false,
+                    color: Some(axis_color.clone()),
+                });
+            } else {
+                scene.add(Primitive::Text {
+                    x: annot_x,
+                    y: neg_y,
+                    content: format!("-{}", val_str),
+                    size: font_size,
+                    anchor: TextAnchor::Start,
+                    rotate: None,
+                    bold: false,
+                    color: Some(axis_color.clone()),
+                });
+            }
+        }
+    }
+}
+
+/// Render a single [`HorizonPlot`] to a [`Scene`].
+pub fn render_horizon(hp: HorizonPlot, layout: Layout) -> Scene {
+    let plots = vec![Plot::Horizon(hp)];
     render_multiple(plots, layout)
 }

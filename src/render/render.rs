@@ -16414,7 +16414,7 @@ fn add_waffle(wp: &WafflePlot, scene: &mut Scene, computed: &ComputedLayout) {
     let inner = cell_px - 2.0 * pad;
     if inner <= 0.0 { return; }
 
-    for cell_idx in 0..n_cells {
+    for (cell_idx, assignment) in assignments.iter().enumerate().take(n_cells) {
         // Map linear cell index → (grid_row, grid_col)
         let (row, col) = match wp.fill_order {
             FillOrder::RowMajorTopLeft    => (cell_idx / wp.cols, cell_idx % wp.cols),
@@ -16426,8 +16426,8 @@ fn add_waffle(wp: &WafflePlot, scene: &mut Scene, computed: &ComputedLayout) {
         let cx = x0 + col as f64 * cell_px + cell_px * 0.5;
         let cy = y0 + row as f64 * cell_px + cell_px * 0.5;
 
-        let fill = Color::from(match assignments[cell_idx] {
-            Some(i) => wp.categories[i].color.as_str(),
+        let fill = Color::from(match assignment {
+            Some(i) => wp.categories[*i].color.as_str(),
             None    => wp.empty_color.as_str(),
         });
 

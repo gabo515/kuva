@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use crate::render::render_utils;
 use crate::render::plots::Plot;
+use crate::render::render::waffle_legend_label;
 use crate::render::annotations::{TextAnnotation, ReferenceLine, ShadedRegion};
 use crate::render::theme::Theme;
 use crate::render::palette::Palette;
@@ -895,6 +896,23 @@ impl Layout {
                     }
                 }
             }
+
+            if let Plot::Waffle(wp) = plot {
+                if wp.legend_label.is_some() {
+                    has_legend = true;
+                    let total: f64 = wp.categories.iter().map(|c| c.value).sum();
+                    let n_cells = wp.rows * wp.cols;
+                    // Use largest-remainder counts to compute annotated label lengths
+                    let counts = crate::render::render::waffle_largest_remainder(
+                        &wp.categories.iter().map(|c| c.value).collect::<Vec<_>>(),
+                        n_cells,
+                    );
+                    for (i, cat) in wp.categories.iter().enumerate() {
+                        let label = waffle_legend_label(cat, i, total, &counts, wp);
+                        max_label_len = max_label_len.max(label.len());
+                    }
+                }
+            }
         }
 
         // Save raw data range before padding (log scale needs it)
@@ -1083,6 +1101,35 @@ impl Layout {
                         let overhead = cl.margin_top + cl.margin_bottom;
                         layout.height = Some(rh * n as f64 + overhead);
                         break;
+                    }
+                }
+            }
+        }
+
+        // WafflePlot — auto-size canvas height to keep cells square.
+        // For wide grids (cols >> rows) the default 450px plot height would leave
+        // a large blank gap above and below the grid; here we shrink the canvas to
+        // match the height that the width-constrained cell size implies.
+        // Only applied when the user has not already set an explicit height.
+        if layout.height.is_none() {
+            for plot in plots.iter() {
+                if let Plot::Waffle(wp) = plot {
+                    if wp.rows > 0 && wp.cols > 0 {
+                        let cl = ComputedLayout::from_layout(&layout);
+                        let plot_w = cl.plot_width();
+                        // Cell size is constrained by width when cols > rows*(plot_w/plot_h)
+                        let cell_px = plot_w / wp.cols as f64;
+                        let natural_grid_h = cell_px * wp.rows as f64;
+                        let default_plot_h = cl.plot_height();
+                        // Only shrink — never expand beyond the default canvas height
+                        if natural_grid_h < default_plot_h {
+                            let overhead = cl.margin_top + cl.margin_bottom;
+                            // Add a modest bottom padding so the unit label (if any)
+                            // and the grid itself aren't flush against the canvas edge.
+                            let bottom_pad = if wp.unit_label.is_some() { 28.0 } else { 12.0 };
+                            layout.height = Some(natural_grid_h + overhead + bottom_pad);
+                        }
+                        break; // only the first WafflePlot drives the sizing
                     }
                 }
             }

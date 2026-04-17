@@ -54,6 +54,7 @@ use crate::plot::funnel::FunnelPlot;
 use crate::plot::rose::RosePlot;
 use crate::plot::calendar::CalendarPlot;
 use crate::plot::pyramid::PopulationPyramid;
+use crate::plot::waffle::WafflePlot;
 use crate::plot::legend::ColorBarInfo;
 use crate::render::render_utils;
 
@@ -115,6 +116,7 @@ pub enum Plot {
     Rose(RosePlot),
     Calendar(CalendarPlot),
     Pyramid(PopulationPyramid),
+    Waffle(WafflePlot),
 }
 
 impl From<ScatterPlot>    for Plot { fn from(p: ScatterPlot)    -> Self { Plot::Scatter(p) } }
@@ -173,6 +175,7 @@ impl From<FunnelPlot>      for Plot { fn from(p: FunnelPlot)      -> Self { Plot
 impl From<RosePlot>        for Plot { fn from(p: RosePlot)        -> Self { Plot::Rose(p) } }
 impl From<CalendarPlot>       for Plot { fn from(p: CalendarPlot)       -> Self { Plot::Calendar(p) } }
 impl From<PopulationPyramid>  for Plot { fn from(p: PopulationPyramid)  -> Self { Plot::Pyramid(p) } }
+impl From<WafflePlot>         for Plot { fn from(p: WafflePlot)         -> Self { Plot::Waffle(p) } }
 
 use crate::plot::plot3d::DataRanges3D;
 use crate::plot::colormap::ColorMap;
@@ -893,6 +896,7 @@ impl Plot {
                 if max_val <= 0.0 { return None; }
                 Some(((-max_val, max_val), (0.5, n as f64 + 0.5)))
             }
+            Plot::Waffle(_) => Some(((-1.0, 1.0), (-1.0, 1.0))),
             // Rendered in pixel space; dummy bounds satisfy Layout::auto_from_plots.
             Plot::Network(_) => Some(((0.0, 1.0), (0.0, 1.0))),
             Plot::Radar(_) => Some(((0.0, 1.0), (0.0, 1.0))),
@@ -988,6 +992,7 @@ impl Plot {
             Plot::Rose(rp) => rp.n_sectors() * rp.series.len().max(1) * 2 + rp.grid_lines * 2 + rp.n_sectors() + 20,
             Plot::Calendar(cp) => cp.data.len() + 100,
             Plot::Pyramid(pp) => pp.series.len() * pp.n_groups() * 4 + 20,
+            Plot::Waffle(wp) => wp.rows * wp.cols + 10,
             _ => 100,
         }
     }

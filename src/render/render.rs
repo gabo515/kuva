@@ -85,6 +85,7 @@ use crate::plot::calendar::{
     to_jd, from_jd, period_grid_pos, period_max_cols, dow_mon0,
 };
 use crate::plot::pyramid::{PopulationPyramid, PyramidMode};
+use crate::plot::waffle::{WafflePlot, WaffleCategory, FillOrder, CellShape};
 
 use crate::plot::Legend;
 use crate::plot::legend::{ColorBarInfo, LegendEntry, LegendGroup, LegendPosition, LegendShape};
@@ -8605,6 +8606,25 @@ pub fn collect_legend_entries(plots: &[Plot]) -> Vec<LegendEntry> {
                     }
                 }
             }
+            Plot::Waffle(wp) => {
+                if wp.legend_label.is_some() {
+                    let total_val: f64 = wp.categories.iter().map(|c| c.value).sum();
+                    let n_cells = wp.rows * wp.cols;
+                    let cell_counts = waffle_largest_remainder(
+                        &wp.categories.iter().map(|c| c.value).collect::<Vec<_>>(),
+                        n_cells,
+                    );
+                    for (i, cat) in wp.categories.iter().enumerate() {
+                        let label = waffle_legend_label(cat, i, total_val, &cell_counts, wp);
+                        entries.push(LegendEntry {
+                            label,
+                            color: cat.color.clone(),
+                            shape: LegendShape::Rect,
+                            dasharray: None,
+                        });
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -10412,7 +10432,7 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
             Plot::Pie(_) | Plot::UpSet(_) | Plot::Chord(_) | Plot::Sankey(_)
             | Plot::PhyloTree(_) | Plot::Synteny(_) | Plot::Polar(_) | Plot::Ternary(_)
             | Plot::Scatter3D(_) | Plot::Surface3D(_) | Plot::Clustermap(_) | Plot::Joint(_) | Plot::Venn(_) | Plot::Parallel(_)
-            | Plot::Mosaic(_) | Plot::Network(_) | Plot::Radar(_) | Plot::Treemap(_) | Plot::Sunburst(_) | Plot::Funnel(_) | Plot::Rose(_) | Plot::Calendar(_)));
+            | Plot::Mosaic(_) | Plot::Network(_) | Plot::Radar(_) | Plot::Treemap(_) | Plot::Sunburst(_) | Plot::Funnel(_) | Plot::Rose(_) | Plot::Calendar(_) | Plot::Waffle(_)));
         if !skip_axes_for_meta {
             scene.axis_meta = Some(AxisMeta {
                 x_min: computed.x_range.0,
@@ -10429,7 +10449,7 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
         }
     }
 
-    let skip_axes = plots.iter().all(|p| matches!(p, Plot::Pie(_) | Plot::UpSet(_) | Plot::Chord(_) | Plot::Sankey(_) | Plot::PhyloTree(_) | Plot::Synteny(_) | Plot::Polar(_) | Plot::Ternary(_) | Plot::DicePlot(_) | Plot::Scatter3D(_) | Plot::Surface3D(_) | Plot::Clustermap(_) | Plot::Joint(_) | Plot::Venn(_) | Plot::Parallel(_) | Plot::Mosaic(_) | Plot::Network(_) | Plot::Radar(_) | Plot::Treemap(_) | Plot::Sunburst(_) | Plot::Funnel(_) | Plot::Rose(_) | Plot::Calendar(_)));
+    let skip_axes = plots.iter().all(|p| matches!(p, Plot::Pie(_) | Plot::UpSet(_) | Plot::Chord(_) | Plot::Sankey(_) | Plot::PhyloTree(_) | Plot::Synteny(_) | Plot::Polar(_) | Plot::Ternary(_) | Plot::DicePlot(_) | Plot::Scatter3D(_) | Plot::Surface3D(_) | Plot::Clustermap(_) | Plot::Joint(_) | Plot::Venn(_) | Plot::Parallel(_) | Plot::Mosaic(_) | Plot::Network(_) | Plot::Radar(_) | Plot::Treemap(_) | Plot::Sunburst(_) | Plot::Funnel(_) | Plot::Rose(_) | Plot::Calendar(_) | Plot::Waffle(_)));
     if !skip_axes {
         add_axes_and_grid(&mut scene, &computed, &layout);
     }
@@ -10692,6 +10712,9 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
             }
             Plot::Pyramid(pp) => {
                 add_pyramid(pp, &mut scene, &computed);
+            }
+            Plot::Waffle(wp) => {
+                add_waffle(wp, &mut scene, &computed);
             }
         }
     }
@@ -16286,5 +16309,174 @@ fn add_pyramid(pp: &PopulationPyramid, scene: &mut Scene, computed: &ComputedLay
 /// Render a single [`PopulationPyramid`] to a [`Scene`].
 pub fn render_pyramid(pp: PopulationPyramid, layout: Layout) -> Scene {
     let plots = vec![Plot::Pyramid(pp)];
+    render_multiple(plots, layout)
+}
+
+// ─── WafflePlot ──────────────────────────────────────────────────────────────
+
+/// Allocate `total_cells` across `values` using the Largest Remainder
+/// (Hamilton) method.  Guarantees the returned counts sum exactly to
+/// `total_cells`.  Returns a `Vec<usize>` parallel to `values`.
+pub fn waffle_largest_remainder(values: &[f64], total_cells: usize) -> Vec<usize> {
+    if values.is_empty() || total_cells == 0 {
+        return vec![0; values.len()];
+    }
+    let total: f64 = values.iter().sum();
+    if total <= 0.0 {
+        return vec![0; values.len()];
+    }
+    let exact: Vec<f64> = values
+        .iter()
+        .map(|v| v / total * total_cells as f64)
+        .collect();
+    let mut floored: Vec<usize> = exact.iter().map(|v| *v as usize).collect();
+    let allocated: usize = floored.iter().sum();
+    let remainder = total_cells.saturating_sub(allocated);
+    // Collect (index, fractional part) pairs; break ties by index for determinism
+    let mut fracs: Vec<(usize, f64)> = exact
+        .iter()
+        .zip(floored.iter())
+        .enumerate()
+        .map(|(i, (e, f))| (i, e - *f as f64))
+        .collect();
+    fracs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(&b.0)));
+    for i in 0..remainder {
+        floored[fracs[i].0] += 1;
+    }
+    floored
+}
+
+/// Build the display label for a waffle legend entry, respecting
+/// `show_percents` and `show_counts` flags.
+pub fn waffle_legend_label(
+    cat: &WaffleCategory,
+    cat_idx: usize,
+    total_val: f64,
+    cell_counts: &[usize],
+    wp: &WafflePlot,
+) -> String {
+    let mut label = cat.label.clone();
+    let has_pct   = wp.show_percents && total_val > 0.0;
+    let has_count = wp.show_counts;
+    match (has_pct, has_count) {
+        (true, true) => {
+            let pct = cat.value / total_val * 100.0;
+            label = format!("{} ({} cells, {:.1}%)", label, cell_counts[cat_idx], pct);
+        }
+        (true, false) => {
+            let pct = cat.value / total_val * 100.0;
+            label = format!("{} ({:.1}%)", label, pct);
+        }
+        (false, true) => {
+            label = format!("{} ({} cells)", label, cell_counts[cat_idx]);
+        }
+        (false, false) => {}
+    }
+    label
+}
+
+fn add_waffle(wp: &WafflePlot, scene: &mut Scene, computed: &ComputedLayout) {
+    let n_cells = wp.rows * wp.cols;
+    if n_cells == 0 { return; }
+
+    // Assign cells using Largest Remainder rounding
+    let values: Vec<f64> = wp.categories.iter().map(|c| c.value).collect();
+    let cell_counts = waffle_largest_remainder(&values, n_cells);
+
+    // Build per-cell category index (None = background/empty)
+    let mut assignments: Vec<Option<usize>> = Vec::with_capacity(n_cells);
+    for (cat_idx, &count) in cell_counts.iter().enumerate() {
+        for _ in 0..count {
+            assignments.push(Some(cat_idx));
+        }
+    }
+    // Pad with empty cells if needed (should be rare due to LR, but be safe)
+    while assignments.len() < n_cells {
+        assignments.push(None);
+    }
+
+    // Compute cell pixel size — choose the largest size that keeps cells square
+    // and fits the full grid inside the plot area
+    let plot_w = computed.plot_width();
+    let plot_h = computed.plot_height();
+    if plot_w <= 0.0 || plot_h <= 0.0 { return; }
+
+    let cell_px = (plot_w / wp.cols as f64).min(plot_h / wp.rows as f64);
+    let grid_w  = cell_px * wp.cols as f64;
+    let grid_h  = cell_px * wp.rows as f64;
+
+    // Center grid inside plot area
+    let x0 = computed.margin_left + (plot_w - grid_w) * 0.5;
+    let y0 = computed.margin_top  + (plot_h - grid_h) * 0.5;
+
+    // Half-gap applied to each side of a cell
+    let pad = cell_px * wp.gap * 0.5;
+    let inner = cell_px - 2.0 * pad;
+    if inner <= 0.0 { return; }
+
+    for cell_idx in 0..n_cells {
+        // Map linear cell index → (grid_row, grid_col)
+        let (row, col) = match wp.fill_order {
+            FillOrder::RowMajorTopLeft    => (cell_idx / wp.cols, cell_idx % wp.cols),
+            FillOrder::RowMajorBottomLeft => (wp.rows - 1 - cell_idx / wp.cols, cell_idx % wp.cols),
+            FillOrder::ColMajorTopLeft    => (cell_idx % wp.rows, cell_idx / wp.rows),
+            FillOrder::ColMajorBottomLeft => (wp.rows - 1 - cell_idx % wp.rows, cell_idx / wp.rows),
+        };
+
+        let cx = x0 + col as f64 * cell_px + cell_px * 0.5;
+        let cy = y0 + row as f64 * cell_px + cell_px * 0.5;
+
+        let fill = Color::from(match assignments[cell_idx] {
+            Some(i) => wp.categories[i].color.as_str(),
+            None    => wp.empty_color.as_str(),
+        });
+
+        match wp.shape {
+            CellShape::Square => {
+                scene.add(Primitive::Rect {
+                    x: cx - cell_px * 0.5 + pad,
+                    y: cy - cell_px * 0.5 + pad,
+                    width: inner,
+                    height: inner,
+                    fill,
+                    stroke: None,
+                    stroke_width: None,
+                    opacity: None,
+                });
+            }
+            CellShape::Circle => {
+                scene.add(Primitive::Circle {
+                    cx,
+                    cy,
+                    r: inner * 0.5,
+                    fill,
+                    fill_opacity: None,
+                    stroke: None,
+                    stroke_width: None,
+                });
+            }
+        }
+    }
+
+    // Optional unit annotation below the grid
+    if let Some(ref label) = wp.unit_label {
+        let label_y = y0 + grid_h + computed.body_size as f64 + 4.0;
+        let label_x = x0 + grid_w * 0.5;
+        scene.add(Primitive::Text {
+            x: label_x,
+            y: label_y,
+            content: label.clone(),
+            size: computed.body_size,
+            anchor: TextAnchor::Middle,
+            rotate: None,
+            bold: false,
+            color: Some(Color::from("#888888")),
+        });
+    }
+}
+
+/// Render a single [`WafflePlot`] to a [`Scene`].
+pub fn render_waffle(wp: WafflePlot, layout: Layout) -> Scene {
+    let plots = vec![Plot::Waffle(wp)];
     render_multiple(plots, layout)
 }

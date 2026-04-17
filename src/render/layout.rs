@@ -721,6 +721,16 @@ impl Layout {
                 }
             }
 
+            if let Plot::Pr(pr) = plot {
+                if pr.legend_label.is_some() {
+                    has_legend = true;
+                    for g in &pr.groups {
+                        // Label + "  (AUC-PR = 0.xxx)" suffix = 18 chars
+                        max_label_len = max_label_len.max(g.label.len() + 18);
+                    }
+                }
+            }
+
             if let Plot::Slope(sp) = plot {
                 // Reversed: points[0] at top; y=n is the largest y value (maps to top)
                 y_labels = Some(sp.points.iter().rev().map(|p| p.label.clone()).collect());

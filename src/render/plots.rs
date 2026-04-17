@@ -38,6 +38,7 @@ use crate::plot::raincloud::RaincloudPlot;
 use crate::plot::lollipop::LollipopPlot;
 use crate::plot::survival::SurvivalPlot;
 use crate::plot::roc::RocPlot;
+use crate::plot::pr::PrPlot;
 use crate::plot::slope::SlopePlot;
 use crate::plot::venn::VennPlot;
 use crate::plot::parallel::ParallelPlot;
@@ -100,6 +101,7 @@ pub enum Plot {
     Lollipop(LollipopPlot),
     Survival(SurvivalPlot),
     Roc(RocPlot),
+    Pr(PrPlot),
     Slope(SlopePlot),
     Venn(VennPlot),
     Parallel(ParallelPlot),
@@ -160,6 +162,7 @@ impl From<RaincloudPlot> for Plot { fn from(p: RaincloudPlot) -> Self { Plot::Ra
 impl From<LollipopPlot>  for Plot { fn from(p: LollipopPlot)  -> Self { Plot::Lollipop(p) } }
 impl From<SurvivalPlot>  for Plot { fn from(p: SurvivalPlot)  -> Self { Plot::Survival(p) } }
 impl From<RocPlot>       for Plot { fn from(p: RocPlot)       -> Self { Plot::Roc(p) } }
+impl From<PrPlot>        for Plot { fn from(p: PrPlot)        -> Self { Plot::Pr(p) } }
 impl From<SlopePlot>     for Plot { fn from(p: SlopePlot)     -> Self { Plot::Slope(p) } }
 impl From<VennPlot>        for Plot { fn from(p: VennPlot)        -> Self { Plot::Venn(p) } }
 impl From<ParallelPlot>    for Plot { fn from(p: ParallelPlot)    -> Self { Plot::Parallel(p) } }
@@ -254,6 +257,7 @@ impl Plot {
             Plot::Lollipop(l) => l.color = color.into(),
             Plot::Survival(s) => s.color = color.into(),
             Plot::Roc(r) => r.color = color.into(),
+            Plot::Pr(r) => r.color = color.into(),
             Plot::Slope(s) => s.color = color.into(),
             Plot::Parallel(p) => p.color = color.into(),
             Plot::Ecdf(e) => e.color = color.into(),
@@ -800,6 +804,7 @@ impl Plot {
                 Some(((x_min, x_max), (y_min, y_max)))
             }
             Plot::Roc(_) => Some(((0.0, 1.0), (0.0, 1.0))),
+            Plot::Pr(_) => Some(((0.0, 1.0), (0.0, 1.0))),
             Plot::Slope(s) => {
                 let n = s.points.len();
                 if n == 0 { return None; }
@@ -967,6 +972,9 @@ impl Plot {
             Plot::Survival(sp) => sp.groups.iter().map(|g| g.times.len() * 3 + 20).sum(),
             Plot::Lollipop(lp) => lp.points.len() * 2 + lp.domains.len() * 2 + 5,
             Plot::Roc(r) => r.groups.iter().map(|g| {
+                g.raw_predictions.as_ref().map(|p| p.len()).unwrap_or(100) * 2 + 50
+            }).sum::<usize>() + 10,
+            Plot::Pr(r) => r.groups.iter().map(|g| {
                 g.raw_predictions.as_ref().map(|p| p.len()).unwrap_or(100) * 2 + 50
             }).sum::<usize>() + 10,
             Plot::Slope(s) => s.points.len() * 5 + 10,

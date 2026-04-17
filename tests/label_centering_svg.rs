@@ -43,7 +43,9 @@ fn test_title_centred_with_legend() {
         .with_x_label("MyLabel");
 
     let computed = ComputedLayout::from_layout(&layout);
-    let expected_x = computed.margin_left + computed.plot_width() / 2.0;
+    // Title centers on full canvas width; x-label centers on plot area.
+    let expected_title_x = computed.width / 2.0;
+    let expected_label_x = computed.margin_left + computed.plot_width() / 2.0;
 
     let scene = render_multiple(plots, layout);
     let svg = SvgBackend.render_scene(&scene);
@@ -55,12 +57,12 @@ fn test_title_centred_with_legend() {
         .expect("x-label element not found in SVG");
 
     assert!(
-        (title_x - expected_x).abs() < 1.0,
-        "title x={title_x:.1} should equal margin_left+plot_width/2={expected_x:.1}"
+        (title_x - expected_title_x).abs() < 1.0,
+        "title x={title_x:.1} should equal canvas_width/2={expected_title_x:.1}"
     );
     assert!(
-        (label_x - expected_x).abs() < 1.0,
-        "x-label x={label_x:.1} should equal margin_left+plot_width/2={expected_x:.1}"
+        (label_x - expected_label_x).abs() < 1.0,
+        "x-label x={label_x:.1} should equal margin_left+plot_width/2={expected_label_x:.1}"
     );
 }
 
@@ -82,7 +84,9 @@ fn test_title_centred_twin_y() {
         .with_x_label("X");
 
     let computed = ComputedLayout::from_layout(&layout);
-    let expected_x = computed.margin_left + computed.plot_width() / 2.0;
+    // Title centers on full canvas width; x-label centers on plot area.
+    let expected_title_x = computed.width / 2.0;
+    let expected_label_x = computed.margin_left + computed.plot_width() / 2.0;
 
     let scene = render_twin_y(primary, secondary, layout);
     let svg = SvgBackend.render_scene(&scene);
@@ -94,12 +98,12 @@ fn test_title_centred_twin_y() {
         .expect("x-label element not found in SVG");
 
     assert!(
-        (title_x - expected_x).abs() < 1.0,
-        "twin-y title x={title_x:.1} should equal margin_left+plot_width/2={expected_x:.1}"
+        (title_x - expected_title_x).abs() < 1.0,
+        "twin-y title x={title_x:.1} should equal canvas_width/2={expected_title_x:.1}"
     );
     assert!(
-        (label_x - expected_x).abs() < 1.0,
-        "twin-y x-label x={label_x:.1} should equal margin_left+plot_width/2={expected_x:.1}"
+        (label_x - expected_label_x).abs() < 1.0,
+        "twin-y x-label x={label_x:.1} should equal margin_left+plot_width/2={expected_label_x:.1}"
     );
 }
 
@@ -135,18 +139,17 @@ fn test_title_centred_pie_outside_labels() {
         after[..end].parse().unwrap()
     };
 
-    // After widening: plot_width = canvas_width - margin_left - margin_right
-    // expected title x = margin_left + plot_width / 2
-    //                  = (canvas_width + margin_left - margin_right) / 2
-    let expected_x = (canvas_width + margin_left - margin_right) / 2.0;
+    // Title centers on full canvas width regardless of legend/pie-widening margins.
+    let expected_x = canvas_width / 2.0;
+    let _ = (margin_left, margin_right); // retained for context
 
     let title_x = extract_text_x(&svg, "PieTitle")
         .expect("title element not found in SVG");
 
     assert!(
         (title_x - expected_x).abs() < 1.0,
-        "pie title x={title_x:.1} should equal margin_left+plot_width/2={expected_x:.1} \
-         (canvas={canvas_width:.1}, ml={margin_left:.1}, mr={margin_right:.1})"
+        "pie title x={title_x:.1} should equal canvas_width/2={expected_x:.1} \
+         (canvas={canvas_width:.1})"
     );
 }
 

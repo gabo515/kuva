@@ -69,6 +69,7 @@ use crate::plot::surface3d::Surface3DPlot;
 use crate::plot::clustermap::{Clustermap, ClustermapNorm};
 use crate::plot::raincloud::RaincloudPlot;
 use crate::plot::roc::RocPlot;
+use crate::plot::pr::PrPlot;
 use crate::plot::slope::SlopePlot;
 use crate::plot::venn::VennPlot;
 use crate::plot::parallel::{ParallelPlot, ParallelRow};
@@ -3042,6 +3043,90 @@ fn add_roc(roc: &RocPlot, scene: &mut Scene, computed: &ComputedLayout) {
 /// Render a single ROC plot.
 pub fn render_roc(roc: RocPlot, layout: Layout) -> Scene {
     let plots = vec![crate::render::plots::Plot::Roc(roc)];
+    render_multiple(plots, layout)
+}
+
+// ── PrPlot ────────────────────────────────────────────────────────────────────
+
+fn add_pr(pr: &PrPlot, scene: &mut Scene, computed: &ComputedLayout) {
+    use crate::plot::pr::{compute_pr_group, PrPoint};
+    use crate::render::palette::Palette;
+
+    let cat10 = Palette::category10();
+    let n_groups = pr.groups.len();
+
+    // Compute all groups first so we know each group's prevalence for the baseline.
+    let computed_groups: Vec<_> = pr.groups.iter().map(compute_pr_group).collect();
+
+    // Draw baseline: horizontal dashed line at the average prevalence of all groups.
+    if pr.show_baseline {
+        // Use the first group's prevalence (or mean if multiple).
+        let prevalence = if computed_groups.is_empty() {
+            0.5
+        } else {
+            computed_groups.iter().map(|g| g.prevalence).sum::<f64>() / computed_groups.len() as f64
+        };
+        scene.add(Primitive::Line {
+            x1: computed.map_x(0.0),
+            y1: computed.map_y(prevalence),
+            x2: computed.map_x(1.0),
+            y2: computed.map_y(prevalence),
+            stroke: Color::from(&pr.baseline_color),
+            stroke_width: computed.axis_stroke_width,
+            stroke_dasharray: Some(pr.baseline_dasharray.clone()),
+        });
+    }
+
+    for (i, (group, rc)) in pr.groups.iter().zip(computed_groups.iter()).enumerate() {
+        let color_str: &str = group.color.as_deref().unwrap_or_else(|| {
+            if n_groups == 1 { &pr.color } else { &cat10[i % cat10.len()] }
+        });
+        let color = Color::from(color_str);
+
+        if rc.points.is_empty() { continue; }
+
+        // ── PR curve path ─────────────────────────────────────────────────────
+        let pts: Vec<(f64, f64)> = rc.points.iter().map(|pt: &PrPoint| {
+            (computed.map_x(pt.recall), computed.map_y(pt.precision))
+        }).collect();
+
+        if !pts.is_empty() {
+            let mut d = format!("M {},{}", round2(pts[0].0), round2(pts[0].1));
+            for &(x, y) in pts.iter().skip(1) {
+                d.push_str(&format!(" L {},{}", round2(x), round2(y)));
+            }
+            scene.add(Primitive::Path(Box::new(PathData {
+                d,
+                fill: None,
+                stroke: color.clone(),
+                stroke_width: group.line_width,
+                opacity: None,
+                stroke_dasharray: group.dasharray.clone(),
+            })));
+        }
+
+        // ── Optimal F1 point marker ───────────────────────────────────────────
+        if let Some(opt_idx) = rc.optimal_idx {
+            if let Some(opt_pt) = rc.points.get(opt_idx) {
+                let cx = computed.map_x(opt_pt.recall);
+                let cy = computed.map_y(opt_pt.precision);
+                scene.add(Primitive::Circle {
+                    cx,
+                    cy,
+                    r: 5.0 * computed.axis_stroke_width,
+                    fill: color.clone(),
+                    fill_opacity: None,
+                    stroke: Some(Color::from("white")),
+                    stroke_width: Some(computed.axis_stroke_width),
+                });
+            }
+        }
+    }
+}
+
+/// Render a single Precision-Recall plot.
+pub fn render_pr(pr: PrPlot, layout: Layout) -> Scene {
+    let plots = vec![crate::render::plots::Plot::Pr(pr)];
     render_multiple(plots, layout)
 }
 
@@ -8356,6 +8441,32 @@ pub fn collect_legend_entries(plots: &[Plot]) -> Vec<LegendEntry> {
                     }
                 }
             }
+            Plot::Pr(pr) => {
+                if pr.legend_label.is_some() {
+                    let cat10 = crate::render::palette::Palette::category10();
+                    for (i, group) in pr.groups.iter().enumerate() {
+                        let color = group.color.clone().unwrap_or_else(|| {
+                            if pr.groups.len() == 1 {
+                                pr.color.clone()
+                            } else {
+                                cat10[i % cat10.len()].to_string()
+                            }
+                        });
+                        let computed_g = crate::plot::pr::compute_pr_group(group);
+                        let auc_str = if group.show_auc_label {
+                            format!("  (AUC-PR = {:.3})", computed_g.auc)
+                        } else {
+                            String::new()
+                        };
+                        entries.push(LegendEntry {
+                            label: format!("{}{}", group.label, auc_str),
+                            color,
+                            shape: LegendShape::Line,
+                            dasharray: group.dasharray.clone(),
+                        });
+                    }
+                }
+            }
             Plot::Joint(jp) => {
                 use crate::render::palette::Palette;
                 let cat10 = Palette::category10();
@@ -10674,6 +10785,9 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
             }
             Plot::Roc(r) => {
                 add_roc(r, &mut scene, &computed);
+            }
+            Plot::Pr(r) => {
+                add_pr(r, &mut scene, &computed);
             }
             Plot::Slope(s) => {
                 add_slope(s, &mut scene, &computed);

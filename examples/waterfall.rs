@@ -69,7 +69,8 @@ fn totals() {
     let plots = vec![Plot::Waterfall(wf)];
     let layout = Layout::auto_from_plots(&plots)
         .with_title("Income Statement")
-        .with_y_label("USD (thousands)");
+        .with_y_label("USD (thousands)")
+        .with_x_tick_rotate(-45.0);
 
     let svg = SvgBackend.render_scene(&render_multiple(plots, layout));
     std::fs::write(format!("{OUT}/totals.svg"), svg).unwrap();

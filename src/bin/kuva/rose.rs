@@ -144,7 +144,7 @@ pub fn run(args: RoseArgs) -> Result<(), String> {
         // Simple single-series
         let labels_col = table.col_str(&label_col)?;
         let values_col = table.col_f64(&value_col)?;
-        for (label, value) in labels_col.into_iter().zip(values_col.into_iter()) {
+        for (label, value) in labels_col.into_iter().zip(values_col) {
             plot = plot.with_slice(label, value);
         }
     }

@@ -199,10 +199,10 @@ impl DotPlot {
         self.y_categories = y_cats.clone();
 
         for (y_cat, (size_row, color_row)) in y_cats.iter()
-            .zip(sizes.into_iter().zip(colors.into_iter()))
+            .zip(sizes.into_iter().zip(colors))
         {
             for (col_j, (size, color)) in size_row.into_iter()
-                .zip(color_row.into_iter())
+                .zip(color_row)
                 .enumerate()
             {
                 if let Some(x_cat) = x_cats.get(col_j) {

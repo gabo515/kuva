@@ -218,7 +218,7 @@ impl CandlestickPlot {
         T: Into<f64>,
         I: IntoIterator<Item = T>,
     {
-        for (candle, vol) in self.candles.iter_mut().zip(volumes.into_iter()) {
+        for (candle, vol) in self.candles.iter_mut().zip(volumes) {
             candle.volume = Some(vol.into());
         }
         self

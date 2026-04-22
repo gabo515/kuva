@@ -7861,6 +7861,7 @@ fn add_dot_stacked_legends(
 }
 
 /// Collect legend entries from a slice of plots.
+#[allow(clippy::collapsible_match)]
 pub fn collect_legend_entries(plots: &[Plot]) -> Vec<LegendEntry> {
     let mut entries = Vec::new();
     for plot in plots {

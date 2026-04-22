@@ -506,7 +506,7 @@ impl NetworkPlot {
         }
 
         // Sort components by size (largest first) for better packing.
-        comp_layouts.sort_by(|a, b| b.node_count.cmp(&a.node_count));
+        comp_layouts.sort_by_key(|b| std::cmp::Reverse(b.node_count));
 
         // Tile: allocate horizontal width proportional to sqrt(node_count).
         let total_weight: f64 = comp_layouts.iter()

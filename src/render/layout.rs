@@ -1663,6 +1663,7 @@ impl Layout {
                 y2_max = y2_max.max(yhi);
             }
             // Collect legend label lengths so legend_width covers secondary labels too.
+            #[allow(clippy::collapsible_match)]
             match plot {
                 Plot::Scatter(p)     => if let Some(l) = &p.legend_label { max_secondary_label = max_secondary_label.max(l.len()); }
                 Plot::Line(p)        => if let Some(l) = &p.legend_label { max_secondary_label = max_secondary_label.max(l.len()); }
@@ -1674,7 +1675,9 @@ impl Layout {
                 Plot::Strip(p)       => if p.legend_label.is_some() {
                     if p.group_colors.is_some() {
                         for g in &p.groups { max_secondary_label = max_secondary_label.max(g.label.len()); }
-                    } else if let Some(l) = &p.legend_label { max_secondary_label = max_secondary_label.max(l.len()); }
+                    } else if let Some(l) = &p.legend_label {
+                        max_secondary_label = max_secondary_label.max(l.len());
+                    }
                 }
                 Plot::Waterfall(p)   => if let Some(l) = &p.legend_label { max_secondary_label = max_secondary_label.max(l.len()); }
                 Plot::Candlestick(p) => if let Some(l) = &p.legend_label { max_secondary_label = max_secondary_label.max(l.len()); }

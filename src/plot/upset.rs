@@ -310,7 +310,7 @@ impl UpSetPlot {
         let mut sorted: Vec<&UpSetIntersection> = self.intersections.iter().collect();
         match self.sort {
             UpSetSort::ByFrequency => {
-                sorted.sort_by(|a, b| b.count.cmp(&a.count));
+                sorted.sort_by_key(|b| std::cmp::Reverse(b.count));
             }
             UpSetSort::ByDegree => {
                 sorted.sort_by(|a, b| {

@@ -10457,6 +10457,7 @@ pub fn render_sankey(sankey: &SankeyPlot, layout: &Layout) -> Scene {
 pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
     // Auto-assign palette colors to single-color plot types
     let mut plots = plots;
+    let mut layout = layout;
     if let Some(ref palette) = layout.palette {
         let mut color_idx = 0;
         for plot in plots.iter_mut() {
@@ -10636,6 +10637,13 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
         let max_y_px = dp.y_categories.iter().map(|s| s.len()).max().unwrap_or(4) as f64 * ts * 0.6;
         let y_label_x = (gx0 - tl - tlm - max_y_px - 6.0 - ls * 0.5).max(ls * 0.5 + 4.0);
         computed.dice_y_label_pos = Some((y_label_x, gy0 + gh / 2.0));
+    }
+
+    // JointPlot draws its own x/y labels centred on the scatter axis inside add_jointplot;
+    // suppress them here so add_labels_and_title doesn't draw a second misaligned copy.
+    if plots.iter().any(|p| matches!(p, Plot::Joint(_))) {
+        layout.x_label = None;
+        layout.y_label = None;
     }
 
     add_labels_and_title(&mut scene, &computed, &layout);
@@ -12422,16 +12430,26 @@ fn add_jointplot(
     let top_gap   = if jp.show_top   { jp.marginal_gap  } else { 0.0 };
     let right_gap = if jp.show_right { jp.marginal_gap  } else { 0.0 };
 
-    let scatter_canvas_w = width  - right_w - right_gap;
-    let scatter_canvas_h = height - title_offset_y - top_h - top_gap;
-    let scatter_offset_y = title_offset_y + top_h + top_gap;
-
     let (x_min, x_max) = jp.x_range();
     let (y_min, y_max) = jp.y_range();
 
     let has_legend = jp.groups.iter().any(|g| g.scatter.legend_label.is_some());
-    let legend_in_scatter = (show_legend || has_legend) && !jp.show_right;
     let legend_after_right = has_legend && jp.show_right;
+    let legend_in_scatter  = (show_legend || has_legend) && !jp.show_right;
+
+    // In figure context the cell width is fixed, so we must carve space for every
+    // component upfront: scatter | right_gap | right_marginal | legend_gap | legend.
+    // In standalone context render_jointplot already extended scene_width, so no
+    // reservation is needed here.
+    let legend_reserve = if legend_after_right && !draw_scatter_labels {
+        legend_width + 10.0
+    } else {
+        0.0
+    };
+
+    let scatter_canvas_w = width  - right_w - right_gap - legend_reserve;
+    let scatter_canvas_h = height - title_offset_y - top_h - top_gap;
+    let scatter_offset_y = title_offset_y + top_h + top_gap;
 
     let scatter_plots: Vec<Plot> = jp.groups.iter().enumerate().map(|(gi, g)| {
         let mut sp = g.scatter.clone();
@@ -12458,6 +12476,39 @@ fn add_jointplot(
     let scatter_scene = render_multiple(scatter_plots, build_scatter_layout());
 
     let data_right = scatter_computed.margin_left + scatter_computed.plot_width();
+
+    // In figure context, draw x/y labels ourselves centred on the scatter axis.
+    // (The outer render_multiple clears layout.x/y_label so add_labels_and_title skips them.)
+    if !draw_scatter_labels {
+        let ls = scatter_computed.label_size as f64;
+        if let Some(ref xl) = jp.x_label {
+            scene.add(Primitive::Text {
+                x: scatter_computed.margin_left + scatter_computed.plot_width() / 2.0,
+                y: computed.height - ls * 0.5,
+                content: xl.clone(),
+                size: scatter_computed.label_size,
+                anchor: TextAnchor::Middle,
+                rotate: None,
+                bold: false,
+                color: None,
+            });
+        }
+        if let Some(ref yl) = jp.y_label {
+            let yl_x = (scatter_computed.margin_left
+                - 8.0 - scatter_computed.y_tick_label_px - 5.0 - ls * 0.5)
+                .max(ls * 0.5 + 8.0);
+            scene.add(Primitive::Text {
+                x: yl_x,
+                y: scatter_offset_y + scatter_canvas_h / 2.0,
+                content: yl.clone(),
+                size: scatter_computed.label_size,
+                anchor: TextAnchor::Middle,
+                rotate: Some(-90.0),
+                bold: false,
+                color: None,
+            });
+        }
+    }
 
     // Insert scatter sub-scene via SVG translate group
     scene.add(Primitive::GroupStart {

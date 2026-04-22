@@ -10772,7 +10772,8 @@ pub fn render_multiple(plots: Vec<Plot>, layout: Layout) -> Scene {
                 add_clustermap(c, &mut scene, &computed);
             }
             Plot::Joint(jp) => {
-                add_jointplot(jp, &mut scene, &computed, 0.0, computed.legend_width, layout.show_legend);
+                let title_h = if layout.title.is_some() { 35.0 } else { 0.0 };
+                add_jointplot(jp, &mut scene, &computed, title_h, computed.legend_width, layout.show_legend, false);
             }
             Plot::Raincloud(r) => {
                 add_raincloud(r, &mut scene, &computed);
@@ -12408,6 +12409,7 @@ fn add_jointplot(
     title_offset_y: f64,
     legend_width: f64,
     show_legend: bool,
+    draw_scatter_labels: bool,
 ) {
     use crate::render::palette::Palette;
 
@@ -12443,8 +12445,10 @@ fn add_jointplot(
             .with_width(scatter_canvas_w)
             .with_height(scatter_canvas_h)
             .with_theme(computed.theme.clone());
-        if let Some(ref xl) = jp.x_label { sl = sl.with_x_label(xl.clone()); }
-        if let Some(ref yl) = jp.y_label { sl = sl.with_y_label(yl.clone()); }
+        if draw_scatter_labels {
+            if let Some(ref xl) = jp.x_label { sl = sl.with_x_label(xl.clone()); }
+            if let Some(ref yl) = jp.y_label { sl = sl.with_y_label(yl.clone()); }
+        }
         if legend_in_scatter { sl.show_legend = true; }
         sl
     };
@@ -12592,7 +12596,7 @@ pub fn render_jointplot(jp: crate::plot::jointplot::JointPlot, layout: Layout) -
         .with_theme(layout.theme.clone());
     let computed = ComputedLayout::from_layout(&stub_layout);
 
-    add_jointplot(&jp, &mut scene, &computed, title_h, layout.legend_width, layout.show_legend);
+    add_jointplot(&jp, &mut scene, &computed, title_h, layout.legend_width, layout.show_legend, true);
 
     scene
 }
@@ -15975,7 +15979,6 @@ fn add_calendar(cp: &CalendarPlot, scene: &mut Scene, computed: &ComputedLayout)
     if periods.is_empty() { return; }
 
     let sunday_start = matches!(cp.week_start, WeekStart::Sunday);
-    let pitch = cp.cell_size + cp.cell_gap;
     // Reserve left margin wide enough for the longest period label (or day-of-week labels).
     let max_label_len = periods.iter().map(|(l, _, _)| l.chars().count()).max().unwrap_or(4);
     let day_label_w: f64 = if cp.show_day_labels {
@@ -15985,8 +15988,9 @@ fn add_calendar(cp: &CalendarPlot, scene: &mut Scene, computed: &ComputedLayout)
     };
     let month_label_h: f64 = if cp.show_month_labels { 16.0 } else { 0.0 };
     let period_label_h: f64 = 16.0;
-    let grid_h = 7.0 * pitch;
     let period_gap = 14.0;
+    let np = periods.len() as f64;
+    let legend_h = if cp.show_legend { 50.0 } else { 0.0 };
 
     // Maximum columns across all periods (so all rows have the same width)
     let max_cols: u32 = periods.iter().map(|(_, start, end)| {
@@ -15997,6 +16001,23 @@ fn add_calendar(cp: &CalendarPlot, scene: &mut Scene, computed: &ComputedLayout)
         };
         period_max_cols(*start, *end, sdow)
     }).max().unwrap_or(53).max(1);
+
+    // Scale cell_size down if the natural size would overflow the canvas so the
+    // calendar fits its cell the same way every other plot scales to its bounds.
+    let margin = 16.0; // 8 px each side
+    let avail_w = (computed.width  - day_label_w - margin).max(1.0);
+    let avail_h_per_period = ((computed.height
+        - np * (period_label_h + month_label_h)
+        - (np - 1.0) * period_gap
+        - legend_h
+        - margin) / np).max(1.0);
+    let max_pitch_w = avail_w / max_cols as f64;
+    let max_pitch_h = avail_h_per_period / 7.0;
+    let effective_cell_size = cp.cell_size
+        .min((max_pitch_w.min(max_pitch_h) - cp.cell_gap).max(1.0));
+
+    let pitch = effective_cell_size + cp.cell_gap;
+    let grid_h = 7.0 * pitch;
 
     // Compute value range for color mapping.
     // Always floor at 0: calendar values are non-negative activity counts, and
@@ -16015,8 +16036,6 @@ fn add_calendar(cp: &CalendarPlot, scene: &mut Scene, computed: &ComputedLayout)
     let v_range = (v_max - v_min).max(f64::EPSILON);
 
     let grid_w = max_cols as f64 * pitch;
-    let np = periods.len() as f64;
-    let legend_h = if cp.show_legend { 50.0 } else { 0.0 };
     let total_content_w = day_label_w + grid_w;
     let total_content_h = np * (period_label_h + month_label_h + grid_h)
         + (np - 1.0) * period_gap + legend_h;

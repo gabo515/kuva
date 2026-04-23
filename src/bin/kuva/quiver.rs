@@ -9,6 +9,24 @@ use crate::data::{ColSpec, DataTable, InputArgs, parse_colormap};
 use crate::layout_args::{BaseArgs, AxisArgs, apply_base_args, apply_axis_args};
 use crate::output::write_output;
 
+#[derive(clap::ValueEnum, Clone, Default, Debug)]
+pub enum CliPivot {
+    #[default]
+    Tail,
+    Middle,
+    Tip,
+}
+
+impl From<CliPivot> for QuiverPivot {
+    fn from(p: CliPivot) -> Self {
+        match p {
+            CliPivot::Tail   => QuiverPivot::Tail,
+            CliPivot::Middle => QuiverPivot::Middle,
+            CliPivot::Tip    => QuiverPivot::Tip,
+        }
+    }
+}
+
 /// Quiver plot — 2-D vector field rendered as arrows.
 #[derive(Args, Debug)]
 pub struct QuiverArgs {
@@ -71,8 +89,8 @@ pub struct QuiverArgs {
     pub tight_bounds: bool,
 
     /// Where (x, y) sits on each arrow: `tail` (default), `middle`, or `tip`.
-    #[arg(long, value_parser = ["tail", "middle", "tip"])]
-    pub pivot: Option<String>,
+    #[arg(long, value_enum)]
+    pub pivot: Option<CliPivot>,
 
     #[command(flatten)]
     pub input: InputArgs,
@@ -109,25 +127,17 @@ pub fn run(args: QuiverArgs) -> Result<(), String> {
         ));
     }
 
-    let mut plot = QuiverPlot::new();
-    for (((x, y), u), v) in xs.iter().zip(ys.iter()).zip(us.iter()).zip(vs.iter()) {
-        plot = plot.with_arrow(*x, *y, *u, *v);
-    }
+    let mut plot = QuiverPlot::new().with_arrows(
+        xs.iter().zip(&ys).zip(&us).zip(&vs)
+            .map(|(((x, y), u), v)| (*x, *y, *u, *v))
+    );
 
     if let Some(c) = args.color { plot = plot.with_color(c); }
     if let Some(s) = args.arrow_scale { plot = plot.with_scale(s); }
     if let Some(f) = args.auto_scale { plot = plot.with_auto_scale(f); }
     if let Some(w) = args.shaft_width { plot = plot.with_shaft_width(w); }
-
-    // If either dimension is passed explicitly, pin both to pixel values
-    // (the unspecified one falls back to the proportional aspect at that length).
-    if args.head_length.is_some() || args.head_width.is_some() {
-        // Baseline proportional values at the current default aspect so the
-        // user only has to set one flag if they want to tune one dimension.
-        let default_len = args.head_length.unwrap_or(10.0);
-        let default_w = args.head_width.unwrap_or(default_len * plot.head_aspect);
-        plot = plot.with_head(default_len, default_w);
-    }
+    if let Some(l) = args.head_length { plot = plot.with_head_length(l); }
+    if let Some(w) = args.head_width { plot = plot.with_head_width(w); }
 
     if let Some(name) = args.colormap {
         plot = plot.with_color_map(parse_colormap(&name));
@@ -137,15 +147,7 @@ pub fn run(args: QuiverArgs) -> Result<(), String> {
     }
     if let Some(s) = args.legend { plot = plot.with_legend(s); }
     if args.tight_bounds { plot = plot.with_tight_bounds(); }
-    if let Some(name) = args.pivot {
-        let pivot = match name.as_str() {
-            "tail"   => QuiverPivot::Tail,
-            "middle" => QuiverPivot::Middle,
-            "tip"    => QuiverPivot::Tip,
-            _ => unreachable!("clap value_parser guards the variants"),
-        };
-        plot = plot.with_pivot(pivot);
-    }
+    if let Some(p) = args.pivot { plot = plot.with_pivot(p.into()); }
 
     let plots = vec![Plot::Quiver(plot)];
     let layout = Layout::auto_from_plots(&plots);

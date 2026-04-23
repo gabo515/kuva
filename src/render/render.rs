@@ -17015,6 +17015,7 @@ pub fn render_horizon(hp: HorizonPlot, layout: Layout) -> Scene {
 fn add_quiver(q: &crate::plot::quiver::QuiverPlot, scene: &mut Scene, computed: &ComputedLayout) {
     if q.arrows.is_empty() { return; }
 
+    let scale = q.effective_scale();
     let (mag_min, mag_max) = q.magnitude_extent();
     let (c_min, c_max) = q.color_range.unwrap_or((mag_min, mag_max));
     let c_span = (c_max - c_min).max(f64::EPSILON);
@@ -17043,7 +17044,7 @@ fn add_quiver(q: &crate::plot::quiver::QuiverPlot, scene: &mut Scene, computed: 
     }
 
     for arrow in &q.arrows {
-        let ((tx, ty), (px, py)) = q.endpoints(arrow);
+        let ((tx, ty), (px, py)) = q.endpoints_with_scale(arrow, scale);
         let tail_x = computed.map_x(tx);
         let tail_y = computed.map_y(ty);
         let tip_x  = computed.map_x(px);
@@ -17054,8 +17055,6 @@ fn add_quiver(q: &crate::plot::quiver::QuiverPlot, scene: &mut Scene, computed: 
         let len = (dx * dx + dy * dy).sqrt();
         if len < 1e-6 { continue; }
 
-        // Interactive tooltips: wrap each arrow in a group with data-* attrs so
-        // the embedded JS can show a readout on hover.
         if computed.interactive {
             let mag = arrow.magnitude();
             let angle_deg = arrow.v.atan2(arrow.u).to_degrees();
@@ -17084,12 +17083,10 @@ fn add_quiver(q: &crate::plot::quiver::QuiverPlot, scene: &mut Scene, computed: 
         };
         let color = Color::from(color_str.as_str());
 
-        // Unit vector along the shaft.
         let ux = dx / len;
         let uy = dy / len;
-        // Resolve head dimensions (explicit pixels or proportional to shaft).
         let (head_len, half_w) = q.resolve_head(len);
-        // Shaft terminates at the base of the triangle so the head caps it cleanly.
+        // Shaft ends at the head base, not at the tip, so the two don't overlap.
         let base_x = tip_x - ux * head_len;
         let base_y = tip_y - uy * head_len;
 

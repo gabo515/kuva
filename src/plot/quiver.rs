@@ -299,6 +299,20 @@ impl QuiverPlot {
         self
     }
 
+    /// Pin just the head length in pixels. `with_head_width` remains
+    /// independently overridable; unset dimensions fall back to the
+    /// proportional default.
+    pub fn with_head_length(mut self, length: f64) -> Self {
+        self.head_length = Some(length);
+        self
+    }
+
+    /// Pin just the head half-width in pixels.
+    pub fn with_head_width(mut self, half_width: f64) -> Self {
+        self.head_width = Some(half_width);
+        self
+    }
+
     /// Set the head length as a fraction of the shaft length (used when no
     /// explicit `with_head` is set). Default `0.28`.
     pub fn with_head_ratio(mut self, ratio: f64) -> Self {
@@ -314,7 +328,6 @@ impl QuiverPlot {
             Some(px) => px.min(shaft_px),
             None => {
                 let target = shaft_px * self.head_ratio;
-                // Clamp to [min, max], but never let the head exceed the shaft.
                 let lo = self.head_min_px.min(shaft_px);
                 let hi = self.head_max_px.min(shaft_px);
                 target.clamp(lo, hi)
@@ -381,11 +394,14 @@ impl QuiverPlot {
     }
 
     /// Resolve an arrow's tail and tip endpoints in data coordinates,
-    /// accounting for `pivot` and `scale`.
-    pub(crate) fn endpoints(&self, arrow: &QuiverArrow) -> ((f64, f64), (f64, f64)) {
-        let s = self.effective_scale();
-        let du = arrow.u * s;
-        let dv = arrow.v * s;
+    /// given a precomputed scale multiplier.
+    pub(crate) fn endpoints_with_scale(
+        &self,
+        arrow: &QuiverArrow,
+        scale: f64,
+    ) -> ((f64, f64), (f64, f64)) {
+        let du = arrow.u * scale;
+        let dv = arrow.v * scale;
         let (sx, sy) = match self.pivot {
             QuiverPivot::Tail   => (0.0, 0.0),
             QuiverPivot::Middle => (-du * 0.5, -dv * 0.5),

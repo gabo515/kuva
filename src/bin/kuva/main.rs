@@ -60,7 +60,7 @@ mod doom;
 use clap::{CommandFactory, Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "kuva", about = "Scientific plotting from the command line")]
+#[command(name = "kuva", about = "Scientific plotting from the command line", version)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,

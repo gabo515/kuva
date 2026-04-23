@@ -59,6 +59,7 @@ pub mod calendar;
 pub mod pyramid;
 pub mod waffle;
 pub mod horizon;
+pub mod quiver;
 
 pub mod legend;
 
@@ -125,5 +126,6 @@ pub use calendar::{CalendarPlot, CalendarAgg, CalendarPeriod, WeekStart};
 pub use pyramid::{PopulationPyramid, PyramidSeries, PyramidMode};
 pub use waffle::{WafflePlot, WaffleCategory, FillOrder, CellShape};
 pub use horizon::{HorizonPlot, HorizonSeries};
+pub use quiver::{QuiverPlot, QuiverArrow, QuiverPivot};
 
 pub use legend::{Legend, LegendEntry, LegendShape, LegendPosition, LegendGroup};

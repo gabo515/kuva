@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`QuiverPlot`** — 2-D vector field rendered as arrows. Each arrow has a tail at `(x, y)` and a vector `(u, v)`. Features: `from_function()` constructor for sampling a closure on a regular grid; auto-scaled arrow length (default) or explicit `with_scale`; proportional arrow heads that make every arrow "look like an arrow" regardless of magnitude; three pivot modes (`Tail`, `Middle`, `Tip`); optional magnitude-driven colormap with automatic colorbar; `tight_bounds` opt-in for dense fields with plot-area clipping; combo helper `with_magnitude_colormap(cmap, label)`. CLI: `kuva quiver`.
+- **`render_utils::arrow_head_path`** — shared helper used by `QuiverPlot`, `NetworkPlot` (directed-edge arrowheads), and `TextAnnotation` arrows.
+
 ---
 
 ## [0.1.7] — 2026-04-22

@@ -881,6 +881,58 @@ fn test_heatmap_colormap_unknown_warns_but_succeeds() {
     );
 }
 
+// ── quiver ───────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_quiver_svg() {
+    let (stdout, stderr, code) = run_with_file(&[
+        "quiver", &data("quiver.tsv"),
+        "--auto-scale", "0.8",
+        "--title", "Vector Field", "--x-label", "x", "--y-label", "y",
+    ]);
+    assert_eq!(code, 0, "exit code should be 0; stderr: {stderr}");
+    assert!(stdout.starts_with("<svg"), "output should start with <svg");
+    // Arrow = line (shaft) + path (head). Every arrow adds at least one of each.
+    assert!(stdout.matches("<path").count() >= 60, "expected arrow-head paths; got {}", stdout.matches("<path").count());
+}
+
+#[test]
+fn test_quiver_colormap_adds_colorbar() {
+    let plain = run_with_file(&[
+        "quiver", &data("quiver.tsv"), "--auto-scale", "0.8",
+    ]).0;
+    let with_cmap = run_with_file(&[
+        "quiver", &data("quiver.tsv"), "--auto-scale", "0.8",
+        "--colormap", "viridis", "--colorbar-label", "Speed",
+    ]).0;
+    assert!(plain.starts_with("<svg") && with_cmap.starts_with("<svg"));
+    // Colorbar widens the canvas and adds the label text to the SVG.
+    assert!(with_cmap.contains("Speed"), "colorbar label should appear in SVG");
+    let plain_w = extract_width(&plain);
+    let cmap_w = extract_width(&with_cmap);
+    assert!(cmap_w > plain_w, "colormap version should be wider ({cmap_w} vs {plain_w})");
+}
+
+fn extract_width(svg: &str) -> f64 {
+    let start = svg.find("width=\"").expect("width attr") + 7;
+    let end = svg[start..].find('"').expect("close quote");
+    svg[start..start + end].parse().expect("parse width")
+}
+
+#[test]
+fn test_quiver_scale_auto_scale_exclusive() {
+    let (_, stderr, code) = run_with_file(&[
+        "quiver", &data("quiver.tsv"),
+        "--arrow-scale", "1.0", "--auto-scale", "0.8",
+    ]);
+    assert_ne!(code, 0, "mutually exclusive flags should error");
+    assert!(
+        stderr.to_ascii_lowercase().contains("cannot be used with") ||
+        stderr.to_ascii_lowercase().contains("conflict"),
+        "expected conflict error; got: {stderr}"
+    );
+}
+
 // ── misc ─────────────────────────────────────────────────────────────────────
 
 #[test]

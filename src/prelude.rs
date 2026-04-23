@@ -142,6 +142,9 @@ pub use crate::plot::{
     PopulationPyramid,
     PyramidSeries,
     PyramidMode,
+    QuiverPlot,
+    QuiverArrow,
+    QuiverPivot,
     // Style / config types used when building plots
     MarkerShape,
     LineStyle,

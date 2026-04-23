@@ -57,6 +57,7 @@ use crate::plot::calendar::CalendarPlot;
 use crate::plot::pyramid::PopulationPyramid;
 use crate::plot::waffle::WafflePlot;
 use crate::plot::horizon::HorizonPlot;
+use crate::plot::quiver::QuiverPlot;
 use crate::plot::legend::ColorBarInfo;
 use crate::render::render_utils;
 
@@ -121,6 +122,7 @@ pub enum Plot {
     Pyramid(PopulationPyramid),
     Waffle(WafflePlot),
     Horizon(HorizonPlot),
+    Quiver(QuiverPlot),
 }
 
 impl From<ScatterPlot>    for Plot { fn from(p: ScatterPlot)    -> Self { Plot::Scatter(p) } }
@@ -182,6 +184,7 @@ impl From<CalendarPlot>       for Plot { fn from(p: CalendarPlot)       -> Self 
 impl From<PopulationPyramid>  for Plot { fn from(p: PopulationPyramid)  -> Self { Plot::Pyramid(p) } }
 impl From<WafflePlot>         for Plot { fn from(p: WafflePlot)         -> Self { Plot::Waffle(p) } }
 impl From<HorizonPlot>        for Plot { fn from(p: HorizonPlot)        -> Self { Plot::Horizon(p) } }
+impl From<QuiverPlot>         for Plot { fn from(p: QuiverPlot)         -> Self { Plot::Quiver(p) } }
 
 use crate::plot::plot3d::DataRanges3D;
 use crate::plot::colormap::ColorMap;
@@ -262,6 +265,7 @@ impl Plot {
             Plot::Parallel(p) => p.color = color.into(),
             Plot::Ecdf(e) => e.color = color.into(),
             Plot::QQ(q) => q.color = color.into(),
+            Plot::Quiver(q) => q.color = color.into(),
             _ => {}  // multi-series plots (StackedArea, Streamgraph, etc.) skip palette auto-assign
         }
     }
@@ -914,6 +918,29 @@ impl Plot {
             // Rendered in pixel space; dummy bounds satisfy Layout::auto_from_plots.
             Plot::Network(_) => Some(((0.0, 1.0), (0.0, 1.0))),
             Plot::Radar(_) => Some(((0.0, 1.0), (0.0, 1.0))),
+            Plot::Quiver(q) => {
+                if q.arrows.is_empty() { return None; }
+                let mut x_min = f64::INFINITY;
+                let mut x_max = f64::NEG_INFINITY;
+                let mut y_min = f64::INFINITY;
+                let mut y_max = f64::NEG_INFINITY;
+                for a in &q.arrows {
+                    // (a.x, a.y) is the user-perceived data point — always include it.
+                    x_min = x_min.min(a.x);
+                    x_max = x_max.max(a.x);
+                    y_min = y_min.min(a.y);
+                    y_max = y_max.max(a.y);
+                    if !q.tight_bounds {
+                        let (tail, tip) = q.endpoints(a);
+                        x_min = x_min.min(tail.0).min(tip.0);
+                        x_max = x_max.max(tail.0).max(tip.0);
+                        y_min = y_min.min(tail.1).min(tip.1);
+                        y_max = y_max.max(tail.1).max(tip.1);
+                    }
+                }
+                if !x_min.is_finite() { return None; }
+                Some(((x_min, x_max), (y_min, y_max)))
+            }
             Plot::Streamgraph(sg) => {
                 let geom = sg.compute_geometry()?;
                 let x_min = sg.x.iter().cloned().fold(f64::INFINITY, f64::min);
@@ -1015,6 +1042,7 @@ impl Plot {
                 let pts_per_series = hp.series.first().map(|s| s.x.len()).unwrap_or(100);
                 n * hp.n_bands * 2 * pts_per_series / 10 + 20
             }
+            Plot::Quiver(q) => q.arrows.len() * 2 + 10,
             _ => 100,
         }
     }
@@ -1148,6 +1176,22 @@ impl Plot {
             }
             Plot::Surface3D(s) => colorbar_from_z(s.z_colormap.as_ref()?, s.data_ranges()?, s.box3d.z_label.clone()),
             Plot::Scatter3D(s) => colorbar_from_z(s.z_colormap.as_ref()?, s.data_ranges()?, s.box3d.z_label.clone()),
+            Plot::Quiver(q) => {
+                let cmap = q.color_map.as_ref()?.clone();
+                let (min, max) = q.color_range.unwrap_or_else(|| q.magnitude_extent());
+                if !min.is_finite() || !max.is_finite() { return None; }
+                let label = q.color_legend_label.clone();
+                Some(ColorBarInfo {
+                    map_fn: Arc::new(move |t| {
+                        let norm = (t - min) / (max - min + f64::EPSILON);
+                        cmap.map(norm.clamp(0.0, 1.0))
+                    }),
+                    min_value: min,
+                    max_value: max,
+                    label,
+                    tick_labels: None,
+                })
+            }
             // Hexbin draws its own colorbar inside add_hexbin (values are only known
             // after binning).  Return None here so the generic colorbar loop in
             // render_multiple does not attempt to draw a second, placeholder bar.

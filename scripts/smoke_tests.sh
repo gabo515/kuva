@@ -888,6 +888,17 @@ check "calendar date range" \
         --start 2024-01-01 --end 2024-06-30 \
         --agg sum --title "Calendar Range"
 
+# ── quiver ────────────────────────────────────────────────────────────────────
+check "quiver basic" \
+    "$BIN" quiver "$DATA/quiver.tsv" \
+        --auto-scale 0.8 \
+        --title "Quiver Field" --x-label "x" --y-label "y"
+
+check "quiver with colormap" \
+    "$BIN" quiver "$DATA/quiver.tsv" \
+        --auto-scale 0.8 --colormap viridis --colorbar-label "Speed" \
+        --title "Quiver Magnitude"
+
 # ── summary ───────────────────────────────────────────────────────────────────
 echo ""
 echo "Results: $PASS passed, $FAIL failed"

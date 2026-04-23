@@ -7,9 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [0.1.7] — 2026-04-22
+
 ### Added
 
-- **`NetworkPlot`** — new plot type: node-edge network / graph diagram with force-directed (Fruchterman-Reingold) and circular layout algorithms. Supports edge-list and adjacency-matrix input, directed/undirected edges, self-loops, weighted edges (stroke width + opacity), per-node color/size/group, and group-based legends. CLI: `kuva network`.
+- **`NetworkPlot`** — node-edge network / graph diagram with force-directed (Fruchterman-Reingold) and circular layout algorithms. Supports edge-list and adjacency-matrix input, directed/undirected edges, self-loops, weighted edges (stroke width + opacity), per-node color/size/group, and group-based legends. CLI: `kuva network`.
+- **`WafflePlot`** — waffle / unit chart displaying categorical proportions as a grid of colored cells. Supports square and circle cell shapes, configurable grid dimensions, fill order, empty-cell color, unit annotation, show-counts / show-percents labels, and legend. CLI: `kuva waffle`.
+- **`HorizonPlot`** — compact multi-series time series visualization. Each series occupies a single row; the value range is divided into N equal-width bands folded onto that row with progressively darker shading. Positive and negative deviations use separate color families. Supports configurable band count, row height, baseline, value-max, and optional band-scale annotations. CLI: `kuva horizon`.
+- **`PrPlot`** (Precision-Recall Curve) — precision-recall curve with AUC-PR computed via trapezoidal integration. Supports per-group curves from raw `(score, label)` predictions or pre-computed `(recall, precision)` points, optional optimal-F1 threshold marker, optional AUC label in legend, baseline (random classifier) line, and multi-group legend. CLI: `kuva pr`.
+- **`PopulationPyramid`** — back-to-back horizontal bar chart for age/gender structure visualization. Supports single and multi-series (Grouped/Overlap modes), percentage normalization, value labels, per-series colors, and configurable bar width and gap. CLI: `kuva pyramid`.
+- **13 new CLI subcommands**: `slope`, `lollipop`, `raincloud`, `mosaic`, `waffle`, `pyramid`, `roc`, `pr`, `survival`, `horizon`, `parallel`, `venn`, `calendar` — covering all previously library-only plot types.
+- **`BrickPlot` bladerunner stitched STRIGAR format** — `with_strigars` now handles bladerunner's multi-candidate stitched format: `|` separates candidates; inter-candidate gaps render as `N@` (large gap) or `@:seq`/`1@` (small gap, light grey). Canonical-rotation normalisation operates across all candidates.
+- **`BrickPlot::with_start_positions(iter)`** and **`BrickPlot::with_x_origin(f)`** — per-read genomic start coordinates for aligned repeat region display; `with_x_origin` sets the reference coordinate that maps to x = 0.
+- **`StripPlot` per-point markers** — `with_group_markers(label, values, markers)` assigns a distinct marker shape per point within a strip group (triangle, square, diamond, cross, star, plus).
+- **`Figure` legend position extensions** — `FigureLegendPosition` now includes `OutsideRightMiddle`, `OutsideRightBottom`, `OutsideTopLeft`, `OutsideTopCenter`, `OutsideTopRight`, `OutsideBottomLeft`, `OutsideBottomCenter`, `OutsideBottomRight`, `OutsideLeftTop`, `OutsideLeftMiddle`, `OutsideLeftBottom` in addition to the existing `Right`, `Bottom`, `Custom`.
+- **Text wrapping** — long axis labels, titles, and legend items are now automatically wrapped at word boundaries when they exceed the available width.
+- **`ColorMap` extended** — added `Cividis`, `Turbo`, `Cubehelix`, `RdYlGn`, `BrBG`, `PuOr`, and `Spectral` palettes.
+- **`Layout::with_width_gap(px)`** and **`Layout::with_height_gap(px)`** — explicit per-axis gap overrides for fine-tuning panel spacing in `Figure` grids.
+- **`BrickPlot` figure normalisation** — row heights are normalised to a consistent pixel height when `BrickPlot` is placed inside a `Figure` panel.
+
+### Fixed
+
+- **`JointPlot` in figure context** — scatter panel, right-marginal histogram, and legend now fit cleanly within the allocated cell. Legend space is carved from `scatter_canvas_w` upfront rather than overflowing into adjacent cells.
+- **`JointPlot` axis label centering** — x-label is now centred on the scatter axis (not the full canvas); y-label is centred on the scatter panel height.
+- **`JointPlot` label duplication in figure** — x/y labels are suppressed from `add_labels_and_title` when a `JointPlot` is detected in the panel; the custom-positioned labels are the only ones drawn.
+- **Clippy warnings (Rust 1.85)** — resolved `collapsible_match`, `useless_conversion` (`into_iter`), `unnecessary_sort_by`, and `clone_on_copy` lints across `dotplot.rs`, `upset.rs`, `candlestick.rs`, `network.rs`, `layout.rs`, `render.rs`, and `src/bin/kuva/rose.rs`.
 
 ---
 

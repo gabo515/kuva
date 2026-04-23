@@ -41,6 +41,19 @@ mod sunburst;
 mod bump;
 mod funnel;
 mod rose;
+mod slope;
+mod lollipop;
+mod raincloud;
+mod mosaic;
+mod waffle;
+mod pyramid;
+mod roc;
+mod pr;
+mod survival;
+mod horizon;
+mod parallel;
+mod venn;
+mod calendar;
 #[cfg(feature = "doom")]
 mod doom;
 
@@ -110,6 +123,34 @@ enum Commands {
     Funnel(funnel::FunnelArgs),
     /// Nightingale rose / coxcomb chart — polar bar chart.
     Rose(rose::RoseArgs),
+    /// Slope chart — paired before/after comparisons on two axes.
+    Slope(slope::SlopeArgs),
+    /// Lollipop chart — dot-and-stem alternative to bar charts.
+    Lollipop(lollipop::LollipopArgs),
+    /// Raincloud plot — half-violin + box + jittered raw points.
+    Raincloud(raincloud::RaincloudArgs),
+    /// Mosaic / Marimekko chart — two-way contingency table.
+    Mosaic(mosaic::MosaicArgs),
+    /// Waffle chart — proportional grid of filled squares.
+    Waffle(waffle::WaffleArgs),
+    /// Population pyramid — back-to-back horizontal bar chart.
+    Pyramid(pyramid::PyramidArgs),
+    /// ROC curve — receiver operating characteristic.
+    #[command(name = "roc")]
+    Roc(roc::RocArgs),
+    /// Precision-recall curve.
+    #[command(name = "pr")]
+    Pr(pr::PrArgs),
+    /// Kaplan-Meier survival curve.
+    Survival(survival::SurvivalArgs),
+    /// Horizon chart — stacked folded time-series.
+    Horizon(horizon::HorizonArgs),
+    /// Parallel coordinates plot — multivariate comparison.
+    Parallel(parallel::ParallelArgs),
+    /// Venn diagram — 2–4 set overlaps.
+    Venn(venn::VennArgs),
+    /// Calendar heatmap — GitHub-style contribution grid.
+    Calendar(calendar::CalendarArgs),
     #[cfg(feature = "doom")]
     /// Generate a self-contained DOOM SVG playable in any browser.
     Doom(doom::DoomArgs),
@@ -167,6 +208,19 @@ fn main() {
         Commands::Bump(args) => bump::run(args),
         Commands::Funnel(args) => funnel::run(args),
         Commands::Rose(args) => rose::run(args),
+        Commands::Slope(args) => slope::run(args),
+        Commands::Lollipop(args) => lollipop::run(args),
+        Commands::Raincloud(args) => raincloud::run(args),
+        Commands::Mosaic(args) => mosaic::run(args),
+        Commands::Waffle(args) => waffle::run(args),
+        Commands::Pyramid(args) => pyramid::run(args),
+        Commands::Roc(args) => roc::run(args),
+        Commands::Pr(args) => pr::run(args),
+        Commands::Survival(args) => survival::run(args),
+        Commands::Horizon(args) => horizon::run(args),
+        Commands::Parallel(args) => parallel::run(args),
+        Commands::Venn(args) => venn::run(args),
+        Commands::Calendar(args) => calendar::run(args),
         #[cfg(feature = "doom")]
         Commands::Doom(args) => doom::run(args),
         Commands::Man => unreachable!(),

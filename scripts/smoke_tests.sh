@@ -737,6 +737,157 @@ check "wrap with scale" \
         --title "Scaled wrapped plot" \
         --wrap 20 --scale 1.5
 
+# ── slope ─────────────────────────────────────────────────────────────────────
+check "slope basic" \
+    "$BIN" slope "$DATA/slope.tsv" \
+        --label-col label --before-col before --after-col after \
+        --before-label "Before" --after-label "After" \
+        --title "Weight Loss by Diet"
+
+check "slope direction colors" \
+    "$BIN" slope "$DATA/slope.tsv" \
+        --label-col label --before-col before --after-col after \
+        --show-values --title "Slope with Values"
+
+# ── lollipop ──────────────────────────────────────────────────────────────────
+check "lollipop basic" \
+    "$BIN" lollipop "$DATA/lollipop.tsv" \
+        --x-col gene --y-col expression \
+        --label-col gene \
+        --title "Gene Expression"
+
+check "lollipop styled" \
+    "$BIN" lollipop "$DATA/lollipop.tsv" \
+        --x-col gene --y-col expression \
+        --color steelblue --dot-radius 6 \
+        --legend "Expression" --title "Styled Lollipop"
+
+# ── raincloud ─────────────────────────────────────────────────────────────────
+check "raincloud basic" \
+    "$BIN" raincloud "$DATA/raincloud.tsv" \
+        --group-col group --value-col value \
+        --title "Raincloud Plot"
+
+check "raincloud no rain" \
+    "$BIN" raincloud "$DATA/raincloud.tsv" \
+        --group-col group --value-col value \
+        --no-rain --legend "group" --title "Cloud + Box Only"
+
+# ── mosaic ────────────────────────────────────────────────────────────────────
+check "mosaic basic" \
+    "$BIN" mosaic "$DATA/mosaic.tsv" \
+        --col-col region --row-col outcome --value-col count \
+        --title "Outcomes by Region"
+
+check "mosaic with values" \
+    "$BIN" mosaic "$DATA/mosaic.tsv" \
+        --col-col region --row-col outcome --value-col count \
+        --show-values --title "Mosaic with Values"
+
+# ── waffle ────────────────────────────────────────────────────────────────────
+check "waffle basic" \
+    "$BIN" waffle "$DATA/waffle.tsv" \
+        --label-col category --value-col value --color-col color \
+        --legend "Energy Mix" --title "Energy Sources"
+
+check "waffle circle shape" \
+    "$BIN" waffle "$DATA/waffle.tsv" \
+        --label-col category --value-col value --color-col color \
+        --shape circle --show-percents --title "Waffle Circles"
+
+# ── pyramid ───────────────────────────────────────────────────────────────────
+check "pyramid basic" \
+    "$BIN" pyramid "$DATA/pyramid.tsv" \
+        --label-col age --left-col male --right-col female \
+        --left-label "Male" --right-label "Female" \
+        --title "Population Pyramid"
+
+check "pyramid normalized" \
+    "$BIN" pyramid "$DATA/pyramid.tsv" \
+        --label-col age --left-col male --right-col female \
+        --left-label "Male" --right-label "Female" \
+        --normalize --legend --title "Normalized Pyramid"
+
+# ── roc ───────────────────────────────────────────────────────────────────────
+check "roc basic" \
+    "$BIN" roc "$DATA/roc.tsv" \
+        --score-col score --label-col label \
+        --auc-label --title "ROC Curve"
+
+check "roc with ci" \
+    "$BIN" roc "$DATA/roc.tsv" \
+        --score-col score --label-col label \
+        --ci --auc-label --legend "Model" --title "ROC with CI"
+
+# ── pr ────────────────────────────────────────────────────────────────────────
+check "pr basic" \
+    "$BIN" pr "$DATA/pr.tsv" \
+        --score-col score --label-col label \
+        --auc-label --title "Precision-Recall Curve"
+
+check "pr no baseline" \
+    "$BIN" pr "$DATA/pr.tsv" \
+        --score-col score --label-col label \
+        --no-baseline --legend "Classifier" --title "PR no Baseline"
+
+# ── survival ──────────────────────────────────────────────────────────────────
+check "survival basic" \
+    "$BIN" survival "$DATA/survival.tsv" \
+        --time-col time --event-col event --group-col group \
+        --title "Kaplan-Meier Survival"
+
+check "survival no ci" \
+    "$BIN" survival "$DATA/survival.tsv" \
+        --time-col time --event-col event --group-col group \
+        --no-ci --legend "Group" --title "KM no CI"
+
+# ── horizon ───────────────────────────────────────────────────────────────────
+check "horizon basic" \
+    "$BIN" horizon "$DATA/horizon.tsv" \
+        --x-col week --value-col value --group-col series \
+        --title "Horizon Chart"
+
+check "horizon with value labels" \
+    "$BIN" horizon "$DATA/horizon.tsv" \
+        --x-col week --value-col value --group-col series \
+        --value-labels --n-bands 4 --title "Horizon 4 Bands"
+
+# ── parallel ──────────────────────────────────────────────────────────────────
+check "parallel basic" \
+    "$BIN" parallel "$DATA/parallel.tsv" \
+        --value-cols sepal_length sepal_width petal_length petal_width \
+        --group-col species \
+        --title "Parallel Coordinates"
+
+check "parallel curved" \
+    "$BIN" parallel "$DATA/parallel.tsv" \
+        --value-cols sepal_length sepal_width petal_length petal_width \
+        --group-col species \
+        --curved --show-mean --legend "Species" --title "Parallel Curved"
+
+# ── venn ──────────────────────────────────────────────────────────────────────
+check "venn basic" \
+    "$BIN" venn "$DATA/venn.tsv" \
+        --element-col element --set-col set \
+        --title "Venn Diagram"
+
+check "venn proportional" \
+    "$BIN" venn "$DATA/venn.tsv" \
+        --element-col element --set-col set \
+        --proportional --legend "Gene Sets" --title "Proportional Venn"
+
+# ── calendar ──────────────────────────────────────────────────────────────────
+check "calendar basic" \
+    "$BIN" calendar "$DATA/calendar.tsv" \
+        --date-col date --value-col count \
+        --title "Calendar Heatmap"
+
+check "calendar date range" \
+    "$BIN" calendar "$DATA/calendar.tsv" \
+        --date-col date --value-col count \
+        --start 2024-01-01 --end 2024-06-30 \
+        --agg sum --title "Calendar Range"
+
 # ── summary ───────────────────────────────────────────────────────────────────
 echo ""
 echo "Results: $PASS passed, $FAIL failed"

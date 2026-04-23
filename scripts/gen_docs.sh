@@ -49,9 +49,16 @@ EXAMPLES=(
     scatter3d
     surface3d
     roc
+    pr
     slope
     venn
     twin_y
+    radar
+    horizon
+    waffle
+    pyramid
+    mosaic
+    parallel
     all_plots_simple
     all_plots_complex
 )

@@ -3,7 +3,7 @@
 //! The projection pipeline:
 //! 1. Normalize data coordinates to [-0.5, 0.5]³ using data ranges
 //! 2. Rotate by combined matrix Rx(elevation) * Rz(azimuth)
-//! 3. Orthographic projection: screen_x = -rotated[0], screen_y = -rotated[2]
+//! 3. Orthographic projection: `screen_x = -rotated[0], screen_y = -rotated[2]`
 //! 4. Scale uniformly to fit the plot area
 //! 5. Translate to center in the pixel bounding box
 

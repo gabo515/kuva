@@ -30,7 +30,7 @@ use crate::plot::plot3d::{DataRanges3D, Box3DConfig, View3D};
 /// ```
 #[derive(Clone, Debug)]
 pub struct Surface3DPlot {
-    /// Grid Z values: z_data[row][col]. All rows must have the same length.
+    /// Grid Z values: `z_data[row][col]`. All rows must have the same length.
     pub z_data: Vec<Vec<f64>>,
     /// Explicit X coordinates for each column. If None, 0..ncols.
     pub x_coords: Option<Vec<f64>>,

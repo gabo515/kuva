@@ -81,26 +81,32 @@ impl TernaryPlot {
     }
 
     /// Add a single ungrouped point.
-    pub fn with_point(mut self, a: f64, b: f64, c: f64) -> Self {
-        self.points.push(TernaryPoint { a, b, c, group: None });
+    pub fn with_point(mut self, a: impl Into<f64>, b: impl Into<f64>, c: impl Into<f64>) -> Self {
+        self.points.push(TernaryPoint { a: a.into(), b: b.into(), c: c.into(), group: None });
         self
     }
 
     /// Add a single point with a group label.
-    pub fn with_point_group<S: Into<String>>(mut self, a: f64, b: f64, c: f64, group: S) -> Self {
+    pub fn with_point_group<S: Into<String>>(mut self, a: impl Into<f64>, b: impl Into<f64>, c: impl Into<f64>, group: S) -> Self {
         self.points.push(TernaryPoint {
-            a,
-            b,
-            c,
+            a: a.into(),
+            b: b.into(),
+            c: c.into(),
             group: Some(group.into()),
         });
         self
     }
 
     /// Add multiple ungrouped points from an iterator of (a, b, c) tuples.
-    pub fn with_points<I: IntoIterator<Item = (f64, f64, f64)>>(mut self, pts: I) -> Self {
+    pub fn with_points<A, B, C, I>(mut self, pts: I) -> Self
+    where
+        A: Into<f64>,
+        B: Into<f64>,
+        C: Into<f64>,
+        I: IntoIterator<Item = (A, B, C)>,
+    {
         for (a, b, c) in pts {
-            self.points.push(TernaryPoint { a, b, c, group: None });
+            self.points.push(TernaryPoint { a: a.into(), b: b.into(), c: c.into(), group: None });
         }
         self
     }

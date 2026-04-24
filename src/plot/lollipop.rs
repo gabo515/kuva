@@ -127,9 +127,14 @@ impl LollipopPlot {
     }
 
     /// Add multiple unlabeled points from an iterator of `(x, y)` pairs.
-    pub fn with_points(mut self, pts: impl IntoIterator<Item = (f64, f64)>) -> Self {
+    pub fn with_points<T, U, I>(mut self, pts: I) -> Self
+    where
+        T: Into<f64>,
+        U: Into<f64>,
+        I: IntoIterator<Item = (T, U)>,
+    {
         for (x, y) in pts {
-            self.points.push(LollipopPoint { x, y, label: None, color: None });
+            self.points.push(LollipopPoint { x: x.into(), y: y.into(), label: None, color: None });
         }
         self
     }

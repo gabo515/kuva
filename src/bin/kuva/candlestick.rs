@@ -163,10 +163,11 @@ pub fn run(args: CandlestickArgs) -> Result<(), String> {
     let layout = Layout::auto_from_plots(&plots);
     let layout = apply_base_args(layout, &args.base);
     let layout = apply_axis_args(layout, &args.axis);
+    let layout = layout.with_x_tick_rotate(-45.0);
     let layout = if let Some(dt) = datetime_axis {
         layout.with_x_datetime(dt)
     } else {
-        layout.with_x_tick_rotate(-45.0)
+        layout
     };
     let scene = render_multiple(plots, layout);
     write_output(scene, &args.base)

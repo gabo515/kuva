@@ -86,18 +86,21 @@ impl MosaicPlot {
     }
 
     /// Add a single cell (col × row = value).
-    pub fn with_cell(mut self, col: impl Into<String>, row: impl Into<String>, value: f64) -> Self {
-        self.cells.push(MosaicCell { col: col.into(), row: row.into(), value });
+    pub fn with_cell(mut self, col: impl Into<String>, row: impl Into<String>, value: impl Into<f64>) -> Self {
+        self.cells.push(MosaicCell { col: col.into(), row: row.into(), value: value.into() });
         self
     }
 
     /// Add multiple cells at once.
-    pub fn with_cells(
-        mut self,
-        cells: impl IntoIterator<Item = (impl Into<String>, impl Into<String>, f64)>,
-    ) -> Self {
+    pub fn with_cells<C, R, V, I>(mut self, cells: I) -> Self
+    where
+        C: Into<String>,
+        R: Into<String>,
+        V: Into<f64>,
+        I: IntoIterator<Item = (C, R, V)>,
+    {
         for (col, row, val) in cells {
-            self.cells.push(MosaicCell { col: col.into(), row: row.into(), value: val });
+            self.cells.push(MosaicCell { col: col.into(), row: row.into(), value: val.into() });
         }
         self
     }

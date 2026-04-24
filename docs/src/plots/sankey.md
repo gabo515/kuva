@@ -166,6 +166,56 @@ let sankey = SankeyPlot::new()
     .with_link("Middle", "Output", 80.0);
 ```
 
+## Alluvium mode and ordering
+
+For multi-stage categorical data, build a Sankey from full alluvia instead of pairwise edges. `.with_alluvium()` records one path across ordered axes, automatically creates axis-specific node IDs, and accumulates adjacent edge weights:
+
+```rust,no_run
+# use kuva::plot::SankeyPlot;
+let sankey = SankeyPlot::new()
+    .with_axis_names(["tissue", "cluster", "sex"])
+    .with_alluvium(vec!["B CELL", "4", "male"], 9.0)
+    .with_alluvium(vec!["BRAIN", "1", "female"], 1.0)
+    .with_alluvium(vec!["HEART", "3", "male"], 3.0)
+    .with_crossing_reduction()
+    .with_left_coloring()
+    .with_node_order_seed(42);
+```
+
+Use `.with_alluvia(iter)` to bulk-load alluvia from an iterator of `(strata, value)` rows.
+
+### How crossing-reduction ordering works
+
+The crossing-reduction algorithm minimises ribbon crossings by finding the best **vertical stacking order** of nodes within each column. The column sequence itself is always preserved exactly as you specified (left to right: tissue → cluster → sex in the example above).
+
+Internally, the algorithm:
+
+1. Builds a pairwise distance matrix over all nodes where two nodes with high co-occurrence in alluvia are assigned a short distance.
+2. Runs a TSP heuristic (nearest-neighbour insertion + 2-opt) over that matrix to find a node cycle that clusters co-occurring nodes together.
+3. Tries every rotation of the cycle, extracts the resulting within-column node ordering for each rotation, computes the weighted crossing objective (counting ribbon crossings weighted by flow), and keeps the rotation with the lowest score.
+
+**Lode stacking within nodes:** when multiple ribbons enter or leave a single node (e.g. T CELL and B CELL both flowing into cluster "4"), the ribbon segments are stacked inside that node in the same top-to-bottom order as their sources in the adjacent column. This prevents unnecessary criss-crossing at the node boundary.
+
+### Ordering modes
+
+| Method | Behaviour |
+|---|---|
+| `.with_node_order(SankeyNodeOrder::Input)` | Preserve insertion order within each column (default) |
+| `.with_crossing_reduction()` | TSP-based weighted crossing reduction |
+| `.with_neighbornet()` | Use the neighbornet cycle backend instead of the TSP heuristic |
+| `.with_node_order_seed(seed)` | Fix the RNG seed for reproducible results (default `42`) |
+
+`CrossingReduction` is a good general-purpose choice. `Neighbornet` can produce different orderings on data with tree-like co-occurrence structure; try both when the default layout is cluttered.
+
+### Coloring modes
+
+| Method | Behaviour |
+|---|---|
+| `.with_node_coloring(SankeyNodeColoring::Label)` | One palette color per unique label, shared across all columns (default) |
+| `.with_left_coloring()` | Each node inherits the color of its dominant left-side parent; new palette colors are allocated when no parent exceeds the cutoff |
+| `.with_palette(colors)` | Override the fallback color list used by either mode |
+| `.with_left_color_cutoff(f)` | Minimum parent-share (0.0–1.0) required for color inheritance in left mode (default `0.5`) |
+
 ---
 
 ## Bioinformatics example
@@ -219,6 +269,9 @@ let svg = SvgBackend.render_scene(&render_multiple(plots, layout));
 | `.with_link(src, tgt, val)` | Add a directed link; auto-creates nodes from labels |
 | `.with_link_colored(src, tgt, val, color)` | Add a link with an explicit ribbon color |
 | `.with_links(iter)` | Bulk-add links from `(source, target, value)` triples |
+| `.with_axis_names(iter)` | Set display names for ordered alluvium axes |
+| `.with_alluvium(strata, value)` | Add one weighted alluvium spanning ordered axes |
+| `.with_alluvia(iter)` | Bulk-add weighted alluvia |
 | `.with_node(label)` | Declare a node without adding a link |
 | `.with_node_color(label, color)` | Set a node's fill color (CSS color string) |
 | `.with_node_column(label, col)` | Pin a node to a specific column (0-indexed) |
@@ -226,6 +279,14 @@ let svg = SvgBackend.render_scene(&render_multiple(plots, layout));
 | `.with_node_gap(px)` | Minimum vertical gap between nodes in a column (default `8.0`) |
 | `.with_gradient_links()` | Ribbons fade from source to target color |
 | `.with_per_link_colors()` | Use per-link color set by `.with_link_colored()` |
+| `.with_node_order(order)` | Choose `Input`, `CrossingReduction`, or `Neighbornet` node ordering |
+| `.with_crossing_reduction()` | Use the default weighted crossing-reduction ordering |
+| `.with_neighbornet()` | Use neighbornet ordering |
+| `.with_node_order_seed(seed)` | Set the ordering RNG seed |
+| `.with_node_coloring(mode)` | Choose `Label` or `Left` coloring |
+| `.with_left_coloring()` | Propagate colors left-to-right from dominant parents |
+| `.with_palette(palette)` | Override the fallback Sankey palette |
+| `.with_left_color_cutoff(f)` | Set the left-color dominant-parent threshold |
 | `.with_link_opacity(f)` | Ribbon fill opacity `0.0`–`1.0` (default `0.5`) |
 | `.with_legend("")` | Enable the legend; one entry per node, labeled with the node name |
 
@@ -236,3 +297,18 @@ let svg = SvgBackend.render_scene(&render_multiple(plots, layout));
 | `Source` | Ribbon inherits the source node color **(default)** |
 | `Gradient` | SVG `linearGradient` from source to target color |
 | `PerLink` | Color from `.with_link_colored()` per ribbon |
+
+### `SankeyNodeOrder` variants
+
+| Variant | Behavior |
+|---------|----------|
+| `Input` | Preserve insertion order within each column **(default)** |
+| `CrossingReduction` | Reduce weighted crossings using the default alluvial ordering backend |
+| `Neighbornet` | Use the neighbornet backend for cycle generation |
+
+### `SankeyNodeColoring` variants
+
+| Variant | Behavior |
+|---------|----------|
+| `Label` | Reuse one palette color per visible label **(default)** |
+| `Left` | Propagate colors left-to-right from dominant parents |

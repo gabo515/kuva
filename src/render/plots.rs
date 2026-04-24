@@ -817,6 +817,10 @@ impl Plot {
                     y_min = y_min.min(lp.baseline - lp.domain_height);
                 }
                 if !x_min.is_finite() { return None; }
+                // Pad x so dots at x=0 aren't clipped by the left axis border.
+                let x_span = (x_max - x_min).max(1.0);
+                x_min -= x_span * 0.04;
+                x_max += x_span * 0.04;
                 Some(((x_min, x_max), (y_min, y_max)))
             }
             Plot::Roc(_) => Some(((0.0, 1.0), (0.0, 1.0))),

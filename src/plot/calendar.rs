@@ -198,7 +198,7 @@ impl CalendarPlot {
     /// Display a single custom date range as one calendar row.
     ///
     /// The label is taken from the start date's year if not otherwise specified.
-    /// Use [`with_period`] to set a custom label.
+    /// Use `with_period` to set a custom label.
     pub fn with_date_range(mut self, start: impl Into<String>, end: impl Into<String>) -> Self {
         let start = start.into();
         let label = start.get(..4).unwrap_or("").to_string();

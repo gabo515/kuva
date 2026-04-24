@@ -168,43 +168,44 @@ impl NetworkPlot {
     }
 
     /// Add an edge, auto-creating source and target nodes by label if needed.
-    pub fn with_edge<S: Into<String>>(mut self, source: S, target: S, weight: f64) -> Self {
-        self.push_edge(source.into(), target.into(), weight, None, None);
+    pub fn with_edge<S: Into<String>>(mut self, source: S, target: S, weight: impl Into<f64>) -> Self {
+        self.push_edge(source.into(), target.into(), weight.into(), None, None);
         self
     }
 
     /// Add an edge with an explicit colour.
     pub fn with_edge_color<S: Into<String>, C: Into<String>>(
-        mut self, source: S, target: S, weight: f64, color: C,
+        mut self, source: S, target: S, weight: impl Into<f64>, color: C,
     ) -> Self {
-        self.push_edge(source.into(), target.into(), weight, Some(color.into()), None);
+        self.push_edge(source.into(), target.into(), weight.into(), Some(color.into()), None);
         self
     }
 
     /// Add an edge with a text label rendered at its midpoint.
     pub fn with_edge_label<S: Into<String>, L: Into<String>>(
-        mut self, source: S, target: S, weight: f64, label: L,
+        mut self, source: S, target: S, weight: impl Into<f64>, label: L,
     ) -> Self {
-        self.push_edge(source.into(), target.into(), weight, None, Some(label.into()));
+        self.push_edge(source.into(), target.into(), weight.into(), None, Some(label.into()));
         self
     }
 
     /// Add an edge with both an explicit colour and a text label.
     pub fn with_edge_styled<S: Into<String>, C: Into<String>, L: Into<String>>(
-        mut self, source: S, target: S, weight: f64, color: C, label: L,
+        mut self, source: S, target: S, weight: impl Into<f64>, color: C, label: L,
     ) -> Self {
-        self.push_edge(source.into(), target.into(), weight, Some(color.into()), Some(label.into()));
+        self.push_edge(source.into(), target.into(), weight.into(), Some(color.into()), Some(label.into()));
         self
     }
 
     /// Bulk-add edges from an iterator of `(source, target, weight)`.
-    pub fn with_edges<S, I>(mut self, edges: I) -> Self
+    pub fn with_edges<S, V, I>(mut self, edges: I) -> Self
     where
         S: Into<String>,
-        I: IntoIterator<Item = (S, S, f64)>,
+        V: Into<f64>,
+        I: IntoIterator<Item = (S, S, V)>,
     {
         for (src, tgt, w) in edges {
-            self.push_edge(src.into(), tgt.into(), w, None, None);
+            self.push_edge(src.into(), tgt.into(), w.into(), None, None);
         }
         self
     }
@@ -213,10 +214,10 @@ impl NetworkPlot {
     ///
     /// Non-zero entries become edges; the value is used as the weight.
     /// The matrix is stored and edges are expanded by
-    /// [`resolve_matrix`] (called automatically by `render_multiple`),
+    /// `resolve_matrix` (called automatically by `render_multiple`),
     /// so `.with_directed()` can be called before or after this method.
     ///
-    /// If you call [`compute_positions`] directly (e.g. to inspect the
+    /// If you call `compute_positions` directly (e.g. to inspect the
     /// layout), call `resolve_matrix()` first.
     pub fn with_matrix<S, L>(mut self, matrix: Vec<Vec<f64>>, labels: L) -> Self
     where
@@ -347,7 +348,7 @@ impl NetworkPlot {
 
     /// Show a legend; one entry per unique group.  If no groups have been
     /// assigned the legend falls back to one entry per node, which can be
-    /// large — prefer using [`with_node_group`] to keep the legend compact.
+    /// large — prefer using `with_node_group` to keep the legend compact.
     pub fn with_legend<S: Into<String>>(mut self, label: S) -> Self {
         self.legend_label = Some(label.into());
         self
@@ -366,9 +367,9 @@ impl NetworkPlot {
     /// Disconnected components are laid out independently, then tiled
     /// side-by-side (like igraph's `component_wise` approach).
     ///
-    /// Call [`resolve_matrix`] first if a matrix was provided via
-    /// [`with_matrix`], or this will only see edges added via
-    /// [`with_edge`]/[`with_edges`].
+    /// Call `resolve_matrix` first if a matrix was provided via
+    /// `with_matrix`, or this will only see edges added via
+    /// `with_edge`/`with_edges`.
     pub fn compute_positions(&self) -> Vec<(f64, f64)> {
         let n = self.nodes.len();
         if n == 0 { return vec![]; }

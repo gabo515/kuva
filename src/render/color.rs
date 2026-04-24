@@ -38,7 +38,7 @@ impl Color {
         }
     }
 
-    /// Return the SVG string representation.  Prefer [`write_svg`] in
+    /// Return the SVG string representation.  Prefer `write_svg` in
     /// loops to avoid per-call allocation.
     pub fn to_svg_string(&self) -> String {
         let mut s = String::with_capacity(7);

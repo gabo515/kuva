@@ -89,11 +89,17 @@ impl BarPlot {
     ///     .with_group("Feb", vec![(13.0, "steelblue"), (9.0, "crimson")])
     ///     .with_legend(vec!["Series A", "Series B"]);
     /// ```
-    pub fn with_group<T: Into<String>>(mut self, label: T, values: Vec<(f64, &str)>) -> Self {
+    pub fn with_group<T, V, S, I>(mut self, label: T, values: I) -> Self
+    where
+        T: Into<String>,
+        V: Into<f64>,
+        S: Into<String>,
+        I: IntoIterator<Item = (V, S)>,
+    {
         let bars = values
                         .into_iter()
                         .map(|(v, c)| BarValue {
-                            value: v,
+                            value: v.into(),
                             color: c.into(),
                         })
                         .collect();
@@ -147,12 +153,12 @@ impl BarPlot {
     ///     .with_bar("C", 2.8)
     ///     .with_color("steelblue");
     /// ```
-    pub fn with_bar<T: Into<String>>(mut self, label: T, value: f64) -> Self {
+    pub fn with_bar<T: Into<String>>(mut self, label: T, value: impl Into<f64>) -> Self {
         let color = self.default_color();
         let l = label.into();
         self.groups.push(BarGroup {
             label: l.clone(),
-            bars: vec![BarValue { value, color }],
+            bars: vec![BarValue { value: value.into(), color }],
         });
 
         self
@@ -172,11 +178,11 @@ impl BarPlot {
     ///     .with_colored_bar("A2G", 58.0, "seagreen")
     ///     .with_colored_bar("A2T", 31.0, "tomato");
     /// ```
-    pub fn with_colored_bar<T, S>(mut self, label: T, value: f64, color: S) -> Self
-    where T: Into<String>, S: Into<String> {
+    pub fn with_colored_bar<T, V, S>(mut self, label: T, value: V, color: S) -> Self
+    where T: Into<String>, V: Into<f64>, S: Into<String> {
         self.groups.push(BarGroup {
             label: label.into(),
-            bars: vec![BarValue { value, color: color.into() }],
+            bars: vec![BarValue { value: value.into(), color: color.into() }],
         });
         self
     }
@@ -196,16 +202,17 @@ impl BarPlot {
     /// ];
     /// let plot = BarPlot::new().with_colored_bars(variants);
     /// ```
-    pub fn with_colored_bars<I, T, S>(mut self, data: I) -> Self
+    pub fn with_colored_bars<I, T, V, S>(mut self, data: I) -> Self
     where
-        I: IntoIterator<Item = (T, f64, S)>,
+        I: IntoIterator<Item = (T, V, S)>,
         T: Into<String>,
+        V: Into<f64>,
         S: Into<String>,
     {
         for (label, value, color) in data {
             self.groups.push(BarGroup {
                 label: label.into(),
-                bars: vec![BarValue { value, color: color.into() }],
+                bars: vec![BarValue { value: value.into(), color: color.into() }],
             });
         }
         self
@@ -222,12 +229,17 @@ impl BarPlot {
     ///     .with_bars(vec![("A", 3.2), ("B", 4.7), ("C", 2.8)])
     ///     .with_color("steelblue");
     /// ```
-    pub fn with_bars<T: Into<String>>(mut self, data: Vec<(T, f64)>) -> Self {
+    pub fn with_bars<T, V, I>(mut self, data: I) -> Self
+    where
+        T: Into<String>,
+        V: Into<f64>,
+        I: IntoIterator<Item = (T, V)>,
+    {
         let color = self.default_color();
-        for (label, value) in data.into_iter() {
+        for (label, value) in data {
             self.groups.push(BarGroup {
                 label: label.into(),
-                bars: vec![BarValue { value, color: color.clone() }],
+                bars: vec![BarValue { value: value.into(), color: color.clone() }],
             });
         }
         self

@@ -261,7 +261,7 @@ impl QuiverPlot {
     }
 
     /// Resolve the scale multiplier, auto-computing when `scale` is `None`.
-    pub(crate) fn effective_scale(&self) -> f64 {
+    pub fn effective_scale(&self) -> f64 {
         if let Some(s) = self.scale { return s; }
         if self.arrows.len() < 2 { return 1.0; }
         let mut x_min = f64::INFINITY;
@@ -276,7 +276,16 @@ impl QuiverPlot {
             y_max = y_max.max(a.y);
             max_mag = max_mag.max(a.magnitude());
         }
-        let span = (x_max - x_min).min(y_max - y_min);
+        // Use the smaller non-zero span; fall back to the other axis when
+        // arrows are all collinear on one axis (span = 0 there).
+        let x_span = x_max - x_min;
+        let y_span = y_max - y_min;
+        let span = match (x_span > 0.0, y_span > 0.0) {
+            (true, true)  => x_span.min(y_span),
+            (true, false) => x_span,
+            (false, true) => y_span,
+            (false, false) => 0.0,
+        };
         if max_mag > 0.0 && span.is_finite() && span > 0.0 {
             self.auto_scale_fraction * span / max_mag
         } else {
@@ -323,7 +332,7 @@ impl QuiverPlot {
     /// Resolve `(head_length, half_width)` in pixels for a shaft of length
     /// `shaft_px`. Honors explicit pixel overrides, else falls back to
     /// proportional sizing clamped by `head_min_px` / `head_max_px`.
-    pub(crate) fn resolve_head(&self, shaft_px: f64) -> (f64, f64) {
+    pub fn resolve_head(&self, shaft_px: f64) -> (f64, f64) {
         let length = match self.head_length {
             Some(px) => px.min(shaft_px),
             None => {
@@ -395,7 +404,7 @@ impl QuiverPlot {
 
     /// Resolve an arrow's tail and tip endpoints in data coordinates,
     /// given a precomputed scale multiplier.
-    pub(crate) fn endpoints_with_scale(
+    pub fn endpoints_with_scale(
         &self,
         arrow: &QuiverArrow,
         scale: f64,
@@ -413,7 +422,7 @@ impl QuiverPlot {
     }
 
     /// Min and max arrow magnitudes in the current data.
-    pub(crate) fn magnitude_extent(&self) -> (f64, f64) {
+    pub fn magnitude_extent(&self) -> (f64, f64) {
         let mut lo = f64::INFINITY;
         let mut hi = f64::NEG_INFINITY;
         for a in &self.arrows {

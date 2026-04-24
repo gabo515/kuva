@@ -59,6 +59,7 @@ EXAMPLES=(
     pyramid
     mosaic
     parallel
+    quiver
     all_plots_simple
     all_plots_complex
 )

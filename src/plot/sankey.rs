@@ -1,5 +1,4 @@
 use crate::render::layout::TickFormat;
-use crate::render::palette::Palette;
 
 /// How ribbon colors are assigned in a Sankey diagram.
 #[derive(Debug, Clone)]
@@ -326,8 +325,8 @@ impl SankeyPlot {
     }
 
     /// Override the palette used for fallback Sankey node colors.
-    pub fn with_palette(mut self, palette: Palette) -> Self {
-        self.palette = Some(palette.colors().to_vec());
+    pub fn with_palette(mut self, colors: Vec<String>) -> Self {
+        self.palette = Some(colors);
         self
     }
 

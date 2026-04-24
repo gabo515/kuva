@@ -10506,11 +10506,22 @@ fn add_sankey(sankey: &SankeyPlot, scene: &mut Scene, computed: &ComputedLayout)
     let mut out_cursor = node_y.clone();
     let mut in_cursor = node_y.clone();
 
-    // Sort links by (target_col, target_node_idx_in_col) for stable ordering.
+    // Pre-compute each node's position within its column for O(1) sort lookups.
+    let mut pos_in_col = vec![0usize; n];
+    for members in &nodes_in_col {
+        for (p, &i) in members.iter().enumerate() {
+            pos_in_col[i] = p;
+        }
+    }
+
+    // Sort by (target_col, target_pos_in_col, source_pos_in_col) so that
+    // ribbons entering the same node stack top-to-bottom in source-column
+    // order, eliminating unnecessary in-node crossings.
     let mut link_order: Vec<usize> = (0..sankey.links.len()).collect();
     link_order.sort_by_key(|&li| {
+        let src = sankey.links[li].source;
         let tgt = sankey.links[li].target;
-        (col[tgt], nodes_in_col[col[tgt]].iter().position(|&x| x == tgt).unwrap_or(0))
+        (col[tgt], pos_in_col[tgt], pos_in_col[src])
     });
 
     for (link_i, &li) in link_order.iter().enumerate() {

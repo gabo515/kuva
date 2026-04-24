@@ -125,7 +125,7 @@ pub fn run(args: SankeyArgs) -> Result<(), String> {
 
     if let Some(ref name) = args.base.palette {
         if let Some(pal) = palette_from_name(name) {
-            plot = plot.with_palette(pal);
+            plot = plot.with_palette(pal.colors().iter().map(|s| s.to_string()).collect());
         }
     }
 

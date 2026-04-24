@@ -929,7 +929,10 @@ pub(crate) fn optimize_sankey_alluvial_order(
     };
     let mut best_obj = f64::INFINITY;
 
+    // Column order is fixed (user-defined axis sequence); only node stacking
+    // within each column is optimised by scanning all rotations of the TSP cycle.
     let fixed_column_order: Vec<usize> = (0..n_axes).collect();
+
     for k in 0..node_cycle.len() {
         let rotated_nodes = rotate_left(&node_cycle, k);
         let axis_nodes = axis_nodes_from_cycle(&rotated_nodes, col_orig, n_axes);
@@ -1577,14 +1580,14 @@ mod tests {
         let node_labels = ordered_label_columns(&ordered, &col_orig, &labels_by_axis);
         assert_eq!(
             column_names,
-            vec!["axis2", "axis4", "axis3", "axis1"],
+            vec!["axis1", "axis2", "axis3", "axis4"],
             "column order mismatch; labels={:?}",
             node_labels
         );
-        assert_eq!(node_labels[0], vec!["K3", "K2", "K1"]);
-        assert_eq!(node_labels[1], vec!["X", "Y", "Z"]);
-        assert_eq!(node_labels[2], vec!["M3", "M1", "M2"]);
-        assert_eq!(node_labels[3], vec!["C", "A", "B"]);
-        assert_eq!(objective, 464.0);
+        assert_eq!(node_labels[0], vec!["A", "B", "C"]);
+        assert_eq!(node_labels[1], vec!["K2", "K1", "K3"]);
+        assert_eq!(node_labels[2], vec!["M1", "M2", "M3"]);
+        assert_eq!(node_labels[3], vec!["Y", "Z", "X"]);
+        assert_eq!(objective, 646.0);
     }
 }

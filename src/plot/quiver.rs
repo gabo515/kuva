@@ -236,6 +236,10 @@ impl QuiverPlot {
 
     /// Add many arrows from an iterator of `(x, y, u, v)` tuples. Non-finite
     /// rows are silently dropped.
+    ///
+    /// All four tuple positions must use the *same* numeric type within the
+    /// iterator (e.g. all `f64` or all `i32`). For mixed types, map at the
+    /// call site: `data.iter().map(|(x, y, u, v)| (*x as f64, *y as f64, ...))`.
     pub fn with_arrows<X, Y, U, V, I>(mut self, arrows: I) -> Self
     where
         X: Into<f64>, Y: Into<f64>, U: Into<f64>, V: Into<f64>,
@@ -275,8 +279,16 @@ impl QuiverPlot {
 
     /// Pin the scale multiplier to an explicit value. Overrides the default
     /// auto-scaling behavior.
+    ///
+    /// # Panics
+    /// In debug builds, panics if `s` is not finite. Release builds accept
+    /// NaN / ±inf silently — the resulting arrows will all map to non-finite
+    /// pixel coordinates and be skipped by the render guard, producing an
+    /// empty plot.
     pub fn with_scale(mut self, s: impl Into<f64>) -> Self {
-        self.scale = Some(s.into());
+        let s = s.into();
+        debug_assert!(s.is_finite(), "QuiverPlot::with_scale: scale must be finite, got {s}");
+        self.scale = Some(s);
         self
     }
 
@@ -286,9 +298,15 @@ impl QuiverPlot {
     ///
     /// Values near `1.0` pack arrows tip-to-tail; smaller values leave more
     /// breathing room. Values above `1.0` allow arrows to overlap each other.
+    ///
+    /// # Panics
+    /// In debug builds, panics if `fraction` is not finite.
     pub fn with_auto_scale(mut self, fraction: impl Into<f64>) -> Self {
+        let fraction = fraction.into();
+        debug_assert!(fraction.is_finite(),
+            "QuiverPlot::with_auto_scale: fraction must be finite, got {fraction}");
         self.scale = None;
-        self.auto_scale_fraction = fraction.into();
+        self.auto_scale_fraction = fraction;
         self
     }
 
@@ -337,7 +355,10 @@ impl QuiverPlot {
 
     /// Set the shaft stroke width in pixels. Default `1.2`.
     pub fn with_shaft_width(mut self, w: impl Into<f64>) -> Self {
-        self.shaft_width = w.into();
+        let w = w.into();
+        debug_assert!(w.is_finite() && w >= 0.0,
+            "QuiverPlot::with_shaft_width: width must be finite and non-negative, got {w}");
+        self.shaft_width = w;
         self
     }
 
@@ -345,8 +366,11 @@ impl QuiverPlot {
     /// the shaft, `half_width` is perpendicular to it. Overrides the default
     /// proportional sizing. Heads are still capped at the shaft length.
     pub fn with_head(mut self, length: impl Into<f64>, half_width: impl Into<f64>) -> Self {
-        self.head_length = Some(length.into());
-        self.head_width = Some(half_width.into());
+        let (length, half_width) = (length.into(), half_width.into());
+        debug_assert!(length.is_finite() && half_width.is_finite(),
+            "QuiverPlot::with_head: length and half_width must be finite");
+        self.head_length = Some(length);
+        self.head_width = Some(half_width);
         self
     }
 
@@ -354,34 +378,44 @@ impl QuiverPlot {
     /// independently overridable; unset dimensions fall back to the
     /// proportional default.
     pub fn with_head_length(mut self, length: impl Into<f64>) -> Self {
-        self.head_length = Some(length.into());
+        let length = length.into();
+        debug_assert!(length.is_finite(), "QuiverPlot::with_head_length: must be finite");
+        self.head_length = Some(length);
         self
     }
 
     /// Pin just the head half-width in pixels.
     pub fn with_head_width(mut self, half_width: impl Into<f64>) -> Self {
-        self.head_width = Some(half_width.into());
+        let half_width = half_width.into();
+        debug_assert!(half_width.is_finite(), "QuiverPlot::with_head_width: must be finite");
+        self.head_width = Some(half_width);
         self
     }
 
     /// Set the head length as a fraction of the shaft length (used when no
     /// explicit `with_head` is set). Default `0.28`.
     pub fn with_head_ratio(mut self, ratio: impl Into<f64>) -> Self {
-        self.head_ratio = ratio.into();
+        let ratio = ratio.into();
+        debug_assert!(ratio.is_finite(), "QuiverPlot::with_head_ratio: must be finite");
+        self.head_ratio = ratio;
         self
     }
 
     /// Minimum head length in pixels when proportional sizing is in effect.
     /// Prevents tiny arrows from losing their head entirely. Default `4.0`.
     pub fn with_head_min_px(mut self, px: impl Into<f64>) -> Self {
-        self.head_min_px = px.into();
+        let px = px.into();
+        debug_assert!(px.is_finite(), "QuiverPlot::with_head_min_px: must be finite");
+        self.head_min_px = px;
         self
     }
 
     /// Maximum head length in pixels when proportional sizing is in effect.
     /// Prevents long arrows from growing gigantic heads. Default `14.0`.
     pub fn with_head_max_px(mut self, px: impl Into<f64>) -> Self {
-        self.head_max_px = px.into();
+        let px = px.into();
+        debug_assert!(px.is_finite(), "QuiverPlot::with_head_max_px: must be finite");
+        self.head_max_px = px;
         self
     }
 
@@ -415,7 +449,10 @@ impl QuiverPlot {
     /// Override the magnitude range used for colormap normalization.
     /// Default: derived from the data.
     pub fn with_color_range(mut self, lo: impl Into<f64>, hi: impl Into<f64>) -> Self {
-        self.color_range = Some((lo.into(), hi.into()));
+        let (lo, hi) = (lo.into(), hi.into());
+        debug_assert!(lo.is_finite() && hi.is_finite(),
+            "QuiverPlot::with_color_range: lo and hi must be finite");
+        self.color_range = Some((lo, hi));
         self
     }
 

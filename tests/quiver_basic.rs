@@ -81,17 +81,27 @@ fn test_quiver_proportional_heads_are_visible_on_small_arrows() {
 
 #[test]
 fn test_quiver_with_legend_emits_entry() {
-    let q = rotational_grid().with_legend("Wind");
+    // Use a non-default plot color so we can find the legend's glyph
+    // unambiguously by stroke color.
+    let q = rotational_grid().with_color("crimson").with_legend("Wind");
     let svg = render(q, "Quiver Legend");
     assert!(svg.contains("Wind"), "legend label should appear in SVG");
-    // Legend glyph for Quiver is a line — verify at least one short stroke
-    // appears near where the legend renders (small horizontal line). Easier
-    // proxy: confirm the SVG has more <line> elements than the empty
-    // rotational grid baseline (which has axis ticks + 25 arrow shafts).
-    let baseline_lines = render(rotational_grid(), "Baseline").matches("<line").count();
-    let legend_lines = svg.matches("<line").count();
-    assert!(legend_lines > baseline_lines,
-        "legend Line glyph should add ≥1 <line> element ({legend_lines} vs baseline {baseline_lines})");
+    // Legend glyph for Quiver is a Line — count short crimson-stroked
+    // <line> elements. The arrow shafts also use crimson, so the glyph is
+    // one of multiple matches; the key check is that *adding* the legend
+    // produces at least one *more* crimson line than the no-legend baseline.
+    let baseline = rotational_grid().with_color("crimson");
+    let baseline_svg = render(baseline, "Baseline");
+    let crimson_lines = |s: &str| -> usize {
+        s.matches("stroke=\"crimson\"").count()
+            + s.matches("stroke=\"#dc143c\"").count()
+            + s.matches("stroke=\"rgb(220,20,60)\"").count()
+    };
+    let legend_count = crimson_lines(&svg);
+    let baseline_count = crimson_lines(&baseline_svg);
+    assert!(legend_count >= baseline_count + 1,
+        "with_legend should add ≥1 crimson-stroked <line> for the glyph \
+         (got {legend_count} vs baseline {baseline_count})");
 }
 
 #[test]

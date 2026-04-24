@@ -84,6 +84,47 @@ fn test_quiver_with_legend_emits_entry() {
     let q = rotational_grid().with_legend("Wind");
     let svg = render(q, "Quiver Legend");
     assert!(svg.contains("Wind"), "legend label should appear in SVG");
+    // Legend glyph for Quiver is a line — verify at least one short stroke
+    // appears near where the legend renders (small horizontal line). Easier
+    // proxy: confirm the SVG has more <line> elements than the empty
+    // rotational grid baseline (which has axis ticks + 25 arrow shafts).
+    let baseline_lines = render(rotational_grid(), "Baseline").matches("<line").count();
+    let legend_lines = svg.matches("<line").count();
+    assert!(legend_lines > baseline_lines,
+        "legend Line glyph should add ≥1 <line> element ({legend_lines} vs baseline {baseline_lines})");
+}
+
+#[test]
+fn test_quiver_drops_non_finite_arrows() {
+    // NaN / infinity inputs must be silently skipped, not propagated.
+    let q = QuiverPlot::new()
+        .with_arrow(0.0, 0.0, 1.0, 0.0)
+        .with_arrow(f64::NAN, 0.0, 1.0, 0.0)
+        .with_arrow(0.0, f64::INFINITY, 1.0, 0.0)
+        .with_arrow(1.0, 1.0, f64::NEG_INFINITY, 0.0)
+        .with_arrow(2.0, 2.0, 1.0, f64::NAN);
+    assert_eq!(q.arrows.len(), 1, "only the all-finite arrow should remain");
+}
+
+#[test]
+fn test_quiver_with_arrows_drops_non_finite() {
+    let q = QuiverPlot::new().with_arrows(vec![
+        (0.0, 0.0, 1.0, 0.0),
+        (f64::NAN, 0.0, 1.0, 0.0),
+        (1.0, 1.0, 1.0, 1.0),
+    ]);
+    assert_eq!(q.arrows.len(), 2);
+}
+
+#[test]
+fn test_quiver_with_arrow_accepts_integer_types() {
+    // Verifies the impl Into<f64> bound — i32 / u32 / f32 all flow through
+    // without callers needing `as f64`.
+    let q = QuiverPlot::new()
+        .with_arrow(0_i32, 0_i32, 1_i32, 0_i32)
+        .with_arrow(1_u32, 1_u32, 2_u32, 3_u32)
+        .with_arrow(2.0_f32, 2.0_f32, 1.5_f32, 0.5_f32);
+    assert_eq!(q.arrows.len(), 3);
 }
 
 #[test]

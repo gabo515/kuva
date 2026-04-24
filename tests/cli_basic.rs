@@ -1030,6 +1030,25 @@ fn test_quiver_cli_no_clip_suppresses_clip_with_tight_bounds() {
 }
 
 #[test]
+fn test_quiver_cli_colorbar_label() {
+    let (stdout, stderr, code) = run_with_file(&[
+        "quiver", &data("quiver.tsv"), "--no-grid",
+        "--colormap", "viridis", "--colorbar-label", "Speed",
+    ]);
+    assert_eq!(code, 0, "exit code should be 0; stderr: {stderr}");
+    assert!(stdout.contains("Speed"), "--colorbar-label text should appear in SVG");
+}
+
+#[test]
+fn test_quiver_cli_legend() {
+    let (stdout, stderr, code) = run_with_file(&[
+        "quiver", &data("quiver.tsv"), "--no-grid", "--legend", "wind",
+    ]);
+    assert_eq!(code, 0, "exit code should be 0; stderr: {stderr}");
+    assert!(stdout.contains("wind"), "--legend text should appear in SVG");
+}
+
+#[test]
 fn test_quiver_cli_head_length_accepted() {
     // Explicit head dims should be accepted without the mutex-with-proportional
     // fallback blowing up. Compare output to default to confirm the flag did

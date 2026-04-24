@@ -218,27 +218,52 @@ impl QuiverPlot {
         }
     }
 
-    /// Add one arrow at `(x, y)` with vector `(u, v)`.
-    pub fn with_arrow(mut self, x: f64, y: f64, u: f64, v: f64) -> Self {
-        self.arrows.push(QuiverArrow { x, y, u, v, color: None });
-        self
-    }
-
-    /// Add many arrows from an iterator of `(x, y, u, v)` tuples.
-    pub fn with_arrows(mut self, arrows: impl IntoIterator<Item = (f64, f64, f64, f64)>) -> Self {
-        for (x, y, u, v) in arrows {
+    /// Add one arrow at `(x, y)` with vector `(u, v)`. Non-finite values
+    /// (NaN / infinity) are silently dropped.
+    pub fn with_arrow(
+        mut self,
+        x: impl Into<f64>,
+        y: impl Into<f64>,
+        u: impl Into<f64>,
+        v: impl Into<f64>,
+    ) -> Self {
+        let (x, y, u, v) = (x.into(), y.into(), u.into(), v.into());
+        if x.is_finite() && y.is_finite() && u.is_finite() && v.is_finite() {
             self.arrows.push(QuiverArrow { x, y, u, v, color: None });
         }
         self
     }
 
-    /// Add an arrow with a per-arrow color override.
+    /// Add many arrows from an iterator of `(x, y, u, v)` tuples. Non-finite
+    /// rows are silently dropped.
+    pub fn with_arrows<X, Y, U, V, I>(mut self, arrows: I) -> Self
+    where
+        X: Into<f64>, Y: Into<f64>, U: Into<f64>, V: Into<f64>,
+        I: IntoIterator<Item = (X, Y, U, V)>,
+    {
+        for (x, y, u, v) in arrows {
+            let (x, y, u, v) = (x.into(), y.into(), u.into(), v.into());
+            if x.is_finite() && y.is_finite() && u.is_finite() && v.is_finite() {
+                self.arrows.push(QuiverArrow { x, y, u, v, color: None });
+            }
+        }
+        self
+    }
+
+    /// Add an arrow with a per-arrow color override. Non-finite values are
+    /// silently dropped.
     pub fn with_colored_arrow(
         mut self,
-        x: f64, y: f64, u: f64, v: f64,
+        x: impl Into<f64>,
+        y: impl Into<f64>,
+        u: impl Into<f64>,
+        v: impl Into<f64>,
         color: impl Into<String>,
     ) -> Self {
-        self.arrows.push(QuiverArrow { x, y, u, v, color: Some(color.into()) });
+        let (x, y, u, v) = (x.into(), y.into(), u.into(), v.into());
+        if x.is_finite() && y.is_finite() && u.is_finite() && v.is_finite() {
+            self.arrows.push(QuiverArrow { x, y, u, v, color: Some(color.into()) });
+        }
         self
     }
 
@@ -250,19 +275,20 @@ impl QuiverPlot {
 
     /// Pin the scale multiplier to an explicit value. Overrides the default
     /// auto-scaling behavior.
-    pub fn with_scale(mut self, s: f64) -> Self {
-        self.scale = Some(s);
+    pub fn with_scale(mut self, s: impl Into<f64>) -> Self {
+        self.scale = Some(s.into());
         self
     }
 
-    /// Override the fraction of the shorter tail-span used when auto-scaling
-    /// (i.e. when [`QuiverPlot::with_scale`] hasn't been called). Default `0.85`.
+    /// Override the fraction of the nearest-neighbor distance used for the
+    /// longest arrow when auto-scaling (i.e. when [`QuiverPlot::with_scale`]
+    /// hasn't been called). Default `0.9`.
     ///
-    /// Values closer to `1.0` produce longer arrows that fill the plot; smaller
-    /// values leave more breathing room between arrows.
-    pub fn with_auto_scale(mut self, fraction: f64) -> Self {
+    /// Values near `1.0` pack arrows tip-to-tail; smaller values leave more
+    /// breathing room. Values above `1.0` allow arrows to overlap each other.
+    pub fn with_auto_scale(mut self, fraction: impl Into<f64>) -> Self {
         self.scale = None;
-        self.auto_scale_fraction = fraction;
+        self.auto_scale_fraction = fraction.into();
         self
     }
 
@@ -310,52 +336,52 @@ impl QuiverPlot {
     }
 
     /// Set the shaft stroke width in pixels. Default `1.2`.
-    pub fn with_shaft_width(mut self, w: f64) -> Self {
-        self.shaft_width = w;
+    pub fn with_shaft_width(mut self, w: impl Into<f64>) -> Self {
+        self.shaft_width = w.into();
         self
     }
 
     /// Pin arrow head dimensions to explicit pixel values. `length` is along
     /// the shaft, `half_width` is perpendicular to it. Overrides the default
     /// proportional sizing. Heads are still capped at the shaft length.
-    pub fn with_head(mut self, length: f64, half_width: f64) -> Self {
-        self.head_length = Some(length);
-        self.head_width = Some(half_width);
+    pub fn with_head(mut self, length: impl Into<f64>, half_width: impl Into<f64>) -> Self {
+        self.head_length = Some(length.into());
+        self.head_width = Some(half_width.into());
         self
     }
 
     /// Pin just the head length in pixels. `with_head_width` remains
     /// independently overridable; unset dimensions fall back to the
     /// proportional default.
-    pub fn with_head_length(mut self, length: f64) -> Self {
-        self.head_length = Some(length);
+    pub fn with_head_length(mut self, length: impl Into<f64>) -> Self {
+        self.head_length = Some(length.into());
         self
     }
 
     /// Pin just the head half-width in pixels.
-    pub fn with_head_width(mut self, half_width: f64) -> Self {
-        self.head_width = Some(half_width);
+    pub fn with_head_width(mut self, half_width: impl Into<f64>) -> Self {
+        self.head_width = Some(half_width.into());
         self
     }
 
     /// Set the head length as a fraction of the shaft length (used when no
     /// explicit `with_head` is set). Default `0.28`.
-    pub fn with_head_ratio(mut self, ratio: f64) -> Self {
-        self.head_ratio = ratio;
+    pub fn with_head_ratio(mut self, ratio: impl Into<f64>) -> Self {
+        self.head_ratio = ratio.into();
         self
     }
 
     /// Minimum head length in pixels when proportional sizing is in effect.
     /// Prevents tiny arrows from losing their head entirely. Default `4.0`.
-    pub fn with_head_min_px(mut self, px: f64) -> Self {
-        self.head_min_px = px;
+    pub fn with_head_min_px(mut self, px: impl Into<f64>) -> Self {
+        self.head_min_px = px.into();
         self
     }
 
     /// Maximum head length in pixels when proportional sizing is in effect.
     /// Prevents long arrows from growing gigantic heads. Default `14.0`.
-    pub fn with_head_max_px(mut self, px: f64) -> Self {
-        self.head_max_px = px;
+    pub fn with_head_max_px(mut self, px: impl Into<f64>) -> Self {
+        self.head_max_px = px.into();
         self
     }
 
@@ -388,8 +414,8 @@ impl QuiverPlot {
 
     /// Override the magnitude range used for colormap normalization.
     /// Default: derived from the data.
-    pub fn with_color_range(mut self, lo: f64, hi: f64) -> Self {
-        self.color_range = Some((lo, hi));
+    pub fn with_color_range(mut self, lo: impl Into<f64>, hi: impl Into<f64>) -> Self {
+        self.color_range = Some((lo.into(), hi.into()));
         self
     }
 

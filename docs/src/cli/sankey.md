@@ -59,7 +59,11 @@ kuva sankey alluvium.tsv \
     --title "NeighborNet Alluvium"
 ```
 
-`--node-order crossings` uses the default weighted crossing-reduction path. `--node-order neighbornet` switches to the neighbornet backend used by wompwomp. `--coloring left` propagates colors from dominant parents left-to-right; `--coloring label` assigns one palette color per visible label.
+`--node-order crossings` uses a TSP-based weighted crossing-reduction algorithm: it builds a co-occurrence distance matrix, finds a node cycle via nearest-neighbour + 2-opt, then tries every rotation to minimise the weighted ribbon-crossing count. The axis column order you specify with `--axis-col` is always preserved exactly — only the vertical stacking of nodes within each column is changed.
+
+`--node-order neighbornet` switches to the neighbornet backend for cycle generation; try it when the default layout is still cluttered, especially on data with tree-like co-occurrence structure.
+
+`--coloring left` propagates colors from dominant parents left-to-right; `--coloring label` assigns one palette color per visible label.
 
 ---
 

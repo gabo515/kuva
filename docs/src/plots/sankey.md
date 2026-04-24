@@ -184,19 +184,37 @@ let sankey = SankeyPlot::new()
 
 Use `.with_alluvia(iter)` to bulk-load alluvia from an iterator of `(strata, value)` rows.
 
+### How crossing-reduction ordering works
+
+The crossing-reduction algorithm minimises ribbon crossings by finding the best **vertical stacking order** of nodes within each column. The column sequence itself is always preserved exactly as you specified (left to right: tissue → cluster → sex in the example above).
+
+Internally, the algorithm:
+
+1. Builds a pairwise distance matrix over all nodes where two nodes with high co-occurrence in alluvia are assigned a short distance.
+2. Runs a TSP heuristic (nearest-neighbour insertion + 2-opt) over that matrix to find a node cycle that clusters co-occurring nodes together.
+3. Tries every rotation of the cycle, extracts the resulting within-column node ordering for each rotation, computes the weighted crossing objective (counting ribbon crossings weighted by flow), and keeps the rotation with the lowest score.
+
+**Lode stacking within nodes:** when multiple ribbons enter or leave a single node (e.g. T CELL and B CELL both flowing into cluster "4"), the ribbon segments are stacked inside that node in the same top-to-bottom order as their sources in the adjacent column. This prevents unnecessary criss-crossing at the node boundary.
+
 ### Ordering modes
 
-- `.with_node_order(SankeyNodeOrder::Input)` preserves insertion order within each column.
-- `.with_crossing_reduction()` runs the default weighted crossing-reduction backend.
-- `.with_neighbornet()` switches to the neighbornet backend.
-- `.with_node_order_seed(seed)` makes the crossing-reduction path deterministic.
+| Method | Behaviour |
+|---|---|
+| `.with_node_order(SankeyNodeOrder::Input)` | Preserve insertion order within each column (default) |
+| `.with_crossing_reduction()` | TSP-based weighted crossing reduction |
+| `.with_neighbornet()` | Use the neighbornet cycle backend instead of the TSP heuristic |
+| `.with_node_order_seed(seed)` | Fix the RNG seed for reproducible results (default `42`) |
+
+`CrossingReduction` is a good general-purpose choice. `Neighbornet` can produce different orderings on data with tree-like co-occurrence structure; try both when the default layout is cluttered.
 
 ### Coloring modes
 
-- `.with_node_coloring(SankeyNodeColoring::Label)` reuses one palette color per label across the plot.
-- `.with_left_coloring()` propagates colors left-to-right from dominant parents, matching wompwomp-style alluvial coloring.
-- `.with_palette(palette)` overrides the fallback palette used by Sankey coloring.
-- `.with_left_color_cutoff(f)` sets the dominant-parent share threshold used by left coloring.
+| Method | Behaviour |
+|---|---|
+| `.with_node_coloring(SankeyNodeColoring::Label)` | One palette color per unique label, shared across all columns (default) |
+| `.with_left_coloring()` | Each node inherits the color of its dominant left-side parent; new palette colors are allocated when no parent exceeds the cutoff |
+| `.with_palette(colors)` | Override the fallback color list used by either mode |
+| `.with_left_color_cutoff(f)` | Minimum parent-share (0.0–1.0) required for color inheritance in left mode (default `0.5`) |
 
 ---
 

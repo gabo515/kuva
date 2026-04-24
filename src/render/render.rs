@@ -3382,9 +3382,12 @@ fn add_parallel(pp: &ParallelPlot, scene: &mut Scene, computed: &ComputedLayout)
     };
 
     // ── Layout geometry ────────────────────────────────────────────────────────
+    // v_inset reserves space so axis name labels (drawn at plot_top - 8) sit
+    // comfortably below the title rather than crowding it.
+    let v_inset     = computed.body_size as f64 + 10.0;
     let plot_left   = computed.margin_left  + h_inset;
     let plot_right  = computed.width - computed.margin_right - h_inset;
-    let plot_top    = computed.margin_top;
+    let plot_top    = computed.margin_top + v_inset;
     let plot_bottom = computed.height - computed.margin_bottom;
     let plot_w      = (plot_right - plot_left).max(1.0);
     let plot_h      = (plot_bottom - plot_top).max(1.0);

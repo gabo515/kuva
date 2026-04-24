@@ -890,31 +890,31 @@ check "calendar date range" \
 
 # ── quiver ────────────────────────────────────────────────────────────────────
 check "quiver basic" \
-    "$BIN" quiver "$DATA/quiver.tsv" \
+    "$BIN" quiver "$DATA/quiver.tsv" --no-grid \
         --title "Quiver Field" --x-label "x" --y-label "y"
 
 check "quiver with colormap" \
-    "$BIN" quiver "$DATA/quiver.tsv" \
+    "$BIN" quiver "$DATA/quiver.tsv" --no-grid \
         --colormap viridis --colorbar-label "Speed" \
         --title "Quiver Magnitude"
 
 check "quiver pivot middle" \
-    "$BIN" quiver "$DATA/quiver.tsv" \
+    "$BIN" quiver "$DATA/quiver.tsv" --no-grid \
         --pivot middle --tight-bounds \
         --title "Quiver Pivot Middle"
 
 check "quiver pivot tip" \
-    "$BIN" quiver "$DATA/quiver.tsv" \
+    "$BIN" quiver "$DATA/quiver.tsv" --no-grid \
         --pivot tip --arrow-scale 0.3 \
         --title "Quiver Pivot Tip"
 
 check "quiver explicit head" \
-    "$BIN" quiver "$DATA/quiver.tsv" \
+    "$BIN" quiver "$DATA/quiver.tsv" --no-grid \
         --head-length 12 --head-width 4 --shaft-width 2 \
         --title "Quiver Fixed Head"
 
 check "quiver with legend" \
-    "$BIN" quiver "$DATA/quiver.tsv" \
+    "$BIN" quiver "$DATA/quiver.tsv" --no-grid \
         --legend "wind" \
         --title "Quiver Legend"
 

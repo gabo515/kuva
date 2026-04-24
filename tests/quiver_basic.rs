@@ -4,7 +4,9 @@ use kuva::backend::svg::SvgBackend;
 
 fn render(q: QuiverPlot, title: &str) -> String {
     let plots = vec![Plot::Quiver(q)];
-    let layout = Layout::auto_from_plots(&plots).with_title(title);
+    let layout = Layout::auto_from_plots(&plots)
+        .with_title(title)
+        .with_show_grid(false);
     SvgBackend.render_scene(&render_multiple(plots, layout))
 }
 

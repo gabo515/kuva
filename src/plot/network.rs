@@ -213,10 +213,10 @@ impl NetworkPlot {
     ///
     /// Non-zero entries become edges; the value is used as the weight.
     /// The matrix is stored and edges are expanded by
-    /// [`resolve_matrix`] (called automatically by `render_multiple`),
+    /// `resolve_matrix` (called automatically by `render_multiple`),
     /// so `.with_directed()` can be called before or after this method.
     ///
-    /// If you call [`compute_positions`] directly (e.g. to inspect the
+    /// If you call `compute_positions` directly (e.g. to inspect the
     /// layout), call `resolve_matrix()` first.
     pub fn with_matrix<S, L>(mut self, matrix: Vec<Vec<f64>>, labels: L) -> Self
     where
@@ -347,7 +347,7 @@ impl NetworkPlot {
 
     /// Show a legend; one entry per unique group.  If no groups have been
     /// assigned the legend falls back to one entry per node, which can be
-    /// large — prefer using [`with_node_group`] to keep the legend compact.
+    /// large — prefer using `with_node_group` to keep the legend compact.
     pub fn with_legend<S: Into<String>>(mut self, label: S) -> Self {
         self.legend_label = Some(label.into());
         self
@@ -366,9 +366,9 @@ impl NetworkPlot {
     /// Disconnected components are laid out independently, then tiled
     /// side-by-side (like igraph's `component_wise` approach).
     ///
-    /// Call [`resolve_matrix`] first if a matrix was provided via
-    /// [`with_matrix`], or this will only see edges added via
-    /// [`with_edge`]/[`with_edges`].
+    /// Call `resolve_matrix` first if a matrix was provided via
+    /// `with_matrix`, or this will only see edges added via
+    /// `with_edge`/`with_edges`.
     pub fn compute_positions(&self) -> Vec<(f64, f64)> {
         let n = self.nodes.len();
         if n == 0 { return vec![]; }

@@ -888,6 +888,62 @@ check "calendar date range" \
         --start 2024-01-01 --end 2024-06-30 \
         --agg sum --title "Calendar Range"
 
+# ── bump ──────────────────────────────────────────────────────────────────────
+check "bump basic" \
+    "$BIN" bump "$DATA/bump.tsv" \
+        --series series --time time --rank rank \
+        --title "Ranking Over Time"
+
+check "bump with legend" \
+    "$BIN" bump "$DATA/bump.tsv" \
+        --series series --time time --rank rank \
+        --title "Bump Chart"
+
+# ── funnel ────────────────────────────────────────────────────────────────────
+check "funnel basic" \
+    "$BIN" funnel "$DATA/funnel.tsv" \
+        --label stage --value n_screened \
+        --title "Clinical Trial Funnel"
+
+check "funnel diverging" \
+    "$BIN" funnel "$DATA/funnel.tsv" \
+        --label stage --value n_screened --mirror-col n_placebo \
+        --left-label "Treatment" --right-label "Placebo" \
+        --title "Diverging Funnel"
+
+# ── rose ──────────────────────────────────────────────────────────────────────
+check "rose basic" \
+    "$BIN" rose "$DATA/rose.tsv" \
+        --label direction --value high_speed \
+        --title "Wind Rose"
+
+check "rose grouped" \
+    "$BIN" rose "$DATA/rose.tsv" \
+        --label direction --value high_speed \
+        --legend "Speed" --title "Wind Rose"
+
+# ── treemap ───────────────────────────────────────────────────────────────────
+check "treemap basic" \
+    "$BIN" treemap "$DATA/treemap.tsv" \
+        --label label --value value \
+        --title "World Population"
+
+check "treemap hierarchical" \
+    "$BIN" treemap "$DATA/treemap.tsv" \
+        --label label --value value --parent parent \
+        --title "World Population by Region"
+
+# ── sunburst ──────────────────────────────────────────────────────────────────
+check "sunburst basic" \
+    "$BIN" sunburst "$DATA/sunburst.tsv" \
+        --label label --value value \
+        --title "Animal Kingdom"
+
+check "sunburst hierarchical" \
+    "$BIN" sunburst "$DATA/sunburst.tsv" \
+        --label label --value value --parent parent \
+        --title "Animal Kingdom by Class"
+
 # ── summary ───────────────────────────────────────────────────────────────────
 echo ""
 echo "Results: $PASS passed, $FAIL failed"

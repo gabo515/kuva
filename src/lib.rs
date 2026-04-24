@@ -79,7 +79,7 @@ pub use render::datetime::{DateTimeAxis, DateUnit, ymd, ymd_hms};
 /// ```
 ///
 /// For fine-grained control (custom layout, twin axes, special-case plot types)
-/// use [`render::render::render_multiple`] and [`backend::svg::SvgBackend`] directly.
+/// use [`render::render::render_multiple`] and [`struct@backend::svg::SvgBackend`] directly.
 pub fn render_to_svg(plots: Vec<render::plots::Plot>, layout: render::layout::Layout) -> String {
     let scene = render::render::render_multiple(plots, layout);
     backend::svg::SvgBackend.render_scene(&scene)

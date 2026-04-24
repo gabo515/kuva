@@ -427,9 +427,11 @@ impl Layout {
             if let Plot::Raincloud(rp) = plot {
                 let labels = rp.groups.iter().map(|g| g.label.clone()).collect::<Vec<_>>();
                 x_labels = Some(labels);
-                if let Some(ref label) = rp.legend_label {
+                if rp.legend_label.is_some() {
                     has_legend = true;
-                    max_label_len = max_label_len.max(label.len());
+                    for g in &rp.groups {
+                        max_label_len = max_label_len.max(g.label.len());
+                    }
                 }
             }
 

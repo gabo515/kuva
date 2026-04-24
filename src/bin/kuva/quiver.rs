@@ -88,6 +88,14 @@ pub struct QuiverArgs {
     #[arg(long)]
     pub tight_bounds: bool,
 
+    /// Force arrow clipping to the plot rectangle regardless of bounds mode.
+    #[arg(long, conflicts_with = "no_clip")]
+    pub clip: bool,
+
+    /// Disable arrow clipping even when --tight-bounds is set.
+    #[arg(long)]
+    pub no_clip: bool,
+
     /// Where (x, y) sits on each arrow: `tail` (default), `middle`, or `tip`.
     #[arg(long, value_enum)]
     pub pivot: Option<CliPivot>,
@@ -147,6 +155,8 @@ pub fn run(args: QuiverArgs) -> Result<(), String> {
     }
     if let Some(s) = args.legend { plot = plot.with_legend(s); }
     if args.tight_bounds { plot = plot.with_tight_bounds(); }
+    if args.clip { plot = plot.with_clip_to_plot_area(); }
+    if args.no_clip { plot = plot.with_no_clip(); }
     if let Some(p) = args.pivot { plot = plot.with_pivot(p.into()); }
 
     let plots = vec![Plot::Quiver(plot)];

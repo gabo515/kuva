@@ -1,8 +1,6 @@
 use crate::plot::colormap::ColorMap;
 
 /// Where `(x, y)` sits relative to the rendered arrow.
-///
-/// Matches the matplotlib convention of the same name.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum QuiverPivot {
     /// `(x, y)` is the back of the arrow; it points *away* from that point. **(default)**
@@ -96,8 +94,8 @@ pub struct QuiverPlot {
     ///
     /// - `Some(s)` — use `s` directly (set via [`QuiverPlot::with_scale`]).
     /// - `None` — auto-compute so the longest arrow is roughly one grid
-    ///   cell long (`≈ span / √n`), matching matplotlib's default. This
-    ///   prevents arrows from overlapping each other in dense fields.
+    ///   cell long (`≈ span / √n`). This prevents arrows from overlapping
+    ///   each other in dense fields.
     pub scale: Option<f64>,
     /// Fraction of the nearest-neighbor distance used for the longest
     /// arrow when `scale` is `None`. Default `0.9`.
@@ -138,6 +136,11 @@ pub struct QuiverPlot {
     /// so nothing clips). Tight bounds produce a denser-looking field that
     /// better fills the plot area.
     pub tight_bounds: bool,
+    /// Clip arrows to the plot rectangle when `Some(b)`. When `None`, clipping
+    /// is auto-derived from `tight_bounds` (clipping implied when tight bounds
+    /// are on, since overflowing arrows would hit the axis labels). Set
+    /// explicitly via [`QuiverPlot::with_clip_to_plot_area`] or `with_no_clip`.
+    pub clip_to_plot_area: Option<bool>,
     /// Where `(x, y)` sits relative to the rendered arrow. Default `Tail`.
     pub pivot: QuiverPivot,
 }
@@ -210,6 +213,7 @@ impl QuiverPlot {
             color_legend_label: None,
             legend_label: None,
             tight_bounds: false,
+            clip_to_plot_area: None,
             pivot: QuiverPivot::Tail,
         }
     }
@@ -267,9 +271,8 @@ impl QuiverPlot {
     /// The auto-scale target is: longest arrow ≈ `fraction × nearest-neighbor
     /// distance`, where the nearest-neighbor distance for `n` arrows on an
     /// `R`-wide span is approximated as `R / √n`. This prevents arrows from
-    /// overlapping each other in dense fields — the same principle matplotlib
-    /// uses.
-    pub fn effective_scale(&self) -> f64 {
+    /// overlapping each other in dense fields.
+    pub(crate) fn effective_scale(&self) -> f64 {
         if let Some(s) = self.scale { return s; }
         let n = self.arrows.len();
         if n < 2 { return 1.0; }
@@ -342,6 +345,20 @@ impl QuiverPlot {
         self
     }
 
+    /// Minimum head length in pixels when proportional sizing is in effect.
+    /// Prevents tiny arrows from losing their head entirely. Default `4.0`.
+    pub fn with_head_min_px(mut self, px: f64) -> Self {
+        self.head_min_px = px;
+        self
+    }
+
+    /// Maximum head length in pixels when proportional sizing is in effect.
+    /// Prevents long arrows from growing gigantic heads. Default `14.0`.
+    pub fn with_head_max_px(mut self, px: f64) -> Self {
+        self.head_max_px = px;
+        self
+    }
+
     /// Resolve `(head_length, half_width)` in pixels for a shaft of length
     /// `shaft_px`. Honors explicit pixel overrides, else falls back to
     /// proportional sizing clamped by `head_min_px` / `head_max_px`.
@@ -403,10 +420,32 @@ impl QuiverPlot {
 
     /// Derive axis bounds from arrow tails only. Arrows may extend past the
     /// plot box. Useful for dense grids where tip-inclusive bounds produce
-    /// too much whitespace around the field.
+    /// too much whitespace around the field. When clipping hasn't been
+    /// explicitly pinned, this also turns clipping on.
     pub fn with_tight_bounds(mut self) -> Self {
         self.tight_bounds = true;
         self
+    }
+
+    /// Force arrows to be clipped to the plot rectangle regardless of bounds
+    /// mode. Useful when you want tip-inclusive bounds but still don't want
+    /// the occasional outlier arrow to overflow into an axis label.
+    pub fn with_clip_to_plot_area(mut self) -> Self {
+        self.clip_to_plot_area = Some(true);
+        self
+    }
+
+    /// Disable arrow clipping even when `tight_bounds` is on. Arrows will be
+    /// drawn whole and may extend past the axis box into the margins.
+    pub fn with_no_clip(mut self) -> Self {
+        self.clip_to_plot_area = Some(false);
+        self
+    }
+
+    /// Resolve whether arrows should be clipped to the plot rectangle,
+    /// falling back to `tight_bounds` when no explicit override is set.
+    pub(crate) fn should_clip(&self) -> bool {
+        self.clip_to_plot_area.unwrap_or(self.tight_bounds)
     }
 
     /// Where `(x, y)` sits relative to the rendered arrow. Default `Tail`.
@@ -417,7 +456,7 @@ impl QuiverPlot {
 
     /// Resolve an arrow's tail and tip endpoints in data coordinates,
     /// given a precomputed scale multiplier.
-    pub fn endpoints_with_scale(
+    pub(crate) fn endpoints_with_scale(
         &self,
         arrow: &QuiverArrow,
         scale: f64,
@@ -435,7 +474,7 @@ impl QuiverPlot {
     }
 
     /// Min and max arrow magnitudes in the current data.
-    pub fn magnitude_extent(&self) -> (f64, f64) {
+    pub(crate) fn magnitude_extent(&self) -> (f64, f64) {
         let mut lo = f64::INFINITY;
         let mut hi = f64::NEG_INFINITY;
         for a in &self.arrows {
@@ -445,5 +484,69 @@ impl QuiverPlot {
         }
         if !lo.is_finite() { return (0.0, 0.0); }
         (lo, hi)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pivot_middle_vs_tail_shifts_endpoints() {
+        let tail = QuiverPlot::new()
+            .with_arrow(0.0, 0.0, 2.0, 0.0)
+            .with_scale(1.0)
+            .with_pivot(QuiverPivot::Tail);
+        let mid = QuiverPlot::new()
+            .with_arrow(0.0, 0.0, 2.0, 0.0)
+            .with_scale(1.0)
+            .with_pivot(QuiverPivot::Middle);
+        let (tail_t, tip_t) = tail.endpoints_with_scale(&tail.arrows[0], 1.0);
+        let (tail_m, tip_m) = mid.endpoints_with_scale(&mid.arrows[0], 1.0);
+        assert_eq!(tail_t, (0.0, 0.0));
+        assert_eq!(tip_t,  (2.0, 0.0));
+        assert_eq!(tail_m, (-1.0, 0.0));
+        assert_eq!(tip_m,  (1.0, 0.0));
+    }
+
+    #[test]
+    fn pivot_tip_places_tip_at_data_point() {
+        let q = QuiverPlot::new()
+            .with_arrow(5.0, 5.0, 1.0, 1.0)
+            .with_scale(1.0)
+            .with_pivot(QuiverPivot::Tip);
+        let (_tail, tip) = q.endpoints_with_scale(&q.arrows[0], 1.0);
+        assert_eq!(tip, (5.0, 5.0));
+    }
+
+    #[test]
+    fn auto_scale_shrinks_huge_vectors() {
+        let q = QuiverPlot::new()
+            .with_arrow(0.0, 0.0, 10.0, 0.0)
+            .with_arrow(1.0, 0.0, 10.0, 0.0);
+        let s = q.effective_scale();
+        assert!(s > 0.0 && s < 0.1, "auto-scale should shrink huge vectors; got {s}");
+    }
+
+    #[test]
+    fn with_scale_pins_exact_value() {
+        let q = QuiverPlot::new()
+            .with_arrow(0.0, 0.0, 10.0, 0.0)
+            .with_arrow(1.0, 0.0, 10.0, 0.0)
+            .with_scale(0.5);
+        assert_eq!(q.effective_scale(), 0.5);
+    }
+
+    #[test]
+    fn effective_scale_fallback_when_empty() {
+        assert_eq!(QuiverPlot::new().effective_scale(), 1.0);
+    }
+
+    #[test]
+    fn effective_scale_fallback_when_all_magnitudes_zero() {
+        let q = QuiverPlot::new()
+            .with_arrow(0.0, 0.0, 0.0, 0.0)
+            .with_arrow(1.0, 1.0, 0.0, 0.0);
+        assert_eq!(q.effective_scale(), 1.0);
     }
 }

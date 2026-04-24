@@ -43,7 +43,7 @@ For irregular data (not on a grid), add arrows one at a time with `.with_arrow(x
 
 ## Scaling
 
-By default the scale multiplier is **auto-computed** so the longest arrow is roughly one grid cell long — approximated as `span / √n` for `n` arrows on a span of `R`. This matches matplotlib's convention and prevents arrows from overlapping each other in dense fields, so zero-config quiver plots look sensible no matter what units `(u, v)` are in.
+By default the scale multiplier is **auto-computed** so the longest arrow is roughly one grid cell long — approximated as `span / √n` for `n` arrows on a span of `R`. This prevents arrows from overlapping each other in dense fields, so zero-config quiver plots look sensible no matter what units `(u, v)` are in.
 
 Two overrides are available when you need explicit control:
 

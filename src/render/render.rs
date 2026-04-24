@@ -17022,7 +17022,7 @@ fn add_quiver(q: &crate::plot::quiver::QuiverPlot, scene: &mut Scene, computed: 
 
     // With tight bounds, arrows can extend past the plot area and into the
     // axis/title margins. Clip to the plot rectangle so they stay tidy.
-    let clipped = q.tight_bounds;
+    let clipped = q.should_clip();
     if clipped {
         let clip_id = format!("kuva-quiver-clip-{}", scene.elements.len());
         let clip_def = format!(

@@ -9,8 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`QuiverPlot`** — 2-D vector field rendered as arrows. Each arrow has a tail at `(x, y)` and a vector `(u, v)`. Features: `from_function()` constructor for sampling a closure on a regular grid; auto-scaled arrow length (default) or explicit `with_scale`; proportional arrow heads that make every arrow "look like an arrow" regardless of magnitude; three pivot modes (`Tail`, `Middle`, `Tip`); optional magnitude-driven colormap with automatic colorbar; `tight_bounds` opt-in for dense fields with plot-area clipping; combo helper `with_magnitude_colormap(cmap, label)`. CLI: `kuva quiver`.
-- **`render_utils::arrow_head_path`** — shared helper used by `QuiverPlot`, `NetworkPlot` (directed-edge arrowheads), and `TextAnnotation` arrows.
+- **`QuiverPlot`** — 2-D vector field rendered as arrows. Each arrow has a tail at `(x, y)` and a vector `(u, v)`. Features: `from_function()` constructor for sampling a closure on a regular grid; auto-scaled arrow length (longest arrow ≈ one grid cell via a `span/√n` heuristic) or explicit `with_scale`; proportional arrow heads that make every arrow "look like an arrow" regardless of magnitude; three pivot modes (`Tail`, `Middle`, `Tip`); optional magnitude-driven colormap with automatic colorbar; `tight_bounds` opt-in for dense fields and independent `with_clip_to_plot_area()` for plot-area clipping; combo helper `with_magnitude_colormap(cmap, label)`. CLI: `kuva quiver`.
+
+### Changed
+
+- **Refactor: `render_utils::arrow_head_path`** — factored a shared arrow-head triangle helper now used by `QuiverPlot`, `NetworkPlot` (directed-edge arrowheads), and `TextAnnotation` arrows. Eliminates three inlined copies of the same geometry.
+- **Refactor: `colorbar_linear` helper** in `render/plots.rs` — consolidates six near-identical `Arc<Fn>` closures that built linearly-normalized colorbars across `Heatmap`, `DotPlot`, `DicePlot`, `Contour`, `Clustermap`, and (new) `Quiver`. The 3-D `colorbar_from_z` path also routes through it now.
 
 ---
 

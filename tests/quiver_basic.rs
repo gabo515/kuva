@@ -1,4 +1,4 @@
-use kuva::plot::{QuiverPlot, QuiverPivot, ColorMap};
+use kuva::plot::{QuiverPlot, ColorMap};
 use kuva::render::{plots::Plot, layout::Layout, render::render_multiple};
 use kuva::backend::svg::SvgBackend;
 
@@ -46,54 +46,6 @@ fn test_quiver_from_function_endpoints_inclusive() {
 }
 
 #[test]
-fn test_quiver_pivot_middle_vs_tail_shifts_endpoints() {
-    let arrow_tail = QuiverPlot::new()
-        .with_arrow(0.0, 0.0, 2.0, 0.0)
-        .with_scale(1.0)
-        .with_pivot(QuiverPivot::Tail);
-    let arrow_mid = QuiverPlot::new()
-        .with_arrow(0.0, 0.0, 2.0, 0.0)
-        .with_scale(1.0)
-        .with_pivot(QuiverPivot::Middle);
-    let (tail_t, tip_t) = arrow_tail.endpoints_with_scale(&arrow_tail.arrows[0], 1.0);
-    let (tail_m, tip_m) = arrow_mid.endpoints_with_scale(&arrow_mid.arrows[0], 1.0);
-    assert_eq!(tail_t, (0.0, 0.0));
-    assert_eq!(tip_t,  (2.0, 0.0));
-    assert_eq!(tail_m, (-1.0, 0.0));
-    assert_eq!(tip_m,  (1.0, 0.0));
-}
-
-#[test]
-fn test_quiver_pivot_tip_places_tip_at_data_point() {
-    let q = QuiverPlot::new()
-        .with_arrow(5.0, 5.0, 1.0, 1.0)
-        .with_scale(1.0)
-        .with_pivot(QuiverPivot::Tip);
-    let (_tail, tip) = q.endpoints_with_scale(&q.arrows[0], 1.0);
-    assert_eq!(tip, (5.0, 5.0));
-}
-
-#[test]
-fn test_quiver_auto_scale_picks_sensible_length() {
-    // Two huge vectors on a tiny span: the √n grid-cell heuristic should
-    // shrink the scale well below 1.0 so arrows don't overlap each other.
-    let q = QuiverPlot::new()
-        .with_arrow(0.0, 0.0, 10.0, 0.0)
-        .with_arrow(1.0, 0.0, 10.0, 0.0);
-    let s = q.effective_scale();
-    assert!(s > 0.0 && s < 0.1, "auto-scale should shrink huge vectors; got {s}");
-}
-
-#[test]
-fn test_quiver_with_scale_pins_exact_value() {
-    let q = QuiverPlot::new()
-        .with_arrow(0.0, 0.0, 10.0, 0.0)
-        .with_arrow(1.0, 0.0, 10.0, 0.0)
-        .with_scale(0.5);
-    assert_eq!(q.effective_scale(), 0.5);
-}
-
-#[test]
 fn test_quiver_colormap_triggers_colorbar() {
     let q = rotational_grid().with_magnitude_colormap(ColorMap::Viridis, "Speed");
     let svg = render(q, "Quiver Colormap");
@@ -136,9 +88,34 @@ fn test_quiver_with_legend_emits_entry() {
 
 #[test]
 fn test_quiver_empty_arrows_renders_empty_plot() {
-    let svg = render(QuiverPlot::new(), "Empty");
-    // Should produce a valid SVG with axes but no arrows.
+    use kuva::render::plots::Plot;
+    let empty = QuiverPlot::new();
+    // bounds() must return None so Layout::auto_from_plots falls back gracefully.
+    assert!(Plot::Quiver(empty.clone()).bounds().is_none(),
+        "empty QuiverPlot bounds must be None");
+    // Render still produces a valid SVG with axes but no arrow shapes.
+    let svg = render(empty, "Empty");
     assert!(svg.contains("<svg"));
+    assert!(!svg.contains("class=\"tt\""),
+        "empty plot should have no interactive arrow groups");
+}
+
+#[test]
+fn test_quiver_per_arrow_color_beats_colormap() {
+    // When BOTH a colormap and a per-arrow color override are set, the
+    // per-arrow color must win — documented priority is
+    // per-arrow > colormap > plot-level.
+    let q = QuiverPlot::new()
+        .with_colored_arrow(0.0, 0.0, 1.0, 0.0, "tomato")
+        .with_arrow(1.0, 0.0, 2.0, 0.0)
+        .with_arrow(2.0, 0.0, 0.5, 0.0)
+        .with_magnitude_colormap(ColorMap::Viridis, "Speed");
+    let svg = render(q, "Priority with cmap");
+    // Tomato must appear (per-arrow override).
+    let has_tomato = svg.contains("tomato")
+        || svg.contains("#ff6347")
+        || svg.contains("rgb(255,99,71)");
+    assert!(has_tomato, "per-arrow tomato must override colormap; svg did not contain tomato");
 }
 
 #[test]

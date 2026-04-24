@@ -918,6 +918,11 @@ check "quiver with legend" \
         --legend "wind" \
         --title "Quiver Legend"
 
+check "quiver grid on + tight bounds" \
+    "$BIN" quiver "$DATA/quiver.tsv" \
+        --tight-bounds --pivot middle \
+        --title "Quiver Grid + Clip"
+
 # ── summary ───────────────────────────────────────────────────────────────────
 echo ""
 echo "Results: $PASS passed, $FAIL failed"

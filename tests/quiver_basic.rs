@@ -3,6 +3,7 @@ use kuva::render::{plots::Plot, layout::Layout, render::render_multiple};
 use kuva::backend::svg::SvgBackend;
 
 fn render(q: QuiverPlot, title: &str) -> String {
+    std::fs::create_dir_all("test_outputs").ok();
     let plots = vec![Plot::Quiver(q)];
     let layout = Layout::auto_from_plots(&plots)
         .with_title(title)
@@ -21,7 +22,6 @@ fn rotational_grid() -> QuiverPlot {
 #[test]
 fn test_quiver_basic_renders_arrows() {
     let svg = render(rotational_grid(), "Quiver Basic");
-    std::fs::create_dir_all("test_outputs").ok();
     std::fs::write("test_outputs/quiver_basic.svg", &svg).unwrap();
     assert!(svg.contains("<svg"), "should be valid SVG");
     let lines = svg.matches("<line").count();
@@ -75,11 +75,11 @@ fn test_quiver_pivot_tip_places_tip_at_data_point() {
 
 #[test]
 fn test_quiver_auto_scale_picks_sensible_length() {
-    // Single arrow gives a span of 0 → falls back to 1.0; use two arrows.
+    // Two huge vectors on a tiny span: the √n grid-cell heuristic should
+    // shrink the scale well below 1.0 so arrows don't overlap each other.
     let q = QuiverPlot::new()
         .with_arrow(0.0, 0.0, 10.0, 0.0)
         .with_arrow(1.0, 0.0, 10.0, 0.0);
-    // Longest arrow (magnitude 10) should fill ~85% of the x span (1.0).
     let s = q.effective_scale();
     assert!(s > 0.0 && s < 0.1, "auto-scale should shrink huge vectors; got {s}");
 }

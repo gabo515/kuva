@@ -54,8 +54,8 @@ pub struct QuiverArgs {
     #[arg(long)]
     pub arrow_scale: Option<f64>,
 
-    /// Auto-scale so the longest arrow spans this fraction of the shorter axis.
-    /// Mutually exclusive with `--arrow-scale`.
+    /// Fraction of the nearest-neighbor distance for the longest arrow.
+    /// Default `0.9` (auto-scaling is on). Mutually exclusive with `--arrow-scale`.
     #[arg(long, conflicts_with = "arrow_scale")]
     pub auto_scale: Option<f64>,
 

@@ -23,7 +23,6 @@ let plot = QuiverPlot::from_function(
     (-5.0, 5.0, 10),
     |x, y| (-y * 0.3, x * 0.3),
 )
-    .with_auto_scale(0.85)
     .with_color("steelblue");
 
 let plots = vec![Plot::Quiver(plot)];
@@ -44,12 +43,12 @@ For irregular data (not on a grid), add arrows one at a time with `.with_arrow(x
 
 ## Scaling
 
-By default the scale multiplier is **auto-computed** so the longest arrow spans 85% of the shorter side of the tail bounding box. This is what makes a zero-config quiver plot look sensible no matter what units `(u, v)` are in.
+By default the scale multiplier is **auto-computed** so the longest arrow is roughly one grid cell long — approximated as `span / √n` for `n` arrows on a span of `R`. This matches matplotlib's convention and prevents arrows from overlapping each other in dense fields, so zero-config quiver plots look sensible no matter what units `(u, v)` are in.
 
 Two overrides are available when you need explicit control:
 
 - `.with_scale(s)` — pin the multiplier. Arrow length in data coords is `(u, v) * s`.
-- `.with_auto_scale(fraction)` — keep auto-scaling on, but change the target fraction (e.g. `0.95` for arrows that almost fill the plot, `0.5` for more breathing room).
+- `.with_auto_scale(fraction)` — keep auto-scaling on, but change the target fraction of the nearest-neighbor distance (default `0.9`). Values near `1.0` pack arrows tip-to-tail; smaller values leave more breathing room.
 
 ---
 
@@ -110,7 +109,7 @@ Proportional heads are clamped to `[4, 14]` pixels so tiny arrows still show a v
 | `--v-col <COL>` | `3` | Vector y-component column |
 | `--color <CSS>` | `steelblue` | Arrow color (overridden by `--colormap`) |
 | `--arrow-scale <F>` | — | Pin `(u, v)` multiplier (disables auto-scaling) |
-| `--auto-scale <F>` | `0.85` | Fraction of shorter axis span for the longest arrow |
+| `--auto-scale <F>` | `0.9` | Fraction of the nearest-neighbor distance for the longest arrow |
 | `--shaft-width <PX>` | `1.2` | Shaft stroke width |
 | `--head-length <PX>` | *proportional* | Pin head length to fixed pixels (default is 28% of shaft, clamped to 4–14 px) |
 | `--head-width <PX>` | *proportional* | Pin head half-width to fixed pixels |

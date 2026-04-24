@@ -345,7 +345,7 @@ impl QuiverPlot {
     /// Resolve `(head_length, half_width)` in pixels for a shaft of length
     /// `shaft_px`. Honors explicit pixel overrides, else falls back to
     /// proportional sizing clamped by `head_min_px` / `head_max_px`.
-    pub fn resolve_head(&self, shaft_px: f64) -> (f64, f64) {
+    pub(crate) fn resolve_head(&self, shaft_px: f64) -> (f64, f64) {
         let length = match self.head_length {
             Some(px) => px.min(shaft_px),
             None => {

@@ -12,7 +12,7 @@ Quiver plot — 2-D vector field rendered as arrows. Each row is one arrow with 
 | `--v-col <COL>` | `3` | Vector y-component column |
 | `--color <CSS>` | `steelblue` | Arrow color (ignored when `--colormap` is set) |
 | `--arrow-scale <F>` | — | Pin the multiplier applied to `(u, v)` before axis mapping. Disables auto-scaling |
-| `--auto-scale <F>` | `0.85` | Fraction of the shorter axis span used for the longest arrow. Auto-scaling is on by default; pass this flag only to change the fraction. Mutually exclusive with `--arrow-scale` |
+| `--auto-scale <F>` | `0.9` | Fraction of the nearest-neighbor distance used for the longest arrow (the auto-scale heuristic sizes arrows to ~one grid cell). Auto-scaling is on by default; pass this flag only to change the fraction. Mutually exclusive with `--arrow-scale` |
 | `--shaft-width <PX>` | `1.2` | Shaft stroke width |
 | `--head-length <PX>` | *proportional* | Pin head length (pixels). Default: 28% of shaft, clamped to 4–14 px |
 | `--head-width <PX>` | *proportional* | Pin head half-width (pixels) |

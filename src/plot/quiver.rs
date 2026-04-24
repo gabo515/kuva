@@ -95,13 +95,15 @@ pub struct QuiverPlot {
     /// Multiplier applied to `(u, v)` before axis mapping.
     ///
     /// - `Some(s)` — use `s` directly (set via [`QuiverPlot::with_scale`]).
-    /// - `None` — auto-compute so the longest arrow spans
-    ///   [`QuiverPlot::auto_scale_fraction`] of the shorter tail span.
-    ///   This is the default; it's what makes a zero-config quiver plot
-    ///   look sensible regardless of the units of `(u, v)`.
+    /// - `None` — auto-compute so the longest arrow is roughly one grid
+    ///   cell long (`≈ span / √n`), matching matplotlib's default. This
+    ///   prevents arrows from overlapping each other in dense fields.
     pub scale: Option<f64>,
-    /// Fraction of the shorter tail-span used for the longest arrow when
-    /// `scale` is `None`. Default `0.85`.
+    /// Fraction of the nearest-neighbor distance used for the longest
+    /// arrow when `scale` is `None`. Default `0.9`.
+    ///
+    /// Values near `1.0` pack arrows tip-to-tail; smaller values leave
+    /// more breathing room. Values above `1.0` allow overlap.
     pub auto_scale_fraction: f64,
     /// Shaft stroke width in pixels. Default `1.2`.
     pub shaft_width: f64,
@@ -195,7 +197,7 @@ impl QuiverPlot {
             arrows: vec![],
             color: "steelblue".into(),
             scale: None,
-            auto_scale_fraction: 0.85,
+            auto_scale_fraction: 0.9,
             shaft_width: 1.2,
             head_length: None,
             head_width: None,
@@ -261,9 +263,16 @@ impl QuiverPlot {
     }
 
     /// Resolve the scale multiplier, auto-computing when `scale` is `None`.
+    ///
+    /// The auto-scale target is: longest arrow ≈ `fraction × nearest-neighbor
+    /// distance`, where the nearest-neighbor distance for `n` arrows on an
+    /// `R`-wide span is approximated as `R / √n`. This prevents arrows from
+    /// overlapping each other in dense fields — the same principle matplotlib
+    /// uses.
     pub fn effective_scale(&self) -> f64 {
         if let Some(s) = self.scale { return s; }
-        if self.arrows.len() < 2 { return 1.0; }
+        let n = self.arrows.len();
+        if n < 2 { return 1.0; }
         let mut x_min = f64::INFINITY;
         let mut x_max = f64::NEG_INFINITY;
         let mut y_min = f64::INFINITY;
@@ -276,10 +285,10 @@ impl QuiverPlot {
             y_max = y_max.max(a.y);
             max_mag = max_mag.max(a.magnitude());
         }
-        // Use the smaller non-zero span; fall back to the other axis when
-        // arrows are all collinear on one axis (span = 0 there).
         let x_span = x_max - x_min;
         let y_span = y_max - y_min;
+        // Pick the smaller non-zero span (or the non-zero one when arrows are
+        // collinear on one axis).
         let span = match (x_span > 0.0, y_span > 0.0) {
             (true, true)  => x_span.min(y_span),
             (true, false) => x_span,
@@ -287,7 +296,11 @@ impl QuiverPlot {
             (false, false) => 0.0,
         };
         if max_mag > 0.0 && span.is_finite() && span > 0.0 {
-            self.auto_scale_fraction * span / max_mag
+            // Grid-cell heuristic: for an n-arrow field on a span R, the
+            // typical nearest-neighbor distance is ~R/√n. Target the longest
+            // arrow to be `fraction` of that.
+            let cell = span / (n as f64).sqrt();
+            self.auto_scale_fraction * cell / max_mag
         } else {
             1.0
         }

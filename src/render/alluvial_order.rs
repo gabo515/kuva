@@ -154,7 +154,7 @@ impl FenwickTree {
     }
 }
 
-fn crossing_objective_from_pairs(pairs: &mut Vec<(f64, f64, f64)>) -> f64 {
+fn crossing_objective_from_pairs(pairs: &mut [(f64, f64, f64)]) -> f64 {
     if pairs.len() <= 1 {
         return 0.0;
     }
@@ -226,6 +226,7 @@ fn barycentric_refine_links(
     }
     for _ in 0..4 {
         let pos = build_node_positions(&nodes_in_axis, col_orig.len());
+        #[allow(clippy::needless_range_loop)]
         for axis in 1..nodes_in_axis.len() {
             let prev = axis - 1;
             nodes_in_axis[axis].sort_by(|&a, &b| {

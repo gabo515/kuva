@@ -118,20 +118,21 @@ impl RosePlot {
 
     /// Add a single sector (label + value) to the first (default) series.
     /// Creates `series[0]` named "Values" if it doesn't exist yet.
-    pub fn with_slice(mut self, label: impl Into<String>, value: f64) -> Self {
+    pub fn with_slice(mut self, label: impl Into<String>, value: impl Into<f64>) -> Self {
         self.labels.push(label.into());
         if self.series.is_empty() {
             self.series.push(RoseSeries::new("Values", vec![]));
         }
-        self.series[0].values.push(value);
+        self.series[0].values.push(value.into());
         self
     }
 
     /// Add multiple slices from an iterator of `(label, value)`.
-    pub fn with_slices<S, I>(mut self, slices: I) -> Self
+    pub fn with_slices<S, V, I>(mut self, slices: I) -> Self
     where
         S: Into<String>,
-        I: IntoIterator<Item = (S, f64)>,
+        V: Into<f64>,
+        I: IntoIterator<Item = (S, V)>,
     {
         for (label, value) in slices {
             self = self.with_slice(label, value);

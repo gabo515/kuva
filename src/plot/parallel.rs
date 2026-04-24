@@ -112,14 +112,14 @@ impl ParallelPlot {
     }
 
     /// Add a row with no group (uses the fallback color).
-    pub fn with_row(mut self, values: Vec<f64>) -> Self {
-        self.rows.push(ParallelRow { values, group: None });
+    pub fn with_row(mut self, values: impl IntoIterator<Item = impl Into<f64>>) -> Self {
+        self.rows.push(ParallelRow { values: values.into_iter().map(|v| v.into()).collect(), group: None });
         self
     }
 
     /// Add a row assigned to a named group.
-    pub fn with_row_group(mut self, group: impl Into<String>, values: Vec<f64>) -> Self {
-        self.rows.push(ParallelRow { values, group: Some(group.into()) });
+    pub fn with_row_group(mut self, group: impl Into<String>, values: impl IntoIterator<Item = impl Into<f64>>) -> Self {
+        self.rows.push(ParallelRow { values: values.into_iter().map(|v| v.into()).collect(), group: Some(group.into()) });
         self
     }
 

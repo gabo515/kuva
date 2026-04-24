@@ -128,10 +128,10 @@ impl WaterfallPlot {
     ///     .with_delta("COGS",    -340.0)
     ///     .with_delta("OpEx",    -200.0);
     /// ```
-    pub fn with_delta<S: Into<String>>(mut self, label: S, value: f64) -> Self {
+    pub fn with_delta<S: Into<String>>(mut self, label: S, value: impl Into<f64>) -> Self {
         self.bars.push(WaterfallBar {
             label: label.into(),
-            value,
+            value: value.into(),
             kind: WaterfallKind::Delta,
         });
         self
@@ -152,11 +152,11 @@ impl WaterfallPlot {
     ///     .with_difference("vs target", 1000.0, 1200.0)  // independent reference
     ///     .with_total("End");
     /// ```
-    pub fn with_difference<S: Into<String>>(mut self, label: S, from: f64, to: f64) -> Self {
+    pub fn with_difference<S: Into<String>>(mut self, label: S, from: impl Into<f64>, to: impl Into<f64>) -> Self {
         self.bars.push(WaterfallBar {
             label: label.into(),
             value: 0.0,
-            kind: WaterfallKind::Difference { from, to },
+            kind: WaterfallKind::Difference { from: from.into(), to: to.into() },
         });
         self
     }

@@ -168,43 +168,44 @@ impl NetworkPlot {
     }
 
     /// Add an edge, auto-creating source and target nodes by label if needed.
-    pub fn with_edge<S: Into<String>>(mut self, source: S, target: S, weight: f64) -> Self {
-        self.push_edge(source.into(), target.into(), weight, None, None);
+    pub fn with_edge<S: Into<String>>(mut self, source: S, target: S, weight: impl Into<f64>) -> Self {
+        self.push_edge(source.into(), target.into(), weight.into(), None, None);
         self
     }
 
     /// Add an edge with an explicit colour.
     pub fn with_edge_color<S: Into<String>, C: Into<String>>(
-        mut self, source: S, target: S, weight: f64, color: C,
+        mut self, source: S, target: S, weight: impl Into<f64>, color: C,
     ) -> Self {
-        self.push_edge(source.into(), target.into(), weight, Some(color.into()), None);
+        self.push_edge(source.into(), target.into(), weight.into(), Some(color.into()), None);
         self
     }
 
     /// Add an edge with a text label rendered at its midpoint.
     pub fn with_edge_label<S: Into<String>, L: Into<String>>(
-        mut self, source: S, target: S, weight: f64, label: L,
+        mut self, source: S, target: S, weight: impl Into<f64>, label: L,
     ) -> Self {
-        self.push_edge(source.into(), target.into(), weight, None, Some(label.into()));
+        self.push_edge(source.into(), target.into(), weight.into(), None, Some(label.into()));
         self
     }
 
     /// Add an edge with both an explicit colour and a text label.
     pub fn with_edge_styled<S: Into<String>, C: Into<String>, L: Into<String>>(
-        mut self, source: S, target: S, weight: f64, color: C, label: L,
+        mut self, source: S, target: S, weight: impl Into<f64>, color: C, label: L,
     ) -> Self {
-        self.push_edge(source.into(), target.into(), weight, Some(color.into()), Some(label.into()));
+        self.push_edge(source.into(), target.into(), weight.into(), Some(color.into()), Some(label.into()));
         self
     }
 
     /// Bulk-add edges from an iterator of `(source, target, weight)`.
-    pub fn with_edges<S, I>(mut self, edges: I) -> Self
+    pub fn with_edges<S, V, I>(mut self, edges: I) -> Self
     where
         S: Into<String>,
-        I: IntoIterator<Item = (S, S, f64)>,
+        V: Into<f64>,
+        I: IntoIterator<Item = (S, S, V)>,
     {
         for (src, tgt, w) in edges {
-            self.push_edge(src.into(), tgt.into(), w, None, None);
+            self.push_edge(src.into(), tgt.into(), w.into(), None, None);
         }
         self
     }

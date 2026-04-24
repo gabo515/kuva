@@ -165,7 +165,7 @@ impl SankeyPlot {
     }
 
     /// Add a link, auto-creating nodes by label if needed.
-    pub fn with_link<S: Into<String>>(mut self, source: S, target: S, value: f64) -> Self {
+    pub fn with_link<S: Into<String>>(mut self, source: S, target: S, value: impl Into<f64>) -> Self {
         let src_label = source.into();
         let tgt_label = target.into();
         let src = self.node_index_internal(&src_label, &src_label, None);
@@ -173,7 +173,7 @@ impl SankeyPlot {
         self.links.push(SankeyLink {
             source: src,
             target: tgt,
-            value,
+            value: value.into(),
             color: None,
         });
         self
@@ -184,7 +184,7 @@ impl SankeyPlot {
         mut self,
         source: S,
         target: S,
-        value: f64,
+        value: impl Into<f64>,
         color: C,
     ) -> Self {
         let src_label = source.into();
@@ -194,17 +194,18 @@ impl SankeyPlot {
         self.links.push(SankeyLink {
             source: src,
             target: tgt,
-            value,
+            value: value.into(),
             color: Some(color.into()),
         });
         self
     }
 
     /// Bulk add links from an iterator of `(source_label, target_label, value)`.
-    pub fn with_links<S, I>(mut self, links: I) -> Self
+    pub fn with_links<S, V, I>(mut self, links: I) -> Self
     where
         S: Into<String>,
-        I: IntoIterator<Item = (S, S, f64)>,
+        V: Into<f64>,
+        I: IntoIterator<Item = (S, S, V)>,
     {
         for (src, tgt, val) in links {
             self = self.with_link(src, tgt, val);
@@ -240,11 +241,12 @@ impl SankeyPlot {
     }
 
     /// Add a weighted alluvium spanning multiple ordered axes.
-    pub fn with_alluvium<S, I>(mut self, strata: I, value: f64) -> Self
+    pub fn with_alluvium<S, I>(mut self, strata: I, value: impl Into<f64>) -> Self
     where
         S: Into<String>,
         I: IntoIterator<Item = S>,
     {
+        let value = value.into();
         let mut nodes = Vec::new();
         for (axis_idx, raw) in strata.into_iter().enumerate() {
             let label = raw.into();

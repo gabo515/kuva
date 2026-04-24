@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Unified numerical input types** — all data-entry builder methods now accept `impl Into<f64>` instead of bare `f64`, so `u8`, `u16`, `u32`, `i8`, `i16`, `i32`, and `f32` values can be passed directly without `.into()` or `as f64`. Affects `BarPlot` (`with_bar`, `with_colored_bar`, `with_colored_bars`, `with_bars`, `with_group`), `WaterfallPlot` (`with_delta`, `with_difference`), `ForestPlot` (`with_row`, `with_weighted_row`, `with_colored_row`, `with_weighted_colored_row`, `ForestRow::new`), `MosaicPlot` (`with_cell`, `with_cells`), `RosePlot` (`with_slice`, `with_slices`), `SankeyPlot` (`with_link`, `with_link_colored`, `with_links`, `with_alluvium`), `TernaryPlot` (`with_point`, `with_point_group`, `with_points`), `ParallelPlot` (`with_row`, `with_row_group`), `NetworkPlot` (`with_edge`, `with_edge_color`, `with_edge_label`, `with_edge_styled`, `with_edges`), `LollipopPlot` (`with_points`). Closes [#68](https://github.com/Psy-Fer/kuva/issues/68).
+
 ---
 
 ## [0.1.7] — 2026-04-22

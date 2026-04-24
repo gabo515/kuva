@@ -993,6 +993,61 @@ fn extract_width(svg: &str) -> f64 {
 }
 
 #[test]
+fn test_quiver_cli_pivot_middle() {
+    // --pivot middle must be accepted and produce a shifted-endpoint SVG
+    // that differs from the tail-default output.
+    let default_out = run_with_file(&[
+        "quiver", &data("quiver.tsv"), "--no-grid",
+    ]).0;
+    let middle_out = run_with_file(&[
+        "quiver", &data("quiver.tsv"), "--no-grid", "--pivot", "middle",
+    ]).0;
+    assert!(default_out.starts_with("<svg"));
+    assert!(middle_out.starts_with("<svg"));
+    assert_ne!(default_out, middle_out,
+        "--pivot middle should produce a different SVG than the tail default");
+}
+
+#[test]
+fn test_quiver_cli_tight_bounds_emits_clip_path() {
+    let (stdout, _, code) = run_with_file(&[
+        "quiver", &data("quiver.tsv"), "--no-grid", "--tight-bounds",
+    ]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("clipPath") || stdout.contains("clip-path"),
+        "--tight-bounds should emit a clip-path");
+}
+
+#[test]
+fn test_quiver_cli_no_clip_suppresses_clip_with_tight_bounds() {
+    let (stdout, _, code) = run_with_file(&[
+        "quiver", &data("quiver.tsv"), "--no-grid",
+        "--tight-bounds", "--no-clip",
+    ]);
+    assert_eq!(code, 0);
+    assert!(!stdout.contains("kuva-quiver-clip"),
+        "--no-clip must suppress the quiver clip-path even with --tight-bounds");
+}
+
+#[test]
+fn test_quiver_cli_head_length_accepted() {
+    // Explicit head dims should be accepted without the mutex-with-proportional
+    // fallback blowing up. Compare output to default to confirm the flag did
+    // something.
+    let default_out = run_with_file(&[
+        "quiver", &data("quiver.tsv"), "--no-grid",
+    ]).0;
+    let big_head_out = run_with_file(&[
+        "quiver", &data("quiver.tsv"), "--no-grid",
+        "--head-length", "20", "--head-width", "8",
+    ]).0;
+    assert!(default_out.starts_with("<svg"));
+    assert!(big_head_out.starts_with("<svg"));
+    assert_ne!(default_out.len(), big_head_out.len(),
+        "--head-length/--head-width should change SVG byte length vs defaults");
+}
+
+#[test]
 fn test_quiver_scale_auto_scale_exclusive() {
     let (_, stderr, code) = run_with_file(&[
         "quiver", &data("quiver.tsv"),

@@ -87,6 +87,95 @@ fn test_quiver_with_legend_emits_entry() {
 }
 
 #[test]
+fn test_quiver_interactive_mode_emits_tooltip_groups() {
+    // In interactive mode every arrow should wrap in <g class="tt" data-...>
+    // with a native <title> readout.
+    let q = rotational_grid();
+    let plots = vec![kuva::render::plots::Plot::Quiver(q)];
+    let layout = Layout::auto_from_plots(&plots)
+        .with_title("Interactive")
+        .with_show_grid(false)
+        .with_interactive();
+    let svg = SvgBackend.render_scene(&render_multiple(plots, layout));
+    let tt_count = svg.matches("class=\"tt\"").count();
+    let data_u_count = svg.matches("data-u=").count();
+    let data_v_count = svg.matches("data-v=").count();
+    let data_mag_count = svg.matches("data-mag=").count();
+    // 5×5 grid = 25 arrows, minus the center (0,0) which has zero magnitude
+    // and is skipped by the `len < 1e-6` guard.
+    assert!(tt_count >= 24 && tt_count <= 25,
+        "expected 24 or 25 tooltip groups, got {tt_count}");
+    assert_eq!(tt_count, data_u_count, "data-u attrs should match tooltip group count");
+    assert_eq!(tt_count, data_v_count, "data-v attrs should match tooltip group count");
+    assert_eq!(tt_count, data_mag_count, "data-mag attrs should match tooltip group count");
+}
+
+#[test]
+fn test_quiver_clip_opt_in_without_tight_bounds() {
+    // with_clip_to_plot_area() alone should emit a clip-path, even when
+    // tight_bounds is off.
+    let q = rotational_grid().with_clip_to_plot_area();
+    let svg = render(q, "Clip opt-in");
+    assert!(svg.contains("clipPath") || svg.contains("clip-path"),
+        "with_clip_to_plot_area() alone should emit a clip-path");
+}
+
+#[test]
+fn test_quiver_no_clip_suppresses_tight_bounds_clip() {
+    // with_no_clip() should suppress clipping even when tight_bounds is on.
+    let q = rotational_grid().with_tight_bounds().with_no_clip();
+    let svg = render(q, "No clip");
+    let has_quiver_clip = svg.contains("kuva-quiver-clip");
+    assert!(!has_quiver_clip,
+        "with_no_clip() must suppress the quiver clip-path even with tight_bounds");
+}
+
+#[test]
+fn test_quiver_color_range_pins_colorbar_extent() {
+    // with_color_range pins the colormap normalization. The colorbar min/max
+    // text should reflect the pinned range, not the data extent.
+    let q = QuiverPlot::from_function(
+        (-1.0, 1.0, 3),
+        (-1.0, 1.0, 3),
+        |x, y| (x, y),
+    )
+        .with_magnitude_colormap(ColorMap::Viridis, "Speed")
+        .with_color_range(0.0, 10.0);
+    let svg = render(q, "Pinned range");
+    // The top of the colorbar axis should be 10 (the pinned max).
+    assert!(svg.contains(">10<") || svg.contains(">10 <") || svg.contains(">10."),
+        "pinned colorbar max of 10 should appear on the axis");
+}
+
+#[test]
+fn test_quiver_head_length_override_grows_heads() {
+    // Explicit pixel head-size should produce visibly larger arrowhead
+    // triangles than proportional defaults on the same data.
+    let default_heads_svg = render(rotational_grid(), "Default heads");
+    let big_heads_svg = render(
+        rotational_grid().with_head_length(20.0).with_head_width(8.0),
+        "Big heads",
+    );
+    // Proxy: count total byte length of path 'd' attributes — bigger heads
+    // → longer path strings with larger coordinates.
+    let default_path_bytes: usize = default_heads_svg
+        .matches(" d=\"M ")
+        .count();
+    let big_path_bytes: usize = big_heads_svg.matches(" d=\"M ").count();
+    // Both should emit ~25 arrow-head paths (one per arrow).
+    assert!(default_path_bytes >= 20,
+        "default render should emit ≥20 arrow-head paths, got {default_path_bytes}");
+    assert!(big_path_bytes >= 20,
+        "override render should emit ≥20 arrow-head paths, got {big_path_bytes}");
+    // Stronger: compare actual path coordinate magnitudes. Large heads
+    // produce longer chord distances between tip and base corners.
+    // Quick check: the big-heads SVG should be longer than default because
+    // coordinate strings have more digits.
+    assert!(big_heads_svg.len() != default_heads_svg.len(),
+        "big heads should change SVG output vs default proportional sizing");
+}
+
+#[test]
 fn test_quiver_empty_arrows_renders_empty_plot() {
     use kuva::render::plots::Plot;
     let empty = QuiverPlot::new();

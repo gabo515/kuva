@@ -529,6 +529,32 @@ mod tests {
     }
 
     #[test]
+    fn auto_scale_matches_grid_cell_formula() {
+        // Pin the exact formula: fraction * span / (√n * max_mag).
+        // 2 arrows, span 1.0 (x: 0..1, y=0 everywhere — falls back to x_span),
+        // max_mag 10, fraction 0.9 → 0.9 * 1.0 / (√2 * 10) ≈ 0.06364.
+        let q = QuiverPlot::new()
+            .with_arrow(0.0, 0.0, 10.0, 0.0)
+            .with_arrow(1.0, 0.0, 10.0, 0.0);
+        let expected = 0.9 * 1.0 / ((2.0_f64).sqrt() * 10.0);
+        let actual = q.effective_scale();
+        assert!((actual - expected).abs() < 1e-9,
+            "auto-scale formula drift: expected {expected}, got {actual}");
+    }
+
+    #[test]
+    fn auto_scale_honors_custom_fraction() {
+        // Changing auto_scale_fraction should linearly scale the result.
+        let a = QuiverPlot::new()
+            .with_arrow(0.0, 0.0, 10.0, 0.0)
+            .with_arrow(1.0, 0.0, 10.0, 0.0);
+        let b = a.clone().with_auto_scale(0.45);
+        // 0.45 is half of the 0.9 default → scale should be half.
+        assert!((b.effective_scale() - a.effective_scale() * 0.5).abs() < 1e-9,
+            "with_auto_scale(0.45) should halve the 0.9-default scale");
+    }
+
+    #[test]
     fn with_scale_pins_exact_value() {
         let q = QuiverPlot::new()
             .with_arrow(0.0, 0.0, 10.0, 0.0)

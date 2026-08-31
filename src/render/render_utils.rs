@@ -1,3 +1,56 @@
+/// XML/attribute-escape a data-derived string before it is interpolated into
+/// a raw SVG attribute string (e.g. `data-group="{value}"`).
+///
+/// Values reaching these call sites (group names, legend labels, category
+/// labels) originate from user data files, not from code, so they must never
+/// be trusted to be free of `"`, `<`, `>`, or `&`.
+pub(crate) fn escape_attr(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// Build an SVG path string for a filled arrow-head triangle.
+///
+/// Tip sits at `(tip_x, tip_y)` and the head points along the unit vector
+/// `(ux, uy)`. `length` is the head's extent along the shaft; `half_width`
+/// is the perpendicular distance from the shaft axis to each base corner.
+///
+/// The caller is responsible for wrapping the returned string in a
+/// `Primitive::Path` with appropriate fill/stroke.
+pub fn arrow_head_path(
+    tip_x: f64,
+    tip_y: f64,
+    ux: f64,
+    uy: f64,
+    length: f64,
+    half_width: f64,
+) -> String {
+    let base_x = tip_x - ux * length;
+    let base_y = tip_y - uy * length;
+    // Perpendicular to the shaft direction.
+    let px = -uy;
+    let py = ux;
+    format!(
+        "M {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} Z",
+        tip_x,
+        tip_y,
+        base_x + px * half_width,
+        base_y + py * half_width,
+        base_x - px * half_width,
+        base_y - py * half_width,
+    )
+}
+
 /// compute ticks so things look nice
 /// compute_tick_step(min, max, target_ticks)
 pub fn compute_tick_step(min: f64, max: f64, target_ticks: usize) -> f64 {
@@ -145,6 +198,57 @@ pub fn auto_nice_range(data_min: f64, data_max: f64, target_ticks: usize) -> (f6
     (nice_min, nice_max)
 }
 
+/// Like [`auto_nice_range`], but avoids rounding a whole extra major tick
+/// onto the axis just because a small breathing-room pad (added by the
+/// caller so a data point at the exact boundary doesn't render flush
+/// against the plot edge) tipped `ceil`/`floor` over a step boundary the
+/// *raw* data didn't actually need.
+///
+/// `padded_min`/`padded_max` are the caller's already-padded range (used,
+/// same as `auto_nice_range`, to pick the tick step and as the normal
+/// rounding input); `raw_min`/`raw_max` are the unpadded data extent. When
+/// rounding the padded value lands on a *different* (larger) multiple than
+/// rounding the raw value would have, that extra step exists purely because
+/// of the padding — for an axis with few, large-value ticks this can
+/// otherwise inflate the range by 15-25%+ for data that already fits
+/// snugly. In that case the margin is capped at `min(step / 2, 5% of the
+/// raw span)` instead, and the resulting boundary may not itself land on a
+/// tick — ticks are generated separately and simply stop at the boundary.
+pub fn auto_nice_range_capped(
+    padded_min: f64,
+    padded_max: f64,
+    raw_min: f64,
+    raw_max: f64,
+    target_ticks: usize,
+) -> (f64, f64) {
+    if padded_min == padded_max {
+        let delta = if padded_min.abs() > 1.0 { 1.0 } else { 0.1 };
+        return (padded_min - delta, padded_max + delta);
+    }
+
+    let step = compute_tick_step(padded_min, padded_max, target_ticks);
+    let raw_span = (raw_max - raw_min).max(f64::EPSILON);
+    let tol = step * 1e-9;
+
+    let nice_max_padded = (padded_max / step).ceil() * step;
+    let nice_max_raw = (raw_max / step).ceil() * step;
+    let nice_max = if nice_max_padded > nice_max_raw + tol {
+        (raw_max + (step * 0.5).min(raw_span * 0.05)).max(nice_max_raw)
+    } else {
+        nice_max_padded
+    };
+
+    let nice_min_padded = (padded_min / step).floor() * step;
+    let nice_min_raw = (raw_min / step).floor() * step;
+    let nice_min = if nice_min_padded < nice_min_raw - tol {
+        (raw_min - (step * 0.5).min(raw_span * 0.05)).min(nice_min_raw)
+    } else {
+        nice_min_padded
+    };
+
+    (nice_min, nice_max)
+}
+
 /// Compute a nice log-scale range that fully includes the data.
 /// Rounds to powers of 10 so boundaries always align with generated ticks.
 pub fn auto_nice_range_log(data_min: f64, data_max: f64) -> (f64, f64) {
@@ -176,19 +280,28 @@ pub fn auto_nice_range_log(data_min: f64, data_max: f64) -> (f64, f64) {
     }
 }
 
+/// Selects the log-tick multiplier set for a given axis span: `[1, 2, 5]` per
+/// decade for narrow ranges, or pure powers of ten for wide ones. Shared by
+/// [`generate_ticks_log`] and [`log_tick_after`]/[`log_tick_before`] so both
+/// agree on which pattern a given axis range actually uses.
+pub(crate) fn log_multipliers(min: f64, max: f64) -> &'static [f64] {
+    let log_min = min.max(1e-10).log10().floor() as i32;
+    let log_max = max.log10().ceil() as i32;
+    let decades = (log_max - log_min).max(0) as usize;
+    if decades <= 3 {
+        &[1.0, 2.0, 5.0]
+    } else {
+        &[1.0]
+    }
+}
+
 /// Generate tick marks for a log-scale axis.
 /// For narrow ranges (≤ 3 decades), include 2x and 5x sub-ticks.
 /// For wider ranges, only powers of 10.
 pub fn generate_ticks_log(min: f64, max: f64) -> Vec<f64> {
     let log_min = min.max(1e-10).log10().floor() as i32;
     let log_max = max.log10().ceil() as i32;
-    let decades = (log_max - log_min) as usize;
-
-    let multipliers: &[f64] = if decades <= 3 {
-        &[1.0, 2.0, 5.0]
-    } else {
-        &[1.0]
-    };
+    let multipliers = log_multipliers(min, max);
 
     let mut ticks = Vec::new();
     for exp in log_min..=log_max {
@@ -201,6 +314,41 @@ pub fn generate_ticks_log(min: f64, max: f64) -> Vec<f64> {
         }
     }
     ticks
+}
+
+/// The next tick strictly greater than `v` in the `[1, 2, 5] × 10^n` (or pure
+/// `10^n`) pattern described by `multipliers` (see [`log_multipliers`]).
+/// Used to find the real tick that would exist just past the last major on a
+/// log axis, instead of guessing it from the ratio of the outermost pair —
+/// which is wrong whenever that pair straddles a `2x`/`5x` sub-tick rather
+/// than a power-of-ten boundary.
+pub(crate) fn log_tick_after(v: f64, multipliers: &[f64]) -> f64 {
+    let exp = v.log10().floor() as i32;
+    for e in exp..=exp + 2 {
+        let base = 10f64.powi(e);
+        for &mult in multipliers {
+            let candidate = base * mult;
+            if candidate > v * (1.0 + 1e-9) {
+                return candidate;
+            }
+        }
+    }
+    v * 10.0 // unreachable given a finite multiplier set; keeps the axis usable
+}
+
+/// The previous tick strictly less than `v` — see [`log_tick_after`].
+pub(crate) fn log_tick_before(v: f64, multipliers: &[f64]) -> f64 {
+    let exp = v.log10().ceil() as i32;
+    for e in (exp - 2..=exp).rev() {
+        let base = 10f64.powi(e);
+        for &mult in multipliers.iter().rev() {
+            let candidate = base * mult;
+            if candidate < v * (1.0 - 1e-9) {
+                return candidate;
+            }
+        }
+    }
+    v / 10.0 // unreachable given a finite multiplier set; keeps the axis usable
 }
 
 /// Format a tick value for display on a log-scale axis
@@ -397,6 +545,166 @@ where
 
     // y = mx+b and r
     Some((slope, intercept, r))
+}
+
+/// LOESS / LOWESS: locally-weighted linear regression smoother.
+///
+/// For each of `n_out` query points evenly spaced across the data's x-range, fits
+/// a degree-1 weighted least-squares line to the `span` fraction of nearest points
+/// (weighted by the tricube kernel of scaled distance) and evaluates it there.
+/// Returns `(x, y_smoothed)` pairs sorted by x. `span` is clamped to `[0.05, 1.0]`;
+/// returns an empty vec if there are fewer than 3 points or the x-range is degenerate.
+pub fn loess<I>(points: I, span: f64, n_out: usize) -> Vec<(f64, f64)>
+where
+    I: IntoIterator,
+    I::Item: Into<(f64, f64)>,
+{
+    let mut pts: Vec<(f64, f64)> = points.into_iter().map(Into::into).collect();
+    if pts.len() < 3 || n_out == 0 {
+        return Vec::new();
+    }
+    pts.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let n = pts.len();
+    let x_min = pts[0].0;
+    let x_max = pts[n - 1].0;
+    if !(x_max - x_min).is_finite() || x_max <= x_min {
+        return Vec::new();
+    }
+    let span = span.clamp(0.05, 1.0);
+    let k = ((span * n as f64).ceil() as usize).clamp(2, n);
+
+    let tricube = |u: f64| {
+        let a = (1.0 - u.abs().powi(3)).max(0.0);
+        a * a * a
+    };
+
+    let mut out = Vec::with_capacity(n_out);
+    for i in 0..n_out {
+        let t = i as f64 / (n_out - 1) as f64;
+        let x0 = x_min + t * (x_max - x_min);
+
+        // The k nearest neighbours by |x - x0| set the local bandwidth.
+        let mut dist: Vec<f64> = pts.iter().map(|(x, _)| (x - x0).abs()).collect();
+        let mut idx: Vec<usize> = (0..n).collect();
+        idx.sort_by(|&a, &b| dist[a].total_cmp(&dist[b]));
+        let d_max = dist[idx[k - 1]].max(1e-12);
+
+        // Weighted degree-1 fit over the k neighbours.
+        let (mut sw, mut swx, mut swy, mut swxx, mut swxy) = (0.0, 0.0, 0.0, 0.0, 0.0);
+        for &j in idx.iter().take(k) {
+            let (x, y) = pts[j];
+            let w = tricube(dist[j] / d_max);
+            sw += w;
+            swx += w * x;
+            swy += w * y;
+            swxx += w * x * x;
+            swxy += w * x * y;
+        }
+        dist.clear();
+
+        let denom = sw * swxx - swx * swx;
+        let y0 = if sw <= 0.0 {
+            continue;
+        } else if denom.abs() < 1e-12 {
+            swy / sw // degenerate (all neighbours share an x) -> weighted mean
+        } else {
+            let slope = (sw * swxy - swx * swy) / denom;
+            let intercept = (swy - slope * swx) / sw;
+            slope * x0 + intercept
+        };
+        out.push((x0, y0));
+    }
+    out
+}
+
+/// One label for the force-directed [`repel_labels`] layout. `pos` is the label
+/// box centre (mutated in place); `anchor` is the fixed data point it belongs to;
+/// `half_w`/`half_h` are half the label's bounding-box width/height in pixels.
+#[derive(Debug, Clone, Copy)]
+pub struct RepelItem {
+    pub anchor: (f64, f64),
+    pub half_w: f64,
+    pub half_h: f64,
+    pub pos: (f64, f64),
+}
+
+/// Force-directed label placement (ggrepel / adjustText style).
+///
+/// Iteratively pushes label boxes off each other and off every anchor point,
+/// with a weak spring pulling each label back toward its own anchor, then clamps
+/// each into `bounds` = `(x_min, y_min, x_max, y_max)`. Mutates `items[*].pos`.
+/// O(iterations · n²); intended for the small top-N label set, not every point.
+pub fn repel_labels(items: &mut [RepelItem], bounds: (f64, f64, f64, f64), iterations: usize) {
+    let n = items.len();
+    if n == 0 {
+        return;
+    }
+    let (xmin, ymin, xmax, ymax) = bounds;
+    let pad = 2.0;
+    let spring = 0.02;
+    let step = 0.6;
+
+    for _ in 0..iterations {
+        let mut force = vec![(0.0_f64, 0.0_f64); n];
+
+        // Label vs label: resolve AABB overlap along the axis of least penetration.
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let dx = items[i].pos.0 - items[j].pos.0;
+                let dy = items[i].pos.1 - items[j].pos.1;
+                let ox = (items[i].half_w + items[j].half_w + pad) - dx.abs();
+                let oy = (items[i].half_h + items[j].half_h + pad) - dy.abs();
+                if ox > 0.0 && oy > 0.0 {
+                    if ox <= oy {
+                        let s = if dx == 0.0 { 1.0 } else { dx.signum() };
+                        force[i].0 += ox * 0.5 * s;
+                        force[j].0 -= ox * 0.5 * s;
+                    } else {
+                        let s = if dy == 0.0 { 1.0 } else { dy.signum() };
+                        force[i].1 += oy * 0.5 * s;
+                        force[j].1 -= oy * 0.5 * s;
+                    }
+                }
+            }
+        }
+
+        // Label vs every anchor point: push the label box off overlapping points.
+        for i in 0..n {
+            for k in 0..n {
+                let (ax, ay) = items[k].anchor;
+                let dx = items[i].pos.0 - ax;
+                let dy = items[i].pos.1 - ay;
+                let ox = (items[i].half_w + pad) - dx.abs();
+                let oy = (items[i].half_h + pad) - dy.abs();
+                if ox > 0.0 && oy > 0.0 {
+                    if ox <= oy {
+                        let s = if dx == 0.0 { 1.0 } else { dx.signum() };
+                        force[i].0 += ox * s;
+                    } else {
+                        // Prefer pushing labels upward when directly over their point.
+                        let s = if dy == 0.0 { -1.0 } else { dy.signum() };
+                        force[i].1 += oy * s;
+                    }
+                }
+            }
+        }
+
+        // Weak spring back to the anchor, then integrate and clamp into bounds.
+        for i in 0..n {
+            force[i].0 += spring * (items[i].anchor.0 - items[i].pos.0);
+            force[i].1 += spring * (items[i].anchor.1 - items[i].pos.1);
+            items[i].pos.0 += force[i].0 * step;
+            items[i].pos.1 += force[i].1 * step;
+            items[i].pos.0 = items[i]
+                .pos
+                .0
+                .clamp(xmin + items[i].half_w, xmax - items[i].half_w);
+            items[i].pos.1 = items[i]
+                .pos
+                .1
+                .clamp(ymin + items[i].half_h, ymax - items[i].half_h);
+        }
+    }
 }
 
 /// Greedy beeswarm layout: returns x pixel offsets from group center for each
@@ -670,15 +978,6 @@ pub fn linkage_to_nodes(
 
 // ── Text utilities ───────────────────────────────────────────────────────────
 
-/// Estimate the rendered pixel width of `text` at the given `font_size`.
-///
-/// Uses a fixed character-width-to-font-size ratio of 0.6, which is the
-/// standard heuristic used throughout the layout and rendering code.
-#[allow(dead_code)]
-pub(crate) fn estimate_text_width(text: &str, font_size: f64) -> f64 {
-    text.chars().count() as f64 * font_size * 0.6
-}
-
 /// Wrap `text` if `max_chars` is `Some`, otherwise return the text as a single-element vec.
 ///
 /// Convenience wrapper around [`wrap_text`] for call sites that hold an
@@ -764,24 +1063,117 @@ pub fn wrap_text(text: &str, max_chars: usize) -> Vec<String> {
 mod tests {
     use super::*;
 
-    // ── estimate_text_width ──────────────────────────────────────────────
+    // ── repel_labels ─────────────────────────────────────────────────────
 
     #[test]
-    fn text_width_ascii() {
-        let w = estimate_text_width("Hello", 10.0);
-        assert!((w - 30.0).abs() < 1e-9); // 5 chars * 10 * 0.6
+    fn repel_separates_overlapping_labels() {
+        // Three identical boxes stacked on the same spot must end up non-overlapping.
+        let mk = |x: f64, y: f64| RepelItem {
+            anchor: (x, y),
+            half_w: 20.0,
+            half_h: 6.0,
+            pos: (x, y),
+        };
+        let mut items = vec![mk(100.0, 100.0), mk(100.0, 100.0), mk(100.0, 100.0)];
+        repel_labels(&mut items, (0.0, 0.0, 400.0, 400.0), 300);
+        // Force-directed layout minimizes but does not guarantee zero overlap; allow a
+        // small tolerance (roughly the internal padding). The key property is that the
+        // stacked boxes are pushed clearly apart rather than staying coincident.
+        let tol = 3.0;
+        for i in 0..items.len() {
+            for j in (i + 1)..items.len() {
+                let dx = (items[i].pos.0 - items[j].pos.0).abs();
+                let dy = (items[i].pos.1 - items[j].pos.1).abs();
+                let overlap = dx < items[i].half_w + items[j].half_w - tol
+                    && dy < items[i].half_h + items[j].half_h - tol;
+                assert!(
+                    !overlap,
+                    "labels {i} and {j} still overlap: dx={dx}, dy={dy}"
+                );
+            }
+        }
     }
 
     #[test]
-    fn text_width_empty() {
-        assert!((estimate_text_width("", 14.0)).abs() < 1e-9);
+    fn repel_keeps_labels_within_bounds() {
+        let mut items: Vec<RepelItem> = (0..8)
+            .map(|_| RepelItem {
+                anchor: (200.0, 200.0),
+                half_w: 15.0,
+                half_h: 6.0,
+                pos: (200.0, 200.0),
+            })
+            .collect();
+        let bounds = (10.0, 10.0, 390.0, 390.0);
+        repel_labels(&mut items, bounds, 200);
+        for it in &items {
+            assert!(
+                it.pos.0 >= bounds.0 + it.half_w - 1e-6 && it.pos.0 <= bounds.2 - it.half_w + 1e-6
+            );
+            assert!(
+                it.pos.1 >= bounds.1 + it.half_h - 1e-6 && it.pos.1 <= bounds.3 - it.half_h + 1e-6
+            );
+        }
+    }
+
+    // ── loess ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn loess_recovers_a_linear_relationship() {
+        // Exactly-linear data: the smoother should reproduce y = 2x + 1 closely.
+        let data: Vec<(f64, f64)> = (0..40).map(|i| (i as f64, 2.0 * i as f64 + 1.0)).collect();
+        let curve = loess(data.iter().copied(), 0.5, 50);
+        assert_eq!(curve.len(), 50);
+        for &(x, y) in &curve {
+            assert!(
+                (y - (2.0 * x + 1.0)).abs() < 1e-6,
+                "loess off at x={x}: y={y}"
+            );
+        }
+        // Endpoints span the data range.
+        assert!((curve.first().unwrap().0 - 0.0).abs() < 1e-9);
+        assert!((curve.last().unwrap().0 - 39.0).abs() < 1e-9);
     }
 
     #[test]
-    fn text_width_unicode() {
-        // 4 characters (c, a, f, é), each counted once regardless of byte length
-        let w = estimate_text_width("café", 10.0);
-        assert!((w - 24.0).abs() < 1e-9);
+    fn loess_smooths_noise_within_data_range() {
+        // Noisy sine: the smoothed curve must stay within the data's y-range (no blow-up)
+        // and be smoother than the raw data (small point-to-point deltas).
+        let data: Vec<(f64, f64)> = (0..120)
+            .map(|i| {
+                let x = i as f64 / 120.0 * 10.0;
+                let noise = ((i as f64 * 12.9898).sin() * 43758.5453).fract() - 0.5;
+                (x, x.sin() + 0.6 * noise)
+            })
+            .collect();
+        let (dmin, dmax) = data
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |a, &(_, y)| {
+                (a.0.min(y), a.1.max(y))
+            });
+        let curve = loess(data.iter().copied(), 0.4, 60);
+        assert!(!curve.is_empty());
+        for &(_, y) in &curve {
+            assert!(
+                y >= dmin - 1e-9 && y <= dmax + 1e-9,
+                "loess left data range: {y}"
+            );
+        }
+        let max_step = curve
+            .windows(2)
+            .map(|w| (w[1].1 - w[0].1).abs())
+            .fold(0.0_f64, f64::max);
+        assert!(
+            max_step < 0.5,
+            "smoothed curve should have small steps, got {max_step}"
+        );
+    }
+
+    #[test]
+    fn loess_degenerate_inputs_return_empty() {
+        assert!(loess([(0.0, 1.0), (1.0, 2.0)], 0.5, 10).is_empty()); // < 3 points
+                                                                      // All same x -> degenerate range.
+        assert!(loess([(1.0, 1.0), (1.0, 2.0), (1.0, 3.0)], 0.5, 10).is_empty());
     }
 
     // ── wrap_text ────────────────────────────────────────────────────────
@@ -862,6 +1254,95 @@ mod tests {
     #[test]
     fn wrap_consecutive_newlines() {
         assert_eq!(wrap_text("a\n\nb", 10), vec!["a", "", "b"]);
+    }
+
+    // ── log_tick_after / log_tick_before ────────────────────────────────
+
+    // Regression (PR #101 follow-up): the phantom-tick extrapolation used to
+    // guess the next/previous major from the ratio of the outermost real
+    // tick pair, which is wrong for the `[1,2,5]` per-decade pattern (ratios
+    // alternate 2x/2.5x, not constant). `log_tick_after`/`log_tick_before`
+    // must instead walk the actual pattern.
+
+    #[test]
+    fn log_tick_after_crosses_a_5x_to_next_decade_1x() {
+        let m = log_multipliers(1.0, 35.0); // decades<=3 → [1,2,5]
+        assert_eq!(log_tick_after(20.0, m), 50.0, "next after 20 is 50, not 40");
+    }
+
+    #[test]
+    fn log_tick_after_within_same_decade() {
+        let m = log_multipliers(1.0, 35.0);
+        assert_eq!(log_tick_after(2.0, m), 5.0);
+        assert_eq!(log_tick_after(5.0, m), 10.0);
+    }
+
+    #[test]
+    fn log_tick_before_crosses_a_1x_to_previous_decade_5x() {
+        let m = log_multipliers(1.0, 35.0);
+        assert_eq!(
+            log_tick_before(20.0, m),
+            10.0,
+            "previous before 20 is 10, matching the pattern"
+        );
+        assert_eq!(
+            log_tick_before(10.0, m),
+            5.0,
+            "previous before 10 is 5, not some fraction of a constant ratio"
+        );
+    }
+
+    #[test]
+    fn log_tick_pure_power_of_ten_pattern_unaffected() {
+        // >3 decades → multiplier set collapses to [1.0]; ratio is always 10.
+        let m = log_multipliers(1.0, 30_000.0);
+        assert_eq!(log_tick_after(1000.0, m), 10_000.0);
+        assert_eq!(log_tick_before(1000.0, m), 100.0);
+    }
+
+    // ── auto_nice_range_capped (issue #98) ──────────────────────────────
+
+    #[test]
+    fn capped_range_caps_expansion_when_raw_max_lands_exactly_on_a_tick() {
+        // Raw data 0..20 lands exactly on a tick once rounded; the caller's
+        // 1% breathing-room pad (0..20.2) alone would push `ceil` up a full
+        // extra step to 25 — a 25% expansion for data that already fits
+        // snugly. Capped: extend by at most 5% of the raw span instead.
+        let (lo, hi) = auto_nice_range_capped(0.0, 20.2, 0.0, 20.0, 5);
+        assert_eq!(lo, 0.0);
+        assert_eq!(
+            hi, 21.0,
+            "expected data_max + 5% of span (20 + 1.0), not a full tick step to 25"
+        );
+    }
+
+    #[test]
+    fn capped_range_leaves_natural_overshoot_untouched() {
+        // Raw max 17 does NOT land on the step-2.5 grid, so ordinary
+        // nice-rounding already gives natural headroom (17.5) — the pad
+        // doesn't cross an extra boundary the raw data didn't already need,
+        // so the result must be identical to plain auto_nice_range.
+        let padded = auto_nice_range(0.0, 17.17, 5);
+        let capped = auto_nice_range_capped(0.0, 17.17, 0.0, 17.0, 5);
+        assert_eq!(capped, padded);
+    }
+
+    #[test]
+    fn capped_range_handles_symmetric_negative_case() {
+        // Raw range exactly (-20, 20), both ends on the tick grid; old
+        // behavior would round out to (-30, 30) (a 50% larger span).
+        let (lo, hi) = auto_nice_range_capped(-20.2, 20.2, -20.0, 20.0, 5);
+        assert_eq!(lo, -22.0);
+        assert_eq!(hi, 22.0);
+    }
+
+    #[test]
+    fn capped_range_never_drops_below_the_raw_nice_rounding() {
+        // Degenerate case: raw span is tiny relative to the step, so 5% of
+        // it is smaller than f64::EPSILON's effect — the result must still
+        // be at least as large as rounding the raw value alone would give.
+        let (_, hi) = auto_nice_range_capped(1.0, 1.0001, 1.0, 1.0, 5);
+        assert!(hi >= 1.0);
     }
 }
 

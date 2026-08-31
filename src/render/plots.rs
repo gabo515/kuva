@@ -32,11 +32,13 @@ use crate::plot::manhattan::ManhattanPlot;
 use crate::plot::mosaic::MosaicPlot;
 use crate::plot::network::NetworkPlot;
 use crate::plot::parallel::ParallelPlot;
+use crate::plot::pareto::ParetoPlot;
 use crate::plot::phylo::PhyloTree;
 use crate::plot::polar::PolarPlot;
 use crate::plot::pr::PrPlot;
 use crate::plot::pyramid::PopulationPyramid;
 use crate::plot::qq::QQPlot;
+use crate::plot::quiver::QuiverPlot;
 use crate::plot::radar::RadarPlot;
 use crate::plot::raincloud::RaincloudPlot;
 use crate::plot::ridgeline::RidgelinePlot;
@@ -107,6 +109,7 @@ pub enum Plot {
     Slope(SlopePlot),
     Venn(VennPlot),
     Parallel(ParallelPlot),
+    Pareto(ParetoPlot),
     Mosaic(MosaicPlot),
     Ecdf(EcdfPlot),
     QQ(QQPlot),
@@ -126,6 +129,7 @@ pub enum Plot {
     Gantt(GanttPlot),
     Text(TextPlot),
     LegendPlot(LegendPlot),
+    Quiver(QuiverPlot),
 }
 
 impl From<ScatterPlot> for Plot {
@@ -343,6 +347,11 @@ impl From<ParallelPlot> for Plot {
         Plot::Parallel(p)
     }
 }
+impl From<ParetoPlot> for Plot {
+    fn from(p: ParetoPlot) -> Self {
+        Plot::Pareto(p)
+    }
+}
 impl From<MosaicPlot> for Plot {
     fn from(p: MosaicPlot) -> Self {
         Plot::Mosaic(p)
@@ -438,6 +447,11 @@ impl From<LegendPlot> for Plot {
         Plot::LegendPlot(p)
     }
 }
+impl From<QuiverPlot> for Plot {
+    fn from(p: QuiverPlot) -> Self {
+        Plot::Quiver(p)
+    }
+}
 
 use crate::plot::colormap::ColorMap;
 use crate::plot::plot3d::DataRanges3D;
@@ -451,16 +465,31 @@ fn colorbar_from_z(
     if !z_min.is_finite() || !z_max.is_finite() {
         return None;
     }
+    colorbar_linear(cmap, z_min, z_max, label)
+}
+
+/// Standard linearly-normalized colorbar: `map_fn(t) = cmap((t - min) / (max - min))`,
+/// clamped to `[0, 1]`. Used by every continuous-colormap plot.
+pub(crate) fn colorbar_linear(
+    cmap: &ColorMap,
+    min: f64,
+    max: f64,
+    label: Option<String>,
+) -> Option<ColorBarInfo> {
+    if !min.is_finite() || !max.is_finite() {
+        return None;
+    }
     let cmap = cmap.clone();
     Some(ColorBarInfo {
         map_fn: Arc::new(move |t| {
-            let norm = (t - z_min) / (z_max - z_min + f64::EPSILON);
+            let norm = (t - min) / (max - min + f64::EPSILON);
             cmap.map(norm.clamp(0.0, 1.0))
         }),
-        min_value: z_min,
-        max_value: z_max,
+        min_value: min,
+        max_value: max,
         label,
         tick_labels: None,
+        tick_values: None,
     })
 }
 
@@ -521,6 +550,7 @@ impl Plot {
             Plot::Parallel(p) => p.color = color.into(),
             Plot::Ecdf(e) => e.color = color.into(),
             Plot::QQ(q) => q.color = color.into(),
+            Plot::Quiver(q) => q.color = color.into(),
             _ => {} // multi-series plots (StackedArea, Streamgraph, etc.) skip palette auto-assign
         }
     }
@@ -553,9 +583,10 @@ impl Plot {
                     }
                 }
 
-                // Expand for trend line
-                if let Some(trend) = s.trend {
-                    let TrendLine::Linear = trend;
+                // Expand for a linear trend, which extrapolates to the axis edges and can
+                // exceed the data's y-range. A LOESS smoother stays within the data, so it
+                // needs no expansion.
+                if let Some(TrendLine::Linear) = s.trend {
                     if let Some((slope, intercept, _)) = render_utils::linear_regression(&s.data) {
                         let y_start = slope * x_min + intercept;
                         let y_end = slope * x_max + intercept;
@@ -602,25 +633,64 @@ impl Plot {
                 if bp.groups.is_empty() {
                     None
                 } else {
-                    let x_min = 0.5;
-                    let x_max = bp.groups.len() as f64 + 0.5;
-                    let y_min = 0.0;
+                    let cat_min = 0.5;
+                    let cat_max = bp.groups.len() as f64 + 0.5;
+                    let mut data_min: f64 = 0.0;
 
-                    let mut y_max = f64::NEG_INFINITY;
+                    let mut data_max = f64::NEG_INFINITY;
+                    let mut flat_i = 0usize;
                     if bp.stacked {
                         for group in &bp.groups {
-                            let sum: f64 = group.bars.iter().map(|b| b.value).sum();
-                            y_max = y_max.max(sum);
+                            let mut accum = 0.0;
+                            for bar in &group.bars {
+                                accum += bar.value;
+                                let (lo, hi) = bp
+                                    .errors
+                                    .as_ref()
+                                    .and_then(|e| e.get(flat_i))
+                                    .copied()
+                                    .unwrap_or((0.0, 0.0));
+                                data_max = data_max.max(accum + hi);
+                                data_min = data_min.min(accum - lo);
+                                flat_i += 1;
+                            }
                         }
                     } else {
                         for group in &bp.groups {
                             for bar in &group.bars {
-                                y_max = y_max.max(bar.value);
+                                let (lo, hi) = bp
+                                    .errors
+                                    .as_ref()
+                                    .and_then(|e| e.get(flat_i))
+                                    .copied()
+                                    .unwrap_or((0.0, 0.0));
+                                data_max = data_max.max(bar.value + hi);
+                                data_min = data_min.min(bar.value - lo);
+                                flat_i += 1;
                             }
                         }
                     }
 
-                    Some(((x_min, x_max), (y_min, y_max)))
+                    if bp.horizontal {
+                        Some(((data_min, data_max), (cat_min, cat_max)))
+                    } else {
+                        Some(((cat_min, cat_max), (data_min, data_max)))
+                    }
+                }
+            }
+            Plot::Pareto(pp) => {
+                if pp.categories.is_empty() {
+                    None
+                } else {
+                    let bars = pp.render_bars();
+                    let cat_min = 0.5;
+                    let cat_max = bars.len() as f64 + 0.5;
+                    let data_max = bars.iter().map(|b| b.value()).fold(0.0_f64, f64::max);
+                    if pp.horizontal {
+                        Some(((0.0, data_max), (cat_min, cat_max)))
+                    } else {
+                        Some(((cat_min, cat_max), (0.0, data_max)))
+                    }
                 }
             }
             Plot::Histogram(h) => {
@@ -638,34 +708,29 @@ impl Plot {
                     };
                     return Some(((x_min, x_max), (0.0, max_y)));
                 }
-                // Auto-binning path: use explicit range if set, else derive from data
-                // (mirrors the fallback in the renderer so bounds() always returns a usable range)
-                let range = h.range.unwrap_or_else(|| {
-                    if h.data.is_empty() {
-                        return (0.0, 1.0);
-                    }
-                    let min = h.data.iter().cloned().fold(f64::INFINITY, f64::min);
-                    let max = h.data.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-                    (min, max)
-                });
-                let bins = h.bins;
-                let bin_width = (range.1 - range.0) / bins as f64;
-
-                let mut counts = vec![0usize; bins];
-                for &value in &h.data {
-                    if value < range.0 || value > range.1 {
-                        continue;
-                    }
-                    let bin = ((value - range.0) / bin_width).floor() as usize;
-                    let bin = if bin == bins { bin - 1 } else { bin };
-                    counts[bin] += 1;
-                }
-
-                let max_y = if h.normalize {
-                    1.0
-                } else {
-                    *counts.iter().max().unwrap_or(&1) as f64
+                // Auto-binning path: reuse the renderer's shared binning so bounds()
+                // agrees on bin count and peak for every mode (step/cumulative/stacked/
+                // weighted/bin-method).
+                let Some(binned) = h.compute_bins() else {
+                    return Some(((0.0, 1.0), (0.0, 1.0)));
                 };
+                let range = binned.range;
+                let mut max_y = binned.max_y;
+
+                // KDE overlay only applies to a single, non-cumulative series (matches the
+                // renderer guard); extend the y-extent to fit its peak when present.
+                if h.show_kde && h.groups.is_empty() && !h.cumulative && h.data.len() >= 2 {
+                    let bw = h
+                        .kde_bandwidth
+                        .unwrap_or_else(|| render_utils::silverman_bandwidth(&h.data));
+                    let n = h.data.len() as f64;
+                    let density_norm = 1.0 / (n * bw * (2.0 * std::f64::consts::PI).sqrt());
+                    let kde = render_utils::simple_kde(&h.data, bw, h.kde_samples);
+                    let peak_density = kde.iter().map(|(_, y)| *y).fold(0.0_f64, f64::max);
+                    let kde_peak_height =
+                        peak_density * density_norm * n * binned.bin_width * binned.norm;
+                    max_y = max_y.max(kde_peak_height);
+                }
 
                 Some((range, (0.0, max_y)))
             }
@@ -673,11 +738,11 @@ impl Plot {
                 if bp.groups.is_empty() {
                     None
                 } else {
-                    let x_min = 0.5;
-                    let x_max = bp.groups.len() as f64 + 0.5;
+                    let cat_min = 0.5;
+                    let cat_max = bp.groups.len() as f64 + 0.5;
 
-                    let mut y_min = f64::INFINITY;
-                    let mut y_max = f64::NEG_INFINITY;
+                    let mut data_min = f64::INFINITY;
+                    let mut data_max = f64::NEG_INFINITY;
                     for g in &bp.groups {
                         if g.values.is_empty() {
                             continue;
@@ -689,24 +754,29 @@ impl Plot {
                         let iqr = q3 - q1;
                         let lo = q1 - 1.5 * iqr;
                         let hi = q3 + 1.5 * iqr;
-                        y_min = y_min.min(lo);
-                        y_max = y_max.max(hi);
+                        data_min = data_min.min(lo);
+                        data_max = data_max.max(hi);
                     }
 
-                    Some(((x_min, x_max), (y_min, y_max)))
+                    if bp.horizontal {
+                        Some(((data_min, data_max), (cat_min, cat_max)))
+                    } else {
+                        Some(((cat_min, cat_max), (data_min, data_max)))
+                    }
                 }
             }
             Plot::Violin(vp) => {
                 if vp.groups.is_empty() {
                     None
                 } else {
-                    let x_min = 0.5;
-                    let x_max = vp.groups.len() as f64 + 0.5;
+                    let cat_min = 0.5;
+                    let cat_max = vp.groups.len() as f64 + 0.5;
 
-                    let mut y_min = f64::INFINITY;
-                    let mut y_max = f64::NEG_INFINITY;
+                    let mut data_min = f64::INFINITY;
+                    let mut data_max = f64::NEG_INFINITY;
 
-                    for group in &vp.groups {
+                    let groups_iter = vp.groups.iter().chain(vp.split_groups.iter());
+                    for group in groups_iter {
                         if group.values.is_empty() {
                             continue;
                         }
@@ -719,11 +789,15 @@ impl Plot {
                         let h = vp
                             .bandwidth
                             .unwrap_or_else(|| render_utils::silverman_bandwidth(&group.values));
-                        y_min = y_min.min(g_min - 3.0 * h);
-                        y_max = y_max.max(g_max + 3.0 * h);
+                        data_min = data_min.min(g_min - 3.0 * h);
+                        data_max = data_max.max(g_max + 3.0 * h);
                     }
 
-                    Some(((x_min, x_max), (y_min, y_max)))
+                    if vp.horizontal {
+                        Some(((data_min, data_max), (cat_min, cat_max)))
+                    } else {
+                        Some(((cat_min, cat_max), (data_min, data_max)))
+                    }
                 }
             }
             Plot::Pie(_) => {
@@ -788,20 +862,24 @@ impl Plot {
                 if sp.groups.is_empty() {
                     return None;
                 }
-                let x_min = 0.5;
-                let x_max = sp.groups.len() as f64 + 0.5;
-                let mut y_min = f64::INFINITY;
-                let mut y_max = f64::NEG_INFINITY;
+                let cat_min = 0.5;
+                let cat_max = sp.groups.len() as f64 + 0.5;
+                let mut val_min = f64::INFINITY;
+                let mut val_max = f64::NEG_INFINITY;
                 for g in &sp.groups {
                     for &v in &g.values {
-                        y_min = y_min.min(v);
-                        y_max = y_max.max(v);
+                        val_min = val_min.min(v);
+                        val_max = val_max.max(v);
                     }
                 }
-                if y_min == f64::INFINITY {
+                if val_min == f64::INFINITY {
                     return None;
                 }
-                Some(((x_min, x_max), (y_min, y_max)))
+                if sp.horizontal {
+                    Some(((val_min, val_max), (cat_min, cat_max)))
+                } else {
+                    Some(((cat_min, cat_max), (val_min, val_max)))
+                }
             }
             Plot::Volcano(vp) => {
                 if vp.points.is_empty() {
@@ -1158,10 +1236,14 @@ impl Plot {
                 if all_vals.is_empty() {
                     return None;
                 }
-                let y_min = all_vals.iter().cloned().fold(f64::INFINITY, f64::min);
-                let y_max = all_vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-                let pad = (y_max - y_min) * 0.05 + 0.5;
-                Some(((0.5, n as f64 + 0.5), (y_min - pad, y_max + pad)))
+                let data_min = all_vals.iter().cloned().fold(f64::INFINITY, f64::min);
+                let data_max = all_vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+                let pad = (data_max - data_min) * 0.05 + 0.5;
+                if r.horizontal {
+                    Some(((data_min - pad, data_max + pad), (0.5, n as f64 + 0.5)))
+                } else {
+                    Some(((0.5, n as f64 + 0.5), (data_min - pad, data_max + pad)))
+                }
             }
             Plot::Survival(sp) => {
                 if sp.groups.is_empty() {
@@ -1367,6 +1449,36 @@ impl Plot {
             Plot::Text(_) => Some(((0.0, 1.0), (0.0, 1.0))),
             Plot::Network(_) => Some(((0.0, 1.0), (0.0, 1.0))),
             Plot::Radar(_) => Some(((0.0, 1.0), (0.0, 1.0))),
+            Plot::Quiver(q) => {
+                if q.arrows.is_empty() {
+                    return None;
+                }
+                // One pass for scale + origin extent; a second pass for
+                // endpoint-expanded bounds only when !tight_bounds.
+                let (scale, x_min_d, x_max_d, y_min_d, y_max_d) =
+                    q.effective_scale_and_data_extent();
+                if !x_min_d.is_finite() {
+                    return None;
+                }
+                if q.tight_bounds {
+                    return Some(((x_min_d, x_max_d), (y_min_d, y_max_d)));
+                }
+                let mut x_min = f64::INFINITY;
+                let mut x_max = f64::NEG_INFINITY;
+                let mut y_min = f64::INFINITY;
+                let mut y_max = f64::NEG_INFINITY;
+                for a in &q.arrows {
+                    let (tail, tip) = q.endpoints_with_scale(a, scale);
+                    x_min = x_min.min(tail.0).min(tip.0);
+                    x_max = x_max.max(tail.0).max(tip.0);
+                    y_min = y_min.min(tail.1).min(tip.1);
+                    y_max = y_max.max(tail.1).max(tip.1);
+                }
+                if !x_min.is_finite() {
+                    return None;
+                }
+                Some(((x_min, x_max), (y_min, y_max)))
+            }
             Plot::Streamgraph(sg) => {
                 let geom = sg.compute_geometry()?;
                 let x_min = sg.x.iter().cloned().fold(f64::INFINITY, f64::min);
@@ -1501,38 +1613,53 @@ impl Plot {
             }
             Plot::Gantt(gp) => gp.tasks.len() * 5 + 20,
             Plot::Text(tp) => tp.body.lines().count() * 2 + 10,
+            Plot::Quiver(q) => q.arrows.len() * 2 + 10,
             _ => 100,
         }
     }
 
-    pub fn colorbar_info(&self) -> Option<ColorBarInfo> {
+    /// `bw_mode` forces every colorbar's colormap to `ColorMap::Grayscale`, matching
+    /// the data fills the renderer draws when BW mode is on (see e.g. `add_heatmap`),
+    /// so the colorbar and the data it labels stay in sync. Exception: `Scatter3D`'s
+    /// colorbar is suppressed entirely (`None`) in BW mode, because its point fills
+    /// already ignore `z_colormap` in favor of a flat marker color — showing a
+    /// colorbar for a mapping the renderer no longer uses would be misleading.
+    pub fn colorbar_info(&self, bw_mode: bool) -> Option<ColorBarInfo> {
+        let cmap_of = |c: &ColorMap| -> ColorMap {
+            if bw_mode {
+                ColorMap::Grayscale
+            } else {
+                c.clone()
+            }
+        };
         match self {
             Plot::Heatmap(hm) => {
-                let flat: Vec<f64> = hm.data.iter().flatten().cloned().collect();
-                let min = flat.iter().cloned().fold(f64::INFINITY, f64::min);
-                let max = flat.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-                let cmap = hm.color_map.clone();
-                Some(ColorBarInfo {
-                    map_fn: Arc::new(move |t| {
-                        let norm = (t - min) / (max - min + f64::EPSILON);
-                        cmap.map(norm.clamp(0.0, 1.0))
-                    }),
-                    min_value: min,
-                    max_value: max,
-                    label: None,
-                    tick_labels: None,
-                })
+                let min = hm
+                    .data
+                    .iter()
+                    .flatten()
+                    .cloned()
+                    .fold(f64::INFINITY, f64::min);
+                let max = hm
+                    .data
+                    .iter()
+                    .flatten()
+                    .cloned()
+                    .fold(f64::NEG_INFINITY, f64::max);
+                colorbar_linear(&cmap_of(&hm.color_map), min, max, None)
             }
             Plot::Histogram2d(h2d) => {
                 let max_count = h2d.bins.iter().flatten().copied().max().unwrap_or(1) as f64;
-                let cmap = h2d.color_map.clone();
+                let cmap = cmap_of(&h2d.color_map);
                 let log_scale = h2d.log_count;
                 if log_scale {
                     // Colorbar in log₁₀ space: ticks at integer powers of 10 labelled
                     // with the actual count value so users can read off "this color = N cells".
+                    // Positions live in log space; the raw counts are supplied as values so
+                    // `add_colorbar_at` formats them through `with_colorbar_tick_format`.
                     let log_max = (max_count + 1.0).log10();
-                    let tick_labels: Vec<(f64, String)> = {
-                        let mut v = vec![(0.0_f64, "0".to_string())];
+                    let tick_values: Vec<(f64, f64)> = {
+                        let mut v = vec![(0.0_f64, 0.0_f64)];
                         let mut k = 0u32;
                         loop {
                             let count = 10_f64.powi(k as i32);
@@ -1540,11 +1667,11 @@ impl Plot {
                                 break;
                             }
                             let pos = (count + 1.0).log10();
-                            v.push((pos, format!("{}", count as u64)));
+                            v.push((pos, count));
                             k += 1;
                         }
                         // Always include max_count at the top
-                        v.push((log_max, format!("{}", max_count as u64)));
+                        v.push((log_max, max_count));
                         v.dedup_by(|a, b| (a.0 - b.0).abs() < 1e-9);
                         v
                     };
@@ -1556,7 +1683,8 @@ impl Plot {
                         min_value: 0.0,
                         max_value: log_max,
                         label: Some("log\u{2081}\u{2080}(Count + 1)".to_string()),
-                        tick_labels: Some(tick_labels),
+                        tick_labels: None,
+                        tick_values: Some(tick_values),
                     })
                 } else {
                     Some(ColorBarInfo {
@@ -1565,89 +1693,73 @@ impl Plot {
                         max_value: max_count,
                         label: Some("Count".to_string()),
                         tick_labels: None,
+                        tick_values: None,
                     })
                 }
             }
             Plot::DotPlot(dp) => {
                 let label = dp.color_legend_label.clone()?;
                 let (min, max) = dp.color_range.unwrap_or_else(|| dp.color_extent());
-                let cmap = dp.color_map.clone();
-                Some(ColorBarInfo {
-                    map_fn: Arc::new(move |t| {
-                        let norm = (t - min) / (max - min + f64::EPSILON);
-                        cmap.map(norm.clamp(0.0, 1.0))
-                    }),
-                    min_value: min,
-                    max_value: max,
-                    label: Some(label),
-                    tick_labels: None,
-                })
+                colorbar_linear(&cmap_of(&dp.color_map), min, max, Some(label))
             }
             Plot::DicePlot(dp) => {
                 let label = dp.fill_legend_label.clone()?;
                 let (min, max) = dp.fill_range.unwrap_or_else(|| dp.fill_extent());
-                let cmap = dp.color_map.clone();
-                Some(ColorBarInfo {
-                    map_fn: Arc::new(move |t| {
-                        let norm = (t - min) / (max - min + f64::EPSILON);
-                        cmap.map(norm.clamp(0.0, 1.0))
-                    }),
-                    min_value: min,
-                    max_value: max,
-                    label: Some(label),
-                    tick_labels: None,
-                })
+                colorbar_linear(&cmap_of(&dp.color_map), min, max, Some(label))
             }
             Plot::Contour(cp) => {
                 if !cp.filled {
                     return None;
                 }
                 let (z_min, z_max) = cp.z_range();
-                if !z_min.is_finite() || !z_max.is_finite() {
-                    return None;
-                }
-                let cmap = cp.color_map.clone();
-                let label = cp.legend_label.clone();
-                Some(ColorBarInfo {
-                    map_fn: Arc::new(move |t| {
-                        let norm = (t - z_min) / (z_max - z_min + f64::EPSILON);
-                        cmap.map(norm.clamp(0.0, 1.0))
-                    }),
-                    min_value: z_min,
-                    max_value: z_max,
-                    label,
-                    tick_labels: None,
-                })
+                colorbar_linear(
+                    &cmap_of(&cp.color_map),
+                    z_min,
+                    z_max,
+                    cp.legend_label.clone(),
+                )
             }
             Plot::Clustermap(cm) => {
-                let flat: Vec<f64> = cm.data.iter().flatten().cloned().collect();
-                if flat.is_empty() {
+                if cm.data.is_empty() || cm.data.iter().all(|r| r.is_empty()) {
                     return None;
                 }
-                let min = flat.iter().cloned().fold(f64::INFINITY, f64::min);
-                let max = flat.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-                let cmap = cm.color_map.clone();
-                Some(ColorBarInfo {
-                    map_fn: Arc::new(move |t| {
-                        let norm = (t - min) / (max - min + f64::EPSILON);
-                        cmap.map(norm.clamp(0.0, 1.0))
-                    }),
-                    min_value: min,
-                    max_value: max,
-                    label: cm.legend_label.clone(),
-                    tick_labels: None,
-                })
+                let min = cm
+                    .data
+                    .iter()
+                    .flatten()
+                    .cloned()
+                    .fold(f64::INFINITY, f64::min);
+                let max = cm
+                    .data
+                    .iter()
+                    .flatten()
+                    .cloned()
+                    .fold(f64::NEG_INFINITY, f64::max);
+                colorbar_linear(&cmap_of(&cm.color_map), min, max, cm.legend_label.clone())
             }
             Plot::Surface3D(s) => colorbar_from_z(
-                s.z_colormap.as_ref()?,
+                &cmap_of(s.z_colormap.as_ref()?),
                 s.data_ranges()?,
                 s.box3d.z_label.clone(),
             ),
-            Plot::Scatter3D(s) => colorbar_from_z(
-                s.z_colormap.as_ref()?,
-                s.data_ranges()?,
-                s.box3d.z_label.clone(),
-            ),
+            Plot::Scatter3D(s) => {
+                if bw_mode {
+                    // Points render as a flat marker color in BW mode (see add_scatter3d),
+                    // ignoring z_colormap entirely — a colorbar for an unused mapping
+                    // would be misleading, so suppress it.
+                    return None;
+                }
+                colorbar_from_z(
+                    s.z_colormap.as_ref()?,
+                    s.data_ranges()?,
+                    s.box3d.z_label.clone(),
+                )
+            }
+            Plot::Quiver(q) => {
+                let cmap = cmap_of(q.color_map.as_ref()?);
+                let (min, max) = q.color_range.unwrap_or_else(|| q.magnitude_extent());
+                colorbar_linear(&cmap, min, max, q.color_legend_label.clone())
+            }
             // Hexbin draws its own colorbar inside add_hexbin (values are only known
             // after binning).  Return None here so the generic colorbar loop in
             // render_multiple does not attempt to draw a second, placeholder bar.

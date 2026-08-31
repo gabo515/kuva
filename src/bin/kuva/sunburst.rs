@@ -85,10 +85,21 @@ pub enum CliColorBy {
 }
 
 pub fn run(args: SunburstArgs) -> Result<(), String> {
+    let mut proj: Vec<ColSpec> = vec![
+        args.label.clone().unwrap_or(ColSpec::Index(0)),
+        args.value.clone().unwrap_or(ColSpec::Index(1)),
+    ];
+    if let Some(ref c) = args.parent {
+        proj.push(c.clone());
+    }
+    if let Some(ref c) = args.color_col {
+        proj.push(c.clone());
+    }
     let table = DataTable::parse(
         args.input.input.as_deref(),
-        args.input.no_header,
+        args.input.header_mode(),
         args.input.delimiter,
+        &proj,
     )?;
 
     let label_col = args.label.unwrap_or(ColSpec::Index(0));
@@ -191,6 +202,27 @@ pub fn run(args: SunburstArgs) -> Result<(), String> {
     }
     if let Some(ref lbl) = args.colorbar_label {
         plot = plot.with_colorbar_label(lbl.clone());
+    }
+
+    #[cfg(feature = "emit_code")]
+    if args.base.emit_code {
+        print!(
+            "{}",
+            crate::emit_code::assemble(
+                &[
+                    "kuva::plot::SunburstPlot",
+                    "kuva::plot::TreemapNode",
+                    "kuva::plot::SunburstColorMode",
+                    "kuva::plot::ColorMap",
+                ],
+                "Sunburst",
+                &[crate::emit_code::emit_sunburst_plot(&plot)],
+                &args.base,
+                None,
+                None,
+            )
+        );
+        return Ok(());
     }
 
     let plots = vec![Plot::Sunburst(plot)];

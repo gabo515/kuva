@@ -52,10 +52,15 @@ pub struct QQArgs {
 }
 
 pub fn run(args: QQArgs) -> Result<(), String> {
+    let mut proj: Vec<ColSpec> = vec![args.value.clone()];
+    if let Some(ref c) = args.color_by {
+        proj.push(c.clone());
+    }
     let table = DataTable::parse(
         args.input.input.as_deref(),
-        args.input.no_header,
+        args.input.header_mode(),
         args.input.delimiter,
+        &proj,
     )?;
 
     let mut plot = QQPlot::new();
@@ -98,6 +103,22 @@ pub fn run(args: QQArgs) -> Result<(), String> {
         } else {
             plot = plot.with_data("", values);
         }
+    }
+
+    #[cfg(feature = "emit_code")]
+    if args.base.emit_code {
+        print!(
+            "{}",
+            crate::emit_code::assemble(
+                &["kuva::plot::QQPlot"],
+                "QQ",
+                &[crate::emit_code::emit_qq_plot(&plot)],
+                &args.base,
+                Some(&args.axis),
+                None,
+            )
+        );
+        return Ok(());
     }
 
     let plots = vec![Plot::QQ(plot)];

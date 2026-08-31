@@ -56,10 +56,17 @@ pub struct DotArgs {
 use crate::data::parse_colormap;
 
 pub fn run(args: DotArgs) -> Result<(), String> {
+    let proj: Vec<ColSpec> = vec![
+        args.x_col.clone().unwrap_or(ColSpec::Index(0)),
+        args.y_col.clone().unwrap_or(ColSpec::Index(1)),
+        args.size_col.clone().unwrap_or(ColSpec::Index(2)),
+        args.color_col.clone().unwrap_or(ColSpec::Index(3)),
+    ];
     let table = DataTable::parse(
         args.input.input.as_deref(),
-        args.input.no_header,
+        args.input.header_mode(),
         args.input.delimiter,
+        &proj,
     )?;
 
     let x_col = args.x_col.unwrap_or(ColSpec::Index(0));
@@ -92,6 +99,22 @@ pub fn run(args: DotArgs) -> Result<(), String> {
     }
     if let Some(ref label) = args.colorbar {
         plot = plot.with_colorbar(label.clone());
+    }
+
+    #[cfg(feature = "emit_code")]
+    if args.base.emit_code {
+        print!(
+            "{}",
+            crate::emit_code::assemble(
+                &["kuva::plot::DotPlot", "kuva::plot::ColorMap"],
+                "DotPlot",
+                &[crate::emit_code::emit_dot_plot(&plot)],
+                &args.base,
+                Some(&args.axis),
+                None,
+            )
+        );
+        return Ok(());
     }
 
     let plots = vec![Plot::DotPlot(plot)];

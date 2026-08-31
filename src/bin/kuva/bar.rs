@@ -8,8 +8,8 @@ use kuva::render::palette::Palette;
 use kuva::render::plots::Plot;
 use kuva::render::render::render_multiple;
 
-use crate::data::{ColSpec, DataTable, InputArgs};
-use crate::layout_args::{apply_axis_args, apply_base_args, AxisArgs, BaseArgs};
+use crate::data::{apply_na, ColSpec, DataTable, InputArgs};
+use crate::layout_args::{apply_axis_args, apply_base_args, AxisArgs, BaseArgs, NaArgs};
 use crate::output::write_output;
 
 /// Bar chart from label and value columns.
@@ -39,9 +39,19 @@ pub struct BarArgs {
     #[arg(long)]
     pub bar_width: Option<f64>,
 
+    /// Value column(s). Comma-separated list for a wide-format grouped bar chart:
+    /// `--y A,B,C` treats each column as a series and each row as a category.
+    /// Overrides --value-col when provided with 2+ columns.
+    #[arg(long, value_delimiter = ',')]
+    pub y: Vec<ColSpec>,
+
     /// Group by this column and color each series separately (creates a grouped bar chart).
     #[arg(long)]
     pub color_by: Option<ColSpec>,
+
+    /// Render categories on the Y-axis and values on the X-axis.
+    #[arg(long)]
+    pub horizontal: bool,
 
     #[command(flatten)]
     pub input: InputArgs,
@@ -50,24 +60,174 @@ pub struct BarArgs {
     pub base: BaseArgs,
     #[command(flatten)]
     pub axis: AxisArgs,
+    #[command(flatten)]
+    pub na: NaArgs,
 }
 
 pub fn run(args: BarArgs) -> Result<(), String> {
+    let (na_set, na_strat, clamp) = args.na.resolve()?;
+    // Drop/zero/error missing values in a value column, keeping labels aligned (row-level).
+    let clean_lv =
+        |labels: Vec<String>, vals: Vec<Option<f64>>| -> Result<(Vec<String>, Vec<f64>), String> {
+            let keep = apply_na(na_strat, &[&vals], vals.len())?;
+            Ok((
+                keep.iter().map(|&i| labels[i].clone()).collect(),
+                keep.iter().map(|&i| vals[i].unwrap_or(0.0)).collect(),
+            ))
+        };
+
+    // Multi-column --y mode: wide-format grouped bar (rows = categories, columns = series)
+    if (args.y.len() > 1 || args.y.iter().any(|c| c.is_multi())) && args.color_by.is_none() {
+        let label_spec = args.label_col.clone().unwrap_or(ColSpec::Index(0));
+        let proj: Vec<ColSpec> = std::iter::once(label_spec.clone())
+            .chain(args.y.iter().cloned())
+            .collect();
+        let table = DataTable::parse(
+            args.input.input.as_deref(),
+            args.input.header_mode(),
+            args.input.delimiter,
+            &proj,
+        )?;
+        // Expand column ranges / globs against the parsed table (issue #109).
+        let y_cols = table.expand_columns(&args.y)?;
+        // Aggregate each y-column by label (mean, or --agg func if provided).
+        // This handles both pre-aggregated wide data (one row per label) and
+        // long-format data (many rows per label, values averaged per group).
+        let raw_labels = table.col_str(&label_spec)?;
+        // Read each series NA-aware, then drop any row missing in one or more series (row-level).
+        let y_opt: Vec<Vec<Option<f64>>> = y_cols
+            .iter()
+            .map(|c| table.col_f64_opt(c, &na_set, clamp))
+            .collect::<Result<_, _>>()?;
+        let cols_ref: Vec<&[Option<f64>]> = y_opt.iter().map(|v| v.as_slice()).collect();
+        let keep = apply_na(na_strat, &cols_ref, raw_labels.len())?;
+        let raw_labels: Vec<String> = keep.iter().map(|&i| raw_labels[i].clone()).collect();
+        let y_data: Vec<Vec<f64>> = y_opt
+            .iter()
+            .map(|col| keep.iter().map(|&i| col[i].unwrap_or(0.0)).collect())
+            .collect();
+        let series_names: Vec<String> = y_cols.iter().map(|c| table.col_display_name(c)).collect();
+
+        // Collect unique labels in first-seen order, accumulating values per (label, series).
+        let mut label_order: Vec<String> = Vec::new();
+        let mut sums: BTreeMap<(String, usize), f64> = BTreeMap::new();
+        let mut cnts: BTreeMap<(String, usize), usize> = BTreeMap::new();
+        for (row_i, label) in raw_labels.iter().enumerate() {
+            if !label_order.contains(label) {
+                label_order.push(label.clone());
+            }
+            for (si, col_vals) in y_data.iter().enumerate() {
+                *sums.entry((label.clone(), si)).or_insert(0.0) += col_vals[row_i];
+                *cnts.entry((label.clone(), si)).or_insert(0) += 1;
+            }
+        }
+        let agg_fn = args.agg.as_deref().unwrap_or("mean");
+
+        let pal = Palette::category10();
+        let colors: Vec<String> = (0..y_cols.len()).map(|i| pal[i].to_string()).collect();
+
+        let mut plot = BarPlot::new();
+        if let Some(w) = args.bar_width {
+            plot = plot.with_width(w);
+        }
+        for label in &label_order {
+            let bar_values: Vec<(f64, String)> = (0..y_cols.len())
+                .map(|si| {
+                    let key = (label.clone(), si);
+                    let val = match agg_fn {
+                        "sum" => *sums.get(&key).unwrap_or(&0.0),
+                        "min" | "max" => {
+                            // min/max require the raw values — fall back to mean
+                            let s = sums.get(&key).copied().unwrap_or(0.0);
+                            let c = cnts.get(&key).copied().unwrap_or(1).max(1);
+                            s / c as f64
+                        }
+                        _ => {
+                            // mean (default)
+                            let s = sums.get(&key).copied().unwrap_or(0.0);
+                            let c = cnts.get(&key).copied().unwrap_or(1).max(1);
+                            s / c as f64
+                        }
+                    };
+                    (val, colors[si].clone())
+                })
+                .collect();
+            plot = plot.with_group(label, bar_values);
+        }
+        plot = plot.with_legend(series_names.iter().map(|s| s.as_str()).collect());
+        if args.horizontal {
+            plot = plot.with_horizontal(true);
+        }
+
+        #[cfg(feature = "emit_code")]
+        if args.base.emit_code {
+            print!(
+                "{}",
+                crate::emit_code::assemble(
+                    &["kuva::plot::BarPlot"],
+                    "Bar",
+                    &[crate::emit_code::emit_bar_plot(&plot)],
+                    &args.base,
+                    Some(&args.axis),
+                    None,
+                )
+            );
+            return Ok(());
+        }
+
+        let plots = vec![Plot::Bar(plot)];
+        let layout = Layout::auto_from_plots(&plots);
+        let layout = apply_base_args(layout, &args.base);
+        let layout = apply_axis_args(layout, &args.axis);
+        let layout = if args.horizontal {
+            layout
+        } else {
+            layout.with_x_tick_rotate(-45.0)
+        };
+        let scene = render_multiple(plots, layout);
+        return write_output(scene, &args.base);
+    }
+
+    let mut proj: Vec<ColSpec> = vec![
+        args.label_col.clone().unwrap_or(ColSpec::Index(0)),
+        if args.y.len() == 1 {
+            args.y[0].clone()
+        } else {
+            args.value_col.clone().unwrap_or(ColSpec::Index(1))
+        },
+    ];
+    if let Some(ref c) = args.count_by {
+        proj.push(c.clone());
+    }
+    if let Some(ref c) = args.color_by {
+        proj.push(c.clone());
+    }
     let table = DataTable::parse(
         args.input.input.as_deref(),
-        args.input.no_header,
+        args.input.header_mode(),
         args.input.delimiter,
+        &proj,
     )?;
 
     let color = args.color.unwrap_or_else(|| "steelblue".to_string());
+    let effective_value_col: ColSpec = if args.y.len() == 1 {
+        args.y[0].clone()
+    } else {
+        args.value_col.unwrap_or(ColSpec::Index(1))
+    };
 
     // --color-by: grouped bar chart (one series per unique value in color_by column)
     if let Some(ref color_by_col) = args.color_by {
         let label_col = args.label_col.unwrap_or(ColSpec::Index(0));
-        let value_col = args.value_col.unwrap_or(ColSpec::Index(1));
+        let value_col = effective_value_col.clone();
         let labels = table.col_str(&label_col)?;
         let series = table.col_str(color_by_col)?;
-        let values = table.col_f64(&value_col)?;
+        let values_opt = table.col_f64_opt(&value_col, &na_set, clamp)?;
+        // Drop rows with a missing value, keeping labels + series aligned.
+        let keep = apply_na(na_strat, &[&values_opt], values_opt.len())?;
+        let labels: Vec<String> = keep.iter().map(|&i| labels[i].clone()).collect();
+        let series: Vec<String> = keep.iter().map(|&i| series[i].clone()).collect();
+        let values: Vec<f64> = keep.iter().map(|&i| values_opt[i].unwrap_or(0.0)).collect();
 
         // Collect unique labels and series in insertion order
         let mut label_order: Vec<String> = Vec::new();
@@ -164,11 +324,35 @@ pub fn run(args: BarArgs) -> Result<(), String> {
             plot = plot.with_legend(series_order.iter().map(|s| s.as_str()).collect());
         }
 
+        if args.horizontal {
+            plot = plot.with_horizontal(true);
+        }
+
+        #[cfg(feature = "emit_code")]
+        if args.base.emit_code {
+            print!(
+                "{}",
+                crate::emit_code::assemble(
+                    &["kuva::plot::BarPlot"],
+                    "Bar",
+                    &[crate::emit_code::emit_bar_plot(&plot)],
+                    &args.base,
+                    Some(&args.axis),
+                    None,
+                )
+            );
+            return Ok(());
+        }
+
         let plots = vec![Plot::Bar(plot)];
         let layout = Layout::auto_from_plots(&plots);
         let layout = apply_base_args(layout, &args.base);
         let layout = apply_axis_args(layout, &args.axis);
-        let layout = layout.with_x_tick_rotate(-45.0);
+        let layout = if args.horizontal {
+            layout
+        } else {
+            layout.with_x_tick_rotate(-45.0)
+        };
         let scene = render_multiple(plots, layout);
         return write_output(scene, &args.base);
     }
@@ -182,9 +366,9 @@ pub fn run(args: BarArgs) -> Result<(), String> {
         counts.into_iter().map(|(k, c)| (k, c as f64)).collect()
     } else if let Some(ref func) = args.agg {
         let label_col = args.label_col.unwrap_or(ColSpec::Index(0));
-        let value_col = args.value_col.unwrap_or(ColSpec::Index(1));
+        let value_col = effective_value_col.clone();
         let labels = table.col_str(&label_col)?;
-        let values = table.col_f64(&value_col)?;
+        let (labels, values) = clean_lv(labels, table.col_f64_opt(&value_col, &na_set, clamp)?)?;
         // Accumulate values per group (preserve insertion order via Vec).
         let mut order: Vec<String> = Vec::new();
         let mut groups: BTreeMap<String, Vec<f64>> = BTreeMap::new();
@@ -219,9 +403,11 @@ pub fn run(args: BarArgs) -> Result<(), String> {
             .collect()
     } else {
         let label_col = args.label_col.unwrap_or(ColSpec::Index(0));
-        let value_col = args.value_col.unwrap_or(ColSpec::Index(1));
         let labels = table.col_str(&label_col)?;
-        let values = table.col_f64(&value_col)?;
+        let (labels, values) = clean_lv(
+            labels,
+            table.col_f64_opt(&effective_value_col, &na_set, clamp)?,
+        )?;
         labels.into_iter().zip(values).collect()
     };
 
@@ -230,12 +416,35 @@ pub fn run(args: BarArgs) -> Result<(), String> {
     if let Some(w) = args.bar_width {
         plot = plot.with_width(w);
     }
+    if args.horizontal {
+        plot = plot.with_horizontal(true);
+    }
+
+    #[cfg(feature = "emit_code")]
+    if args.base.emit_code {
+        print!(
+            "{}",
+            crate::emit_code::assemble(
+                &["kuva::plot::BarPlot"],
+                "Bar",
+                &[crate::emit_code::emit_bar_plot(&plot)],
+                &args.base,
+                Some(&args.axis),
+                None,
+            )
+        );
+        return Ok(());
+    }
 
     let plots = vec![Plot::Bar(plot)];
     let layout = Layout::auto_from_plots(&plots);
     let layout = apply_base_args(layout, &args.base);
     let layout = apply_axis_args(layout, &args.axis);
-    let layout = layout.with_x_tick_rotate(-45.0);
+    let layout = if args.horizontal {
+        layout
+    } else {
+        layout.with_x_tick_rotate(-45.0)
+    };
     let scene = render_multiple(plots, layout);
     write_output(scene, &args.base)
 }

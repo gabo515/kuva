@@ -34,6 +34,96 @@ fn test_heatmap_colorbar_values() {
     assert!(svg.contains("<svg"));
 }
 
+/// In-cell value labels shrink to fit short cells, and drop out entirely once even
+/// the shrunk size would fall below the readable floor — so dense heatmaps never
+/// overflow labels into neighbouring cells.
+#[test]
+fn heatmap_value_labels_shrink_to_fit_cells() {
+    // Font size of the <text> whose content is exactly `value` — a distinctive,
+    // non-round number that appears only as an in-cell label, never as a tick.
+    fn value_font_size(svg: &str, value: &str) -> Option<u32> {
+        let end = svg.find(&format!(">{value}</text>"))?;
+        let head = &svg[..end];
+        let tag = &head[head.rfind("<text")?..];
+        let fs = &tag[tag.find("font-size=\"")? + "font-size=\"".len()..];
+        fs[..fs.find('"')?].parse().ok()
+    }
+
+    let marker = "87.31";
+    // A heatmap with `rows` rows (its first cell is the marker) on a fixed 300px canvas,
+    // so more rows means shorter cells.
+    let render = |rows: usize| -> String {
+        let mut data = vec![vec![87.31, 20.0, 30.0]];
+        for i in 1..rows {
+            data.push(vec![i as f64, (i * 2) as f64, (i * 3) as f64]);
+        }
+        let hm = Heatmap::new()
+            .with_data(data)
+            .with_values()
+            .with_color_map(ColorMap::Viridis);
+        let plots = vec![Plot::Heatmap(hm)];
+        let layout = Layout::auto_from_plots(&plots).with_height(300.0);
+        SvgBackend.render_scene(&render_multiple(plots, layout))
+    };
+
+    let roomy = value_font_size(&render(3), marker).expect("roomy grid draws the value");
+    let dense = value_font_size(&render(30), marker).expect("dense grid draws a shrunken value");
+    assert!(
+        dense < roomy,
+        "value must shrink in shorter cells ({dense} !< {roomy})"
+    );
+    assert!(
+        value_font_size(&render(70), marker).is_none(),
+        "sub-floor cells must drop the value labels rather than overflow"
+    );
+}
+
+#[test]
+fn heatmap_wide_outlier_does_not_blank_every_value() {
+    // Count the <text> elements whose content is exactly `value`.
+    fn count(svg: &str, value: &str) -> usize {
+        svg.matches(&format!(">{value}</text>")).count()
+    }
+
+    // One 10-cell row of "0.50", optionally with a single large-magnitude outlier that
+    // formats far wider ("1000000.00"). The outlier must not shrink the whole grid below
+    // the legibility floor and suppress every label.
+    let render = |outlier: bool| -> String {
+        let mut row = vec![0.50_f64; 10];
+        if outlier {
+            row[5] = 1_000_000.0;
+        }
+        let hm = Heatmap::new()
+            .with_data(vec![row])
+            .with_values()
+            .with_color_map(ColorMap::Viridis);
+        let plots = vec![Plot::Heatmap(hm)];
+        let layout = Layout::auto_from_plots(&plots)
+            .with_width(420.0)
+            .with_height(140.0);
+        SvgBackend.render_scene(&render_multiple(plots, layout))
+    };
+
+    let baseline = count(&render(false), "0.50");
+    assert!(
+        baseline >= 9,
+        "sanity: short values draw without an outlier (got {baseline})"
+    );
+
+    let with = render(true);
+    assert!(
+        count(&with, "0.50") >= baseline - 1,
+        "a wide outlier must drop only itself, not blank the grid: {} of {} short labels survived",
+        count(&with, "0.50"),
+        baseline
+    );
+    assert_eq!(
+        count(&with, "1000000.00"),
+        0,
+        "the un-fittable outlier value is dropped, not overflowed"
+    );
+}
+
 #[test]
 fn test_heatmap_colorbar() {
     let data = vec![
@@ -205,6 +295,42 @@ fn test_phylo_heatmap_alignment() {
     let svg = SvgBackend.render_scene(&figure.render());
     common::write_test_output("test_outputs/heatmap_phylo_alignment.svg", svg.clone()).unwrap();
     assert!(svg.contains("<svg"));
+}
+
+/// Refactor regression: ensure `colorbar_linear` produces the same colorbar
+/// output for Heatmap as the pre-refactor inlined closure. Pins a few
+/// characteristic bytes from the gradient so that silent normalization drift
+/// would be caught.
+#[test]
+fn test_heatmap_colorbar_regression() {
+    let data = vec![vec![0.0, 50.0, 100.0], vec![25.0, 75.0, 50.0]];
+    let heatmap = Heatmap::new()
+        .with_data(data)
+        .with_color_map(ColorMap::Viridis);
+    let plots = vec![Plot::Heatmap(heatmap)];
+    let layout = Layout::auto_from_plots(&plots).with_title("Colorbar regression");
+    let svg = SvgBackend.render_scene(&render_multiple(plots, layout));
+
+    // The colorbar tick axis should show the full data range — min 0, max 100.
+    assert!(
+        svg.contains(">0<") || svg.contains(">0.0"),
+        "colorbar min tick (0) should appear"
+    );
+    assert!(
+        svg.contains(">100<") || svg.contains(">100.0"),
+        "colorbar max tick (100) should appear"
+    );
+    // Viridis endpoints — first stop should be dark-purple-ish, last should be
+    // yellow-ish. The SVG gradient inlines stops as hex colors.
+    // Viridis(0.0) = #440154, Viridis(1.0) = #fde725 (colorous crate).
+    assert!(
+        svg.contains("#440154") || svg.contains("#450154"),
+        "Viridis gradient should start near #440154"
+    );
+    assert!(
+        svg.contains("#fde725") || svg.contains("#fdea10"),
+        "Viridis gradient should end near #fde725"
+    );
 }
 
 #[test]

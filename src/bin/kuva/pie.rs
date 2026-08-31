@@ -60,10 +60,21 @@ pub struct PieArgs {
 }
 
 pub fn run(args: PieArgs) -> Result<(), String> {
+    let mut proj: Vec<ColSpec> = vec![
+        args.label_col.clone().unwrap_or(ColSpec::Index(0)),
+        args.value_col.clone().unwrap_or(ColSpec::Index(1)),
+    ];
+    if let Some(ref c) = args.count_by {
+        proj.push(c.clone());
+    }
+    if let Some(ref c) = args.color_col {
+        proj.push(c.clone());
+    }
     let table = DataTable::parse(
         args.input.input.as_deref(),
-        args.input.no_header,
+        args.input.header_mode(),
         args.input.delimiter,
+        &proj,
     )?;
 
     let (labels, values): (Vec<String>, Vec<f64>) = if let Some(ref count_col) = args.count_by {
@@ -114,6 +125,22 @@ pub fn run(args: PieArgs) -> Result<(), String> {
 
     for ((label, value), color) in labels.into_iter().zip(values).zip(colors) {
         plot = plot.with_slice(label, value, color);
+    }
+
+    #[cfg(feature = "emit_code")]
+    if args.base.emit_code {
+        print!(
+            "{}",
+            crate::emit_code::assemble(
+                &["kuva::plot::PiePlot", "kuva::plot::PieLabelPosition"],
+                "Pie",
+                &[crate::emit_code::emit_pie_plot(&plot)],
+                &args.base,
+                None,
+                None,
+            )
+        );
+        return Ok(());
     }
 
     let plots = vec![Plot::Pie(plot)];

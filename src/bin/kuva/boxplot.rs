@@ -2,6 +2,7 @@ use clap::Args;
 
 use kuva::plot::BoxPlot;
 use kuva::render::layout::Layout;
+use kuva::render::palette::Palette;
 use kuva::render::plots::Plot;
 use kuva::render::render::render_multiple;
 
@@ -21,6 +22,11 @@ pub struct BoxArgs {
     #[arg(long)]
     pub value_col: Option<ColSpec>,
 
+    /// Value column(s). Comma-separated for multi-column mode: `--y A,B,C` treats each
+    /// column as a separate group (column name = group label). Overrides --value-col.
+    #[arg(long, value_delimiter = ',')]
+    pub y: Vec<ColSpec>,
+
     /// Box fill color (CSS string; default: "steelblue").
     #[arg(long)]
     pub color: Option<String>,
@@ -38,6 +44,10 @@ pub struct BoxArgs {
     #[arg(long)]
     pub overlay_swarm: bool,
 
+    /// Render groups on the Y-axis and values on the X-axis.
+    #[arg(long)]
+    pub horizontal: bool,
+
     #[command(flatten)]
     pub input: InputArgs,
 
@@ -48,16 +58,84 @@ pub struct BoxArgs {
 }
 
 pub fn run(args: BoxArgs) -> Result<(), String> {
+    let color = args
+        .color
+        .clone()
+        .unwrap_or_else(|| "steelblue".to_string());
+
+    // Multi-column --y mode: each column is a group
+    if args.y.len() > 1 || args.y.iter().any(|c| c.is_multi()) {
+        let table = DataTable::parse(
+            args.input.input.as_deref(),
+            args.input.header_mode(),
+            args.input.delimiter,
+            &args.y,
+        )?;
+        // Expand column ranges / globs against the parsed table (issue #109).
+        let cols = table.expand_columns(&args.y)?;
+        let mut plot = BoxPlot::new().with_color(&color);
+        for col in &cols {
+            let name = table.col_display_name(col);
+            let values = table.col_f64(col)?;
+            plot = plot.with_group(name, values);
+        }
+        if let Some(colors) = args.group_colors {
+            plot = plot.with_group_colors(colors);
+        } else {
+            let pal = Palette::category10();
+            let colors: Vec<String> = (0..cols.len()).map(|i| pal[i].to_string()).collect();
+            plot = plot.with_group_colors(colors);
+        }
+        if args.overlay_swarm {
+            plot = plot.with_swarm_overlay();
+        } else if args.overlay_points {
+            plot = plot.with_strip(0.3);
+        }
+        if args.horizontal {
+            plot = plot.with_horizontal(true);
+        }
+
+        #[cfg(feature = "emit_code")]
+        if args.base.emit_code {
+            print!(
+                "{}",
+                crate::emit_code::assemble(
+                    &["kuva::plot::BoxPlot"],
+                    "Box",
+                    &[crate::emit_code::emit_boxplot(&plot)],
+                    &args.base,
+                    Some(&args.axis),
+                    None,
+                )
+            );
+            return Ok(());
+        }
+
+        let plots = vec![Plot::Box(plot)];
+        let layout = Layout::auto_from_plots(&plots);
+        let layout = apply_base_args(layout, &args.base);
+        let layout = apply_axis_args(layout, &args.axis);
+        let scene = render_multiple(plots, layout);
+        return write_output(scene, &args.base);
+    }
+
+    let value_col = if args.y.len() == 1 {
+        args.y[0].clone()
+    } else {
+        args.value_col.unwrap_or(ColSpec::Index(1))
+    };
+    let proj: Vec<ColSpec> = vec![
+        args.group_col.clone().unwrap_or(ColSpec::Index(0)),
+        value_col.clone(),
+    ];
     let table = DataTable::parse(
         args.input.input.as_deref(),
-        args.input.no_header,
+        args.input.header_mode(),
         args.input.delimiter,
+        &proj,
     )?;
 
     let group_col = args.group_col.unwrap_or(ColSpec::Index(0));
-    let value_col = args.value_col.unwrap_or(ColSpec::Index(1));
-    let color = args.color.unwrap_or_else(|| "steelblue".to_string());
-
     let groups = table.group_by(&group_col)?;
 
     let mut plot = BoxPlot::new().with_color(&color);
@@ -75,6 +153,26 @@ pub fn run(args: BoxArgs) -> Result<(), String> {
         plot = plot.with_swarm_overlay();
     } else if args.overlay_points {
         plot = plot.with_strip(0.3);
+    }
+
+    if args.horizontal {
+        plot = plot.with_horizontal(true);
+    }
+
+    #[cfg(feature = "emit_code")]
+    if args.base.emit_code {
+        print!(
+            "{}",
+            crate::emit_code::assemble(
+                &["kuva::plot::BoxPlot"],
+                "Box",
+                &[crate::emit_code::emit_boxplot(&plot)],
+                &args.base,
+                Some(&args.axis),
+                None,
+            )
+        );
+        return Ok(());
     }
 
     let plots = vec![Plot::Box(plot)];

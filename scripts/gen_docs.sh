@@ -12,17 +12,23 @@ EXAMPLES=(
     boxplot
     brick
     bump
+    bw_mode
     calendar
     candlestick
     chord
     clustermap
+    colormap_swatches
     contour
+    coverage
+    datetime
     density
     diceplot
+    dotplot
     ecdf
     forest
     funnel
     gantt
+    heatmap
     hexbin
     histogram
     histogram2d
@@ -34,15 +40,18 @@ EXAMPLES=(
     line
     lollipop
     manhattan
+    math
     mosaic
     network
     parallel
+    pareto
     phylo
     pie
     polar
     pr
     pyramid
     qq
+    quiver
     radar
     raincloud
     ridgeline
@@ -53,6 +62,7 @@ EXAMPLES=(
     scatter
     scatter3d
     series
+    showcase
     slope
     stacked_area
     streamgraph
@@ -62,6 +72,7 @@ EXAMPLES=(
     survival
     synteny
     ternary
+    text
     treemap
     twin_y
     upset

@@ -65,10 +65,15 @@ pub struct EcdfArgs {
 }
 
 pub fn run(args: EcdfArgs) -> Result<(), String> {
+    let mut proj: Vec<ColSpec> = vec![args.value.clone()];
+    if let Some(ref c) = args.color_by {
+        proj.push(c.clone());
+    }
     let table = DataTable::parse(
         args.input.input.as_deref(),
-        args.input.no_header,
+        args.input.header_mode(),
         args.input.delimiter,
+        &proj,
     )?;
 
     let mut base_plot = EcdfPlot::new();
@@ -108,6 +113,29 @@ pub fn run(args: EcdfArgs) -> Result<(), String> {
         let plot = base_plot.with_data("", vals);
         vec![Plot::Ecdf(plot)]
     };
+
+    #[cfg(feature = "emit_code")]
+    if args.base.emit_code {
+        let exprs: Vec<String> = plots
+            .iter()
+            .map(|p| match p {
+                Plot::Ecdf(e) => crate::emit_code::emit_ecdf_plot(e),
+                _ => unreachable!(),
+            })
+            .collect();
+        print!(
+            "{}",
+            crate::emit_code::assemble(
+                &["kuva::plot::EcdfPlot"],
+                "Ecdf",
+                &exprs,
+                &args.base,
+                Some(&args.axis),
+                Some(&args.log),
+            )
+        );
+        return Ok(());
+    }
 
     let layout = Layout::auto_from_plots(&plots);
     let layout = apply_base_args(layout, &args.base);

@@ -30,10 +30,32 @@
 //! | Feature      | Description |
 //! |--------------|-------------|
 //! | `png`        | Enables [`RasterBackend`] (direct pixel-buffer rasteriser) and the [`PngBackend`] compatibility shim. |
-//! | `pdf`        | Enables [`PdfBackend`] for vector PDF output via `svg2pdf`. |
+//! | `pdf`        | Enables [`PdfBackend`] for vector PDF output via `krilla`. Requires Rust >= 1.92 (higher than the crate's own MSRV — see CHANGELOG.md). |
 //! | `embed_font` | Enables [`backend::svg::SvgBackend::with_embedded_font`] — bakes DejaVu Sans into the SVG as a base64 `@font-face`. Adds `flate2` as a dependency but does **not** pull in `png` or `pdf`. |
 //! | `cli`        | Enables the `kuva` CLI binary (pulls in `clap`). |
-//! | `full`       | Enables `embed_font` + `png` + `pdf`. |
+//! | `typst`      | Enables `TypstBackend` for emitting Typst markup (compile externally). |
+//! | `full`       | Enables `embed_font` + `png` + `pdf` + `typst`. |
+//!
+//! # Math in labels
+//!
+//! Any label (title, axis labels, annotations, markdown body text) may contain
+//! `$...$` math regions written in LaTeX-ish syntax: `$\sigma^2$`,
+//! `$\frac{a}{b}$`, `$\sqrt{x^2 + y^2}$`. There are two rendering tiers:
+//!
+//! * **Lookup tier** (always available, zero deps): math is lowered to inline
+//!   Unicode — Greek letters, operators, super/subscripts, `\frac`→`a/b`,
+//!   `\sqrt`→`√(…)`. Every backend without `pdf` uses this, and it is the
+//!   only tier the terminal backend can use. Write a literal dollar as `\$`.
+//!   See [`render::math::to_unicode`].
+//! * **Typst tier** (feature `pdf`): the whole label is typeset by the Typst
+//!   compiler (linked as a library) for real 2-D math (stacked fractions,
+//!   radicals with vinculum, large operators) and embedded into SVG/PNG/PDF
+//!   output. Rides the `pdf` feature — the PDF backend already sits on
+//!   Typst's own rendering stack (`krilla`), so the two share one heavy,
+//!   Rust >= 1.92 feature rather than splitting into two.
+//!
+//! Note: Typst math is **not** LaTeX — a multi-letter run like `mc` is one
+//! identifier, so write `$E = m c^2$`, not `$E = mc^2$`.
 //!
 //! # Fonts
 //!
@@ -64,7 +86,10 @@ pub use backend::png::PngBackend;
 pub use backend::raster::RasterBackend;
 
 #[cfg(feature = "pdf")]
-pub use backend::pdf::PdfBackend;
+pub use backend::pdf::{PageSize, PdfBackend};
+
+#[cfg(feature = "typst")]
+pub use backend::typst::TypstBackend;
 
 pub use render::datetime::{ymd, ymd_hms, DateTimeAxis, DateUnit};
 /// KDE bandwidth via Silverman's rule of thumb: `h = 1.06 σ n^{-1/5}`.
@@ -83,8 +108,7 @@ pub use render::render_utils::silverman_bandwidth;
 /// [`simple_kde_reflect`] instead.
 pub use render::render_utils::simple_kde;
 
-pub use render::layout::AxisLabelOverlap;
-pub use render::layout::TickFormat;
+pub use render::layout::{AxisLabelOverlap, AxisLine, TickAlign, TickFormat, TickPos};
 pub use render::palette::Palette;
 pub use render::render::render_calendar;
 pub use render::render::render_phylo_tree;
@@ -177,5 +201,24 @@ pub fn render_to_pdf(
     layout: render::layout::Layout,
 ) -> Result<Vec<u8>, String> {
     let scene = render::render::render_multiple(plots, layout);
-    backend::pdf::PdfBackend.render_scene(&scene)
+    backend::pdf::PdfBackend::new().render_scene(&scene)
+}
+
+/// Render several plot collections to a single multi-page PDF — one page per
+/// `(plots, layout)` pair — in one call (requires feature `pdf`).
+///
+/// Each page is sized to its own scene's natural dimensions. For fixed-size
+/// pages (e.g. US Letter), drive [`backend::pdf::PdfBackend`] directly with
+/// [`PdfBackend::with_page_size`](backend::pdf::PdfBackend::with_page_size).
+///
+/// Returns `Err(String)` if `pages` is empty or if any page fails to convert.
+#[cfg(feature = "pdf")]
+pub fn render_to_pdf_multi(
+    pages: Vec<(Vec<render::plots::Plot>, render::layout::Layout)>,
+) -> Result<Vec<u8>, String> {
+    let scenes: Vec<render::render::Scene> = pages
+        .into_iter()
+        .map(|(plots, layout)| render::render::render_multiple(plots, layout))
+        .collect();
+    backend::pdf::PdfBackend::new().render_scenes(&scenes)
 }

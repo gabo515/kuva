@@ -56,10 +56,16 @@ pub struct ContourArgs {
 use crate::data::parse_colormap;
 
 pub fn run(args: ContourArgs) -> Result<(), String> {
+    let proj: Vec<ColSpec> = vec![
+        args.x.clone().unwrap_or(ColSpec::Index(0)),
+        args.y.clone().unwrap_or(ColSpec::Index(1)),
+        args.z.clone().unwrap_or(ColSpec::Index(2)),
+    ];
     let table = DataTable::parse(
         args.input.input.as_deref(),
-        args.input.no_header,
+        args.input.header_mode(),
         args.input.delimiter,
+        &proj,
     )?;
 
     let x_col = args.x.unwrap_or(ColSpec::Index(0));
@@ -90,6 +96,22 @@ pub fn run(args: ContourArgs) -> Result<(), String> {
     }
     if let Some(ref label) = args.legend {
         plot = plot.with_legend(label.clone());
+    }
+
+    #[cfg(feature = "emit_code")]
+    if args.base.emit_code {
+        print!(
+            "{}",
+            crate::emit_code::assemble(
+                &["kuva::plot::ContourPlot", "kuva::plot::ColorMap"],
+                "Contour",
+                &[crate::emit_code::emit_contour_plot(&plot)],
+                &args.base,
+                Some(&args.axis),
+                None,
+            )
+        );
+        return Ok(());
     }
 
     let plots = vec![Plot::Contour(plot)];

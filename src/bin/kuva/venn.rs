@@ -44,10 +44,15 @@ pub struct VennArgs {
 }
 
 pub fn run(args: VennArgs) -> Result<(), String> {
+    let proj: Vec<ColSpec> = vec![
+        args.element_col.clone().unwrap_or(ColSpec::Index(0)),
+        args.set_col.clone().unwrap_or(ColSpec::Index(1)),
+    ];
     let table = DataTable::parse(
         args.input.input.as_deref(),
-        args.input.no_header,
+        args.input.header_mode(),
         args.input.delimiter,
+        &proj,
     )?;
 
     let element_col = args.element_col.unwrap_or(ColSpec::Index(0));
@@ -72,6 +77,22 @@ pub fn run(args: VennArgs) -> Result<(), String> {
     for (name, subtable) in groups {
         let elements = subtable.col_str(&element_col)?;
         plot = plot.with_set(name, elements);
+    }
+
+    #[cfg(feature = "emit_code")]
+    if args.base.emit_code {
+        print!(
+            "{}",
+            crate::emit_code::assemble(
+                &["kuva::plot::VennPlot"],
+                "Venn",
+                &[crate::emit_code::emit_venn_plot(&plot)],
+                &args.base,
+                None,
+                None,
+            )
+        );
+        return Ok(());
     }
 
     let plots = vec![Plot::Venn(plot)];

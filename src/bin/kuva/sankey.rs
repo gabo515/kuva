@@ -112,10 +112,20 @@ fn parse_node_coloring(name: &str) -> Result<SankeyNodeColoring, String> {
 }
 
 pub fn run(args: SankeyArgs) -> Result<(), String> {
+    let proj: Vec<ColSpec> = if !args.axis_cols.is_empty() {
+        args.axis_cols.to_vec() // alluvium mode
+    } else {
+        vec![
+            args.source_col.clone().unwrap_or(ColSpec::Index(0)),
+            args.target_col.clone().unwrap_or(ColSpec::Index(1)),
+            args.value_col.clone().unwrap_or(ColSpec::Index(2)),
+        ]
+    };
     let table = DataTable::parse(
         args.input.input.as_deref(),
-        args.input.no_header,
+        args.input.header_mode(),
         args.input.delimiter,
+        &proj,
     )?;
 
     let mut plot = SankeyPlot::new()
@@ -212,6 +222,22 @@ pub fn run(args: SankeyArgs) -> Result<(), String> {
         for ((source, target), value) in sources.iter().zip(targets.iter()).zip(values.iter()) {
             plot = plot.with_link(source.clone(), target.clone(), *value);
         }
+    }
+
+    #[cfg(feature = "emit_code")]
+    if args.base.emit_code {
+        print!(
+            "{}",
+            crate::emit_code::assemble(
+                &["kuva::plot::SankeyPlot", "kuva::render::layout::TickFormat"],
+                "Sankey",
+                &[crate::emit_code::emit_sankey_plot(&plot)],
+                &args.base,
+                None,
+                None,
+            )
+        );
+        return Ok(());
     }
 
     let plots = vec![Plot::Sankey(plot)];

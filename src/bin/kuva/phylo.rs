@@ -69,13 +69,24 @@ pub fn run(args: PhyloArgs) -> Result<(), String> {
         _ => TreeBranchStyle::Rectangular,
     };
 
+    let proj: Vec<ColSpec> = if args.newick.is_some() {
+        vec![]
+    } else {
+        vec![
+            args.parent_col.clone().unwrap_or(ColSpec::Index(0)),
+            args.child_col.clone().unwrap_or(ColSpec::Index(1)),
+            args.length_col.clone().unwrap_or(ColSpec::Index(2)),
+        ]
+    };
+
     let mut tree = if let Some(ref nwk) = args.newick {
         PhyloTree::from_newick(nwk)
     } else {
         let table = DataTable::parse(
             args.input.input.as_deref(),
-            args.input.no_header,
+            args.input.header_mode(),
             args.input.delimiter,
+            &proj,
         )?;
 
         let parent_col = args.parent_col.unwrap_or(ColSpec::Index(0));
@@ -113,6 +124,27 @@ pub fn run(args: PhyloArgs) -> Result<(), String> {
     }
     if let Some(ref label) = args.legend {
         tree = tree.with_legend(label.clone());
+    }
+
+    #[cfg(feature = "emit_code")]
+    if args.base.emit_code {
+        print!(
+            "{}",
+            crate::emit_code::assemble(
+                &[
+                    "kuva::plot::PhyloTree",
+                    "kuva::plot::PhyloNode",
+                    "kuva::plot::TreeOrientation",
+                    "kuva::plot::TreeBranchStyle",
+                ],
+                "PhyloTree",
+                &[crate::emit_code::emit_phylo_tree(&tree)],
+                &args.base,
+                None,
+                None,
+            )
+        );
+        return Ok(());
     }
 
     let plots = vec![Plot::PhyloTree(tree)];

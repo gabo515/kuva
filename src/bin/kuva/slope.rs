@@ -67,10 +67,16 @@ pub struct SlopeArgs {
 }
 
 pub fn run(args: SlopeArgs) -> Result<(), String> {
+    let proj: Vec<ColSpec> = vec![
+        args.label_col.clone().unwrap_or(ColSpec::Index(0)),
+        args.before_col.clone().unwrap_or(ColSpec::Index(1)),
+        args.after_col.clone().unwrap_or(ColSpec::Index(2)),
+    ];
     let table = DataTable::parse(
         args.input.input.as_deref(),
-        args.input.no_header,
+        args.input.header_mode(),
         args.input.delimiter,
+        &proj,
     )?;
 
     let label_col = args.label_col.unwrap_or(ColSpec::Index(0));
@@ -120,6 +126,22 @@ pub fn run(args: SlopeArgs) -> Result<(), String> {
 
     for ((label, before), after) in labels.iter().zip(befores).zip(afters) {
         plot = plot.with_point(label.as_str(), before, after);
+    }
+
+    #[cfg(feature = "emit_code")]
+    if args.base.emit_code {
+        print!(
+            "{}",
+            crate::emit_code::assemble(
+                &["kuva::plot::SlopePlot"],
+                "Slope",
+                &[crate::emit_code::emit_slope_plot(&plot)],
+                &args.base,
+                Some(&args.axis),
+                None,
+            )
+        );
+        return Ok(());
     }
 
     let plots = vec![Plot::Slope(plot)];

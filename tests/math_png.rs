@@ -1,7 +1,7 @@
 //! Structural tests for the typst math tier in the raster (PNG) backend,
 //! including rotated labels (y-axis titles).
 
-#![cfg(all(feature = "pdf", feature = "png"))]
+#![cfg(all(feature = "typst-math", feature = "png"))]
 
 use kuva::backend::png::PngBackend;
 use kuva::plot::scatter::ScatterPlot;
@@ -125,4 +125,37 @@ fn textplot_body_math_composites() {
 
     std::fs::create_dir_all("test_outputs").ok();
     std::fs::write("test_outputs/textplot_math.png", &png).unwrap();
+}
+
+// The pixmap cache is keyed on (label, size, color, pixels_per_pt). Repeated
+// calls with the same key must be indistinguishable from a fresh compile, and
+// each key component must actually participate in the key: sharing a cache
+// entry across different scales or sizes would blit a wrongly-rasterised
+// fragment.
+#[test]
+fn pixmap_cache_is_keyed_on_every_input() {
+    let a = render_label_pixmap("$\\sqrt{x^2+y^2}$", 14.0, None, 2.0).expect("pixmap");
+    let b = render_label_pixmap("$\\sqrt{x^2+y^2}$", 14.0, None, 2.0).expect("pixmap");
+    assert_eq!(a.width_px, b.width_px);
+    assert_eq!(a.height_px, b.height_px);
+    assert_eq!(a.baseline_offset_px, b.baseline_offset_px);
+    assert_eq!(a.rgba, b.rgba, "repeat call must match the first render");
+
+    // Same label and size, different rasterisation scale.
+    let hi = render_label_pixmap("$\\sqrt{x^2+y^2}$", 14.0, None, 4.0).expect("pixmap");
+    assert!(
+        hi.width_px > a.width_px,
+        "4x scale should be wider than 2x ({} vs {})",
+        hi.width_px,
+        a.width_px
+    );
+
+    // Same label and scale, different point size.
+    let big = render_label_pixmap("$\\sqrt{x^2+y^2}$", 28.0, None, 2.0).expect("pixmap");
+    assert!(
+        big.width_px > a.width_px,
+        "28pt should be wider than 14pt ({} vs {})",
+        big.width_px,
+        a.width_px
+    );
 }

@@ -1,5 +1,5 @@
 //! Embed a typst-rendered label (whole-label SVG fragment) into the SVG
-//! backend's output. Feature `math`.
+//! backend's output. Feature `typst-math`.
 //!
 //! With whole-label rendering there is no per-segment layout: the entire
 //! label was typeset by Typst into one fragment with a known width and

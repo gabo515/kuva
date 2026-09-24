@@ -1,6 +1,6 @@
 pub mod interactive_js;
 pub mod svg;
-#[cfg(feature = "pdf")]
+#[cfg(feature = "typst-math")]
 pub mod svg_math;
 pub mod terminal;
 

@@ -177,7 +177,7 @@ impl SvgBackend {
 
         let mut depth: usize = 1;
         // Unique tag per embedded math fragment, to namespace Typst's element IDs.
-        #[cfg(feature = "pdf")]
+        #[cfg(feature = "typst-math")]
         let mut math_uid: usize = 0;
         for elem in &scene.elements {
             match elem {
@@ -229,10 +229,10 @@ impl SvgBackend {
                     color,
                 } => {
                     // Math routing: a `$...$` label is either typeset by the
-                    // typst tier (feature `pdf`) and embedded as a fragment,
+                    // typst tier (feature `typst-math`) and embedded as a fragment,
                     // or lowered to inline Unicode by the always-on lookup
                     // tier and emitted as ordinary text.
-                    #[cfg(feature = "pdf")]
+                    #[cfg(feature = "typst-math")]
                     if crate::render::math::contains_math(content) {
                         if let Some(m) = crate::render::math::render_label_svg(
                             content,
@@ -311,7 +311,7 @@ impl SvgBackend {
                     // bundled-font metrics, fragments with their typeset
                     // width — so each piece can be positioned absolutely and
                     // the math embeds inline at the shared baseline.
-                    #[cfg(feature = "pdf")]
+                    #[cfg(feature = "typst-math")]
                     if spans.iter().any(|sp| sp.math) {
                         rich_text_with_math(
                             &mut svg,
@@ -718,7 +718,7 @@ pub const SvgBackend: SvgBackend = SvgBackend::new();
 /// width (math), all sharing the baseline `y`. Anchoring shifts the whole
 /// line by its total width. A fragment that fails to compile degrades to its
 /// lookup-tier text in place.
-#[cfg(feature = "pdf")]
+#[cfg(feature = "typst-math")]
 #[allow(clippy::too_many_arguments)]
 fn rich_text_with_math(
     svg: &mut String,

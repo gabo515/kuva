@@ -4,12 +4,12 @@
 //! Run with:
 //!
 //! ```bash
-//! cargo run --features full --example math
+//! cargo run --features full,typst-math --example math
 //! ```
 //!
-//! With `full` (which includes `pdf`), labels render through the typst tier
-//! — real typeset math. Without features the same code emits the lookup
-//! tier's inline-Unicode forms.
+//! With `typst-math`, labels render through the typst tier — real typeset
+//! math. Without it the same code emits the lookup tier's inline-Unicode
+//! forms.
 //!
 //! SVGs are written to `docs/src/assets/math/`.
 

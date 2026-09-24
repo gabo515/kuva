@@ -38,6 +38,37 @@ jobs:
           cargo ci-test
 
 
+  # `typst-math` and `typst` are opt-in and excluded from `full`, so the main
+  # test job above compiles their tests out entirely. This job is the only
+  # thing covering the typst tiers — without it they would rot silently.
+  typst:
+    name: Test (opt-in typst tiers)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+          docker-images: true
+          swap-storage: false
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Test (typst math tier + markup backend)
+        run: |
+          mkdir -p test_outputs smoke_test_outputs
+          cargo ci-test-typst
+
+      - name: Clippy (typst math tier + markup backend)
+        run: cargo ci-clippy-typst
+
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
@@ -101,11 +132,12 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      # `full` = png + pdf + embed_font + typst; this is the combination the
-      # release workflow's pre-built binaries use (features: cli,full), so
-      # verify it builds cleanly at the pdf feature's own real MSRV floor
-      # rather than package.rust-version (which no longer covers it). Since
-      # `pdf` also carries the typst math tier, this job covers typst's MSRV
-      # too (typst 0.14 needs 1.89 < krilla's 1.92).
-      - name: Build library (CLI + all backends, including pdf + typst math) at pdf's MSRV
-        run: cargo +${{ steps.pdf_msrv.outputs.version }} build --features cli,full
+      # `full` = png + pdf + embed_font. Adding `typst-math` here matches what
+      # the release workflow's pre-built binaries use (features:
+      # cli,full,typst-math), so verify that whole combination builds cleanly
+      # at the pdf feature's own real MSRV floor rather than
+      # package.rust-version (which no longer covers it). `typst-math` has a
+      # lower floor of its own (typst 0.14 needs 1.89 < krilla's 1.92), so
+      # building it here covers both.
+      - name: Build library (CLI + all backends + typst math) at pdf's MSRV
+        run: cargo +${{ steps.pdf_msrv.outputs.version }} build --features cli,full,typst-math

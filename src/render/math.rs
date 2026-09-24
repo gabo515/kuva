@@ -10,7 +10,7 @@
 //! it works everywhere a plain string does, including the terminal backend's
 //! character grid and markdown body text). Literal dollars are written `\$`.
 //!
-//! # Typst tier (feature `math`)
+//! # Typst tier (feature `typst-math`)
 //!
 //! With the `math` feature, backends upgrade `$...$` labels to real 2-D
 //! typography: the **whole label** (text + math) is compiled with the Typst
@@ -24,7 +24,7 @@
 //! failure the backend falls back to the lookup tier and warns once per
 //! distinct label.
 
-#[cfg(feature = "pdf")]
+#[cfg(feature = "typst-math")]
 use std::sync::{Mutex, OnceLock};
 
 // ─────────────────────────── detection ─────────────────────────────────────
@@ -571,7 +571,7 @@ fn read_script_group(s: &str, pos: usize) -> Option<(&str, usize)> {
     Some((&s[pos..pos + ch_len], pos + ch_len))
 }
 
-#[cfg(feature = "pdf")]
+#[cfg(feature = "typst-math")]
 mod typst_tier {
     use super::*;
     use crate::render::color::Color;
@@ -670,23 +670,54 @@ mod typst_tier {
     }
 
     /// Render the whole label to an RGBA pixmap at `pixels_per_pt`.
+    ///
+    /// Memoized on the same terms as [`render_label_svg`], with
+    /// `pixels_per_pt` added to the key since it changes the rasterisation.
+    /// The raster backend compiles a label once per `DrawText` primitive, so
+    /// a label repeated across panels of a `Figure`, across the pages of a
+    /// multi-page PDF, or simply twice in one scene would otherwise pay a
+    /// full Typst compile each time. Entries hold the decoded RGBA buffer, so
+    /// this map is heavier per entry than the SVG one; it stays bounded by
+    /// the number of distinct (label, size, color, scale) keys, which is one
+    /// per unique math label per output scale.
     pub fn render_label_pixmap(
         label: &str,
         size_pt: f64,
         color: Option<&Color>,
         pixels_per_pt: f32,
     ) -> Option<MathPixmap> {
-        let doc = compile(label, size_pt, color)?;
-        let page = doc.pages.first()?;
-        let baseline_pt =
-            first_baseline_pt(&page.frame).unwrap_or_else(|| page.frame.height().to_pt());
-        let pixmap = typst_render::render(page, pixels_per_pt);
-        Some(MathPixmap {
-            width_px: pixmap.width(),
-            height_px: pixmap.height(),
-            rgba: pixmap.data().to_vec(),
-            baseline_offset_px: baseline_pt * pixels_per_pt as f64,
-        })
+        type Key = (String, u64, Option<String>, u32);
+        static CACHE: OnceLock<Mutex<std::collections::HashMap<Key, Option<MathPixmap>>>> =
+            OnceLock::new();
+        let key: Key = (
+            label.to_string(),
+            size_pt.to_bits(),
+            color.map(|c| c.to_svg_string()),
+            pixels_per_pt.to_bits(),
+        );
+        let cache = CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
+        if let Ok(map) = cache.lock() {
+            if let Some(hit) = map.get(&key) {
+                return hit.clone();
+            }
+        }
+        let result = (|| {
+            let doc = compile(label, size_pt, color)?;
+            let page = doc.pages.first()?;
+            let baseline_pt =
+                first_baseline_pt(&page.frame).unwrap_or_else(|| page.frame.height().to_pt());
+            let pixmap = typst_render::render(page, pixels_per_pt);
+            Some(MathPixmap {
+                width_px: pixmap.width(),
+                height_px: pixmap.height(),
+                rgba: pixmap.data().to_vec(),
+                baseline_offset_px: baseline_pt * pixels_per_pt as f64,
+            })
+        })();
+        if let Ok(mut map) = cache.lock() {
+            map.insert(key, result.clone());
+        }
+        result
     }
 
     fn compile(label: &str, size_pt: f64, color: Option<&Color>) -> Option<PagedDocument> {
@@ -858,21 +889,21 @@ mod typst_tier {
     }
 }
 
-#[cfg(feature = "pdf")]
+#[cfg(feature = "typst-math")]
 pub use typst_tier::{render_label_pixmap, render_label_svg, MathPixmap, MathSvg};
 
 /// Margin baked into every typeset fragment, in em (× the label's font
 /// size). Needed so `height: auto` pages don't clip descenders and italic
 /// overhang. Inline splicing (TextPlot bodies) subtracts it again so the
 /// fragment advances like a word rather than a padded box.
-#[cfg(feature = "pdf")]
+#[cfg(feature = "typst-math")]
 pub(crate) const FRAGMENT_MARGIN_EM: f64 = 0.3;
 
 /// Typeset dimensions of a label: `(width_pt, height_pt, baseline_offset_pt)`.
 /// Used by the render layer to wrap TextPlot lines around math fragments and
 /// grow line leading for tall ones. `None` when the label fails to compile
 /// (callers fall back to lookup-tier text metrics).
-#[cfg(feature = "pdf")]
+#[cfg(feature = "typst-math")]
 pub(crate) fn fragment_size(label: &str, size_pt: f64) -> Option<(f64, f64, f64)> {
     render_label_svg(label, size_pt, None).map(|m| (m.width_pt, m.height_pt, m.baseline_offset_pt))
 }
@@ -972,7 +1003,7 @@ pub fn to_typst_math(body: &str) -> String {
 /// backend. Covers the markup-significant characters: `#`, `$`, `*`, `_`,
 /// `` ` ``, `<`, `>`, `@`, `\`, `"`, and the content-block delimiters `[` `]`
 /// (a label like `signal [dB]` would otherwise lose its brackets).
-#[cfg(any(feature = "pdf", feature = "typst"))]
+#[cfg(any(feature = "typst-math", feature = "typst"))]
 pub(crate) fn escape_typst_markup(s: &str, out: &mut String) {
     for c in s.chars() {
         if matches!(

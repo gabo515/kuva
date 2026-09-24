@@ -379,7 +379,7 @@ pub struct TextSpan {
     pub underline: bool,
     pub code: bool,
     /// `text` is the body of a `$...$` math region (without the dollars).
-    /// With the `pdf` feature, backends typeset it via the typst tier and
+    /// With the `typst-math` feature, backends typeset it via the typst tier and
     /// splice the fragment into the line; without it (and always on the
     /// terminal) it is lowered to inline Unicode by the lookup tier.
     pub math: bool,
@@ -15348,12 +15348,12 @@ fn parse_inline_markup(text: &str) -> Vec<TextSpan> {
     flush(&mut plain, &mut spans);
 
     // Math is parsed after markdown, so the styling markers are already
-    // consumed. With `pdf`, split each span at `$...$` boundaries: math
+    // consumed. With `typst-math`, split each span at `$...$` boundaries: math
     // bodies become dedicated spans (math: true) that backends typeset with
     // the typst tier and splice into the line; the text between them keeps
-    // the lookup pass for escaped `\$`. Without `pdf`, everything lowers to
+    // the lookup pass for escaped `\$`. Without `typst-math`, everything lowers to
     // inline Unicode exactly as before.
-    #[cfg(feature = "pdf")]
+    #[cfg(feature = "typst-math")]
     {
         use crate::render::math::Segment;
         let mut spliced: Vec<TextSpan> = Vec::with_capacity(spans.len());
@@ -15392,7 +15392,7 @@ fn parse_inline_markup(text: &str) -> Vec<TextSpan> {
         spliced
     }
 
-    #[cfg(not(feature = "pdf"))]
+    #[cfg(not(feature = "typst-math"))]
     {
         // Lower any `$...$` math in each span to inline Unicode (lookup tier),
         // so math works inside markdown body text just like in plain labels.
@@ -15409,9 +15409,9 @@ fn parse_inline_markup(text: &str) -> Vec<TextSpan> {
 /// Words are never split mid-word; a word that would overflow is moved to the
 /// next line. A math span is one unbreakable word whose length is the typeset
 /// fragment's width expressed in mean-character units (`font_size` sizes the
-/// fragment; it is unused without the `pdf` feature).
+/// fragment; it is unused without the `typst-math` feature).
 fn wrap_rich_spans(spans: &[TextSpan], max_chars: usize, font_size: u32) -> Vec<Vec<TextSpan>> {
-    #[cfg(not(feature = "pdf"))]
+    #[cfg(not(feature = "typst-math"))]
     let _ = font_size;
     struct Word {
         bold: bool,
@@ -15562,7 +15562,7 @@ fn wrap_rich_spans(spans: &[TextSpan], max_chars: usize, font_size: u32) -> Vec<
 /// mean-character units, so the line-breaker packs it like any other word.
 /// Falls back to the lookup tier's inline form when the fragment fails to
 /// compile (the backends will draw that same fallback).
-#[cfg(feature = "pdf")]
+#[cfg(feature = "typst-math")]
 fn math_word_chars(body: &str, font_size: u32) -> usize {
     let label = format!("${body}$");
     let fs = font_size as f64;
@@ -15578,15 +15578,15 @@ fn math_word_chars(body: &str, font_size: u32) -> usize {
     .max(1)
 }
 
-#[cfg(not(feature = "pdf"))]
+#[cfg(not(feature = "typst-math"))]
 fn math_word_chars(_body: &str, _font_size: u32) -> usize {
     1
 }
 
 /// Extra leading needed above (ascent overshoot) and below (descent
 /// overshoot) a rich-text line whose math fragments are taller than the
-/// surrounding text. Zero without the `pdf` feature.
-#[cfg(feature = "pdf")]
+/// surrounding text. Zero without the `typst-math` feature.
+#[cfg(feature = "typst-math")]
 fn rich_line_math_extents(spans: &[TextSpan], font_size: u32) -> (f64, f64) {
     use crate::render::text_metrics::{ascent, descent, FontStyle};
     let fs = font_size as f64;
@@ -15606,7 +15606,7 @@ fn rich_line_math_extents(spans: &[TextSpan], font_size: u32) -> (f64, f64) {
     (asc_extra.max(0.0), desc_extra.max(0.0))
 }
 
-#[cfg(not(feature = "pdf"))]
+#[cfg(not(feature = "typst-math"))]
 fn rich_line_math_extents(_spans: &[TextSpan], _font_size: u32) -> (f64, f64) {
     (0.0, 0.0)
 }

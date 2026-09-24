@@ -33,8 +33,9 @@
 //! | `pdf`        | Enables [`PdfBackend`] for vector PDF output via `krilla`. Requires Rust >= 1.92 (higher than the crate's own MSRV — see CHANGELOG.md). |
 //! | `embed_font` | Enables [`backend::svg::SvgBackend::with_embedded_font`] — bakes DejaVu Sans into the SVG as a base64 `@font-face`. Adds `flate2` as a dependency but does **not** pull in `png` or `pdf`. |
 //! | `cli`        | Enables the `kuva` CLI binary (pulls in `clap`). |
-//! | `typst`      | Enables `TypstBackend` for emitting Typst markup (compile externally). |
-//! | `full`       | Enables `embed_font` + `png` + `pdf` + `typst`. |
+//! | `typst-math` | Typesets `$...$` labels with the Typst compiler (linked as a library) for real 2-D math in SVG/PNG/PDF. Heavy (~200 crates) and opt-in: deliberately **not** in `full`. Requires Rust >= 1.89. |
+//! | `typst`      | Enables `TypstBackend` for emitting Typst markup (compile externally). Zero deps, but opt-in — also **not** in `full`. |
+//! | `full`       | Enables `embed_font` + `png` + `pdf` — the core backends for the expected use cases. Extras (`typst-math`, `typst`, `parquet`, `emit_code`) are opted into explicitly. |
 //!
 //! # Math in labels
 //!
@@ -44,15 +45,15 @@
 //!
 //! * **Lookup tier** (always available, zero deps): math is lowered to inline
 //!   Unicode — Greek letters, operators, super/subscripts, `\frac`→`a/b`,
-//!   `\sqrt`→`√(…)`. Every backend without `pdf` uses this, and it is the
-//!   only tier the terminal backend can use. Write a literal dollar as `\$`.
-//!   See [`render::math::to_unicode`].
-//! * **Typst tier** (feature `pdf`): the whole label is typeset by the Typst
-//!   compiler (linked as a library) for real 2-D math (stacked fractions,
-//!   radicals with vinculum, large operators) and embedded into SVG/PNG/PDF
-//!   output. Rides the `pdf` feature — the PDF backend already sits on
-//!   Typst's own rendering stack (`krilla`), so the two share one heavy,
-//!   Rust >= 1.92 feature rather than splitting into two.
+//!   `\sqrt`→`√(…)`. Every backend without `typst-math` uses this, and it is
+//!   the only tier the terminal backend can use. Write a literal dollar as
+//!   `\$`. See [`render::math::to_unicode`].
+//! * **Typst tier** (feature `typst-math`): the whole label is typeset by the
+//!   Typst compiler (linked as a library) for real 2-D math (stacked
+//!   fractions, radicals with vinculum, large operators) and embedded into
+//!   SVG/PNG/PDF output. Opt-in and excluded from `full`: it pulls a ~200-crate
+//!   dependency tree and needs Rust >= 1.89, so it is enabled explicitly
+//!   (`--features typst-math,png`) rather than riding a broader feature.
 //!
 //! Note: Typst math is **not** LaTeX — a multi-letter run like `mc` is one
 //! identifier, so write `$E = m c^2$`, not `$E = mc^2$`.
@@ -74,7 +75,12 @@ pub mod plot;
 pub mod prelude;
 pub mod render;
 
-#[cfg(any(feature = "embed_font", feature = "png", feature = "pdf"))]
+#[cfg(any(
+    feature = "embed_font",
+    feature = "png",
+    feature = "pdf",
+    feature = "typst-math"
+))]
 pub(crate) mod fonts;
 
 pub use backend::terminal::TerminalBackend;

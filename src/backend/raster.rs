@@ -103,7 +103,7 @@ impl Canvas {
     /// into the canvas with its top-left corner at device pixel (dx, dy),
     /// clipped to `clip`. Used by the math feature to composite rendered
     /// `$...$` regions.
-    #[cfg(feature = "pdf")]
+    #[cfg(feature = "typst-math")]
     fn blit_pixmap(&mut self, src: &crate::render::math::MathPixmap, dx: i32, dy: i32, clip: Clip) {
         let sw = src.width_px as i32;
         let sh = src.height_px as i32;
@@ -1071,7 +1071,7 @@ impl Canvas {
     /// inverse-rotation bilinear-sample it into the canvas around the anchor
     /// point `(anchor_x, anchor_y)`. The pixmap's anchor is at
     /// `(off_ax, baseline_offset_px)`, where `off_ax` depends on text anchor.
-    #[cfg(feature = "pdf")]
+    #[cfg(feature = "typst-math")]
     fn blit_pixmap_rotated(
         &mut self,
         pm: &crate::render::math::MathPixmap,
@@ -1705,7 +1705,7 @@ fn parse_dasharray(s: &str) -> Vec<f32> {
 /// Un-premultiply a premultiplied-alpha pixel to straight RGB. typst-render
 /// outputs premultiplied RGBA; `blend()` expects straight color + coverage.
 /// Callers must ensure `a > 0`.
-#[cfg(feature = "pdf")]
+#[cfg(feature = "typst-math")]
 #[inline]
 fn unpremultiply(r: u8, g: u8, b: u8, a: u8) -> (u8, u8, u8) {
     if a == 255 {
@@ -2213,11 +2213,11 @@ impl RasterBackend {
                         .as_ref()
                         .and_then(kcolor_to_rgba)
                         .unwrap_or(default_text);
-                    // Math routing: typst tier (feature `pdf`) renders the
+                    // Math routing: typst tier (feature `typst-math`) renders the
                     // whole label to a pixmap and composites it; otherwise the
                     // always-on lookup tier lowers `$...$` to inline Unicode
                     // text drawn through the normal glyph path.
-                    #[cfg(feature = "pdf")]
+                    #[cfg(feature = "typst-math")]
                     if crate::render::math::contains_math(content) {
                         if let Some(pm) = crate::render::math::render_label_pixmap(
                             content,
@@ -2298,7 +2298,7 @@ impl RasterBackend {
                     // width feeds anchor alignment, and the same pixmap is
                     // blitted in the pen loop. A failed compile leaves None
                     // and the span degrades to lookup-tier text below.
-                    #[cfg(feature = "pdf")]
+                    #[cfg(feature = "typst-math")]
                     let math_frags: Vec<
                         Option<crate::render::math::MathPixmap>,
                     > = spans
@@ -2317,21 +2317,21 @@ impl RasterBackend {
                         })
                         .collect();
                     // Lookup-tier text for math spans whose fragment is
-                    // unavailable (compile failure, or no `pdf` feature —
+                    // unavailable (compile failure, or no `typst-math` feature —
                     // in which case spans never carry math anyway).
                     let lowered_math = |sp: &crate::render::render::TextSpan| {
                         crate::render::math::to_unicode(&format!("${}$", sp.text))
                     };
 
                     // Compute total width for anchor alignment using metrics (no cache needed).
-                    // (the index is only read when `pdf` is compiled in)
+                    // (the index is only read when `typst-math` is compiled in)
                     #[allow(clippy::unused_enumerate_index)]
                     let total_w: f32 = spans
                         .iter()
                         .enumerate()
                         .map(|(_i, sp)| {
                             if sp.math {
-                                #[cfg(feature = "pdf")]
+                                #[cfg(feature = "typst-math")]
                                 if let Some(pm) = &math_frags[_i] {
                                     // Advance minus the fragment's baked-in
                                     // margin (see math::FRAGMENT_MARGIN_EM).
@@ -2366,7 +2366,7 @@ impl RasterBackend {
                     #[allow(clippy::unused_enumerate_index)]
                     for (_i, sp) in spans.iter().enumerate() {
                         if sp.math {
-                            #[cfg(feature = "pdf")]
+                            #[cfg(feature = "typst-math")]
                             if let Some(pm) = &math_frags[_i] {
                                 // Blit at the shared baseline, shifted a
                                 // margin early; advance minus both margins so

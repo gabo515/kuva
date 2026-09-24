@@ -1127,11 +1127,12 @@ check "quiver grid on + tight bounds" \
 
 
 # ── math in labels ──────────────────────────────────────────────────────────
-# $...$ math regions in labels. A cli,full binary includes `pdf`, so these are
-# typeset by the typst tier (real 2-D math embedded in the SVG); a build
-# without `pdf` lowers them to inline Unicode (σ², a/b, √(…), ∑) via the
-# always-on lookup tier. Same commands either way — exercised across plot
-# types and label slots to confirm it is not scatter-specific.
+# $...$ math regions in labels. A binary built with `typst-math` (as the
+# released binaries are) typesets these via the typst tier (real 2-D math
+# embedded in the SVG); a build without it lowers them to inline Unicode
+# (σ², a/b, √(…), ∑) via the always-on lookup tier. Same commands either way
+# — exercised across plot types and label slots to confirm it is not
+# scatter-specific.
 check "math superscript + sqrt" \
     "$BIN" scatter "$DATA/scatter.tsv" --x x --y y \
         --x-label 'Variance, $\sigma^2$ (units)' --y-label '$\sqrt{x^2+y^2}$'
@@ -1340,9 +1341,9 @@ check "coverage real pools overlaid" \
         --regions "$DATA/covar_genes.tsv" --region-name genes --x-label "MN908947.3"
 
 # ── math (typst tier) ─────────────────────────────────────────────────────────
-# Deeper 2-D math (stacked fractions, radicals, limits). With cli,full these
-# come back as embedded typst fragments; a pdf-less build still passes via the
-# lookup tier's inline forms.
+# Deeper 2-D math (stacked fractions, radicals, limits). With `typst-math`
+# these come back as embedded typst fragments; a build without it still passes
+# via the lookup tier's inline forms.
 check "typst fraction" \
     "$BIN" scatter "$DATA/scatter.tsv" --x x --y y \
         --title 'Rate $\frac{a + b}{c}$'

@@ -1136,7 +1136,7 @@ mod tests {
             "expected a minor tick in the trailing band above 30.0, got {minors:?}"
         );
         assert!(
-            minors.iter().all(|&m| m >= 3.0 && m <= 34.0),
+            minors.iter().all(|&m| (3.0..=34.0).contains(&m)),
             "no minor tick should fall outside the axis range, got {minors:?}"
         );
     }

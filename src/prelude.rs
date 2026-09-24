@@ -35,6 +35,7 @@ pub use crate::plot::{
     DotPoint,
     EcdfGroup,
     EcdfPlot,
+    FillPattern,
     ForestPlot,
     ForestRow,
     FunnelColorMode,
@@ -92,6 +93,9 @@ pub use crate::plot::{
     QQGroup,
     QQMode,
     QQPlot,
+    QuiverArrow,
+    QuiverPivot,
+    QuiverPlot,
     RadarPlot,
     RadarReference,
     RadarSeries,
@@ -165,7 +169,7 @@ pub use crate::plot::{
 pub use crate::render::plots::Plot;
 
 // ── Layout & rendering ───────────────────────────────────────────────────────
-pub use crate::render::layout::{Layout, TickFormat};
+pub use crate::render::layout::{AxisLine, Layout, TickAlign, TickFormat, TickPos};
 pub use crate::render::render::{
     collect_legend_entries, render_bump, render_forest, render_funnel, render_gantt,
     render_jointplot, render_lollipop, render_mosaic, render_multiple, render_parallel,
@@ -196,7 +200,7 @@ pub use crate::render_to_svg;
 pub use crate::render_to_png;
 
 #[cfg(feature = "pdf")]
-pub use crate::render_to_pdf;
+pub use crate::{render_to_pdf, render_to_pdf_multi};
 
 // ── Backends ─────────────────────────────────────────────────────────────────
 pub use crate::backend::svg::SvgBackend;
@@ -206,4 +210,4 @@ pub use crate::backend::terminal::TerminalBackend;
 pub use crate::backend::png::PngBackend;
 
 #[cfg(feature = "pdf")]
-pub use crate::backend::pdf::PdfBackend;
+pub use crate::backend::pdf::{PageSize, PdfBackend};

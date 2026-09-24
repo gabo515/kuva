@@ -48,10 +48,15 @@ pub struct CalendarArgs {
 }
 
 pub fn run(args: CalendarArgs) -> Result<(), String> {
+    let proj: Vec<ColSpec> = vec![
+        args.date_col.clone().unwrap_or(ColSpec::Index(0)),
+        args.value_col.clone().unwrap_or(ColSpec::Index(1)),
+    ];
     let table = DataTable::parse(
         args.input.input.as_deref(),
-        args.input.no_header,
+        args.input.header_mode(),
         args.input.delimiter,
+        &proj,
     )?;
 
     let date_col = args.date_col.unwrap_or(ColSpec::Index(0));
@@ -89,6 +94,22 @@ pub fn run(args: CalendarArgs) -> Result<(), String> {
 
     if args.no_legend {
         plot = plot.with_legend(false);
+    }
+
+    #[cfg(feature = "emit_code")]
+    if args.base.emit_code {
+        print!(
+            "{}",
+            crate::emit_code::assemble(
+                &["kuva::plot::CalendarPlot", "kuva::plot::CalendarAgg"],
+                "Calendar",
+                &[crate::emit_code::emit_calendar_plot(&plot)],
+                &args.base,
+                None,
+                None,
+            )
+        );
+        return Ok(());
     }
 
     let plots = vec![Plot::Calendar(plot)];

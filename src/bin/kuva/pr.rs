@@ -47,10 +47,18 @@ pub struct PrArgs {
 }
 
 pub fn run(args: PrArgs) -> Result<(), String> {
+    let mut proj: Vec<ColSpec> = vec![
+        args.score_col.clone().unwrap_or(ColSpec::Index(0)),
+        args.label_col.clone().unwrap_or(ColSpec::Index(1)),
+    ];
+    if let Some(ref c) = args.color_by {
+        proj.push(c.clone());
+    }
     let table = DataTable::parse(
         args.input.input.as_deref(),
-        args.input.no_header,
+        args.input.header_mode(),
         args.input.delimiter,
+        &proj,
     )?;
 
     let score_col = args.score_col.unwrap_or(ColSpec::Index(0));
@@ -100,6 +108,22 @@ pub fn run(args: PrArgs) -> Result<(), String> {
             group = group.with_auc_label(true);
         }
         plot = plot.with_group(group);
+    }
+
+    #[cfg(feature = "emit_code")]
+    if args.base.emit_code {
+        print!(
+            "{}",
+            crate::emit_code::assemble(
+                &["kuva::plot::PrPlot", "kuva::plot::pr::PrGroup"],
+                "Pr",
+                &[crate::emit_code::emit_pr_plot(&plot)],
+                &args.base,
+                Some(&args.axis),
+                None,
+            )
+        );
+        return Ok(());
     }
 
     let plots = vec![Plot::Pr(plot)];

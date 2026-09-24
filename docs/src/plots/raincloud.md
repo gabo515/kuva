@@ -196,6 +196,37 @@ let plot = RaincloudPlot::new()
 
 ---
 
+## Horizontal mode
+
+`.with_horizontal(true)` rotates the chart so categories appear on the Y-axis and values on the X-axis.
+
+```rust,no_run
+use kuva::plot::RaincloudPlot;
+use kuva::render::layout::Layout;
+use kuva::render::plots::Plot;
+use kuva::render::render::render_multiple;
+use kuva::backend::svg::SvgBackend;
+
+let plot = RaincloudPlot::new()
+    .with_group("Control",   control_data)
+    .with_group("Low dose",  low_data)
+    .with_group("High dose", high_data)
+    .with_group_colors(["#4878d0", "#ee854a", "#6acc65"])
+    .with_horizontal(true);
+
+let plots = vec![Plot::Raincloud(plot)];
+let layout = Layout::auto_from_plots(&plots)
+    .with_title("Horizontal Raincloud Plot")
+    .with_x_label("Value")
+    .with_y_label("Treatment");
+
+let svg = SvgBackend.render_scene(&render_multiple(plots, layout));
+```
+
+<img src="../assets/raincloud/horizontal.svg" alt="Horizontal raincloud plot" width="560">
+
+---
+
 ## API reference
 
 | Method | Description |
@@ -222,3 +253,41 @@ let plot = RaincloudPlot::new()
 | `.with_flip(bool)` | Swap cloud and rain sides (default `false` — cloud right, rain left) |
 | `.with_seed(u64)` | RNG seed for reproducible jitter (default `42`) |
 | `.with_legend(s)` | Show per-group legend entries |
+| `.with_horizontal(bool)` | Rotate chart: categories on Y-axis, values on X-axis (default `false`) |
+
+**See also:** [Violin Plot](./violin.md), [Box Plot](./boxplot.md), and [Strip Plot](./strip.md) for the three components it combines.
+
+---
+
+## CLI
+
+Raincloud plot — combines a half-violin KDE cloud, box-and-whisker, and jittered raw points in one panel per group.
+
+**Input:** one row per observation with group and value columns.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--group-col <COL>` | `0` | Group label column |
+| `--value-col <COL>` | `1` | Numeric value column |
+| `--color <CSS>` | — | Color for single-group plots |
+| `--bandwidth <F>` | auto | KDE bandwidth (Silverman's rule by default) |
+| `--no-cloud` | off | Hide the half-violin KDE |
+| `--no-box` | off | Hide the box-and-whisker |
+| `--no-rain` | off | Hide the jittered raw points |
+| `--flip` | off | Mirror cloud to the opposite side |
+| `--horizontal` | off | Render groups on the Y-axis, values on the X-axis |
+| `--legend <LABEL>` | — | Add legend entries (one per group) |
+
+```bash
+kuva raincloud data.tsv --group-col group --value-col score
+
+kuva raincloud data.tsv --group-col condition --value-col response \
+    --no-rain --legend "Condition" --title "Treatment Response"
+
+# horizontal layout
+kuva raincloud data.tsv --group-col group --value-col score --horizontal
+```
+
+---
+
+*See also: [Shared flags](../cli/index.md#shared-flags) — output, appearance, axes.*

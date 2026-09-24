@@ -62,10 +62,18 @@ pub struct WaffleArgs {
 }
 
 pub fn run(args: WaffleArgs) -> Result<(), String> {
+    let mut proj: Vec<ColSpec> = vec![
+        args.label_col.clone().unwrap_or(ColSpec::Index(0)),
+        args.value_col.clone().unwrap_or(ColSpec::Index(1)),
+    ];
+    if let Some(ref c) = args.color_col {
+        proj.push(c.clone());
+    }
     let table = DataTable::parse(
         args.input.input.as_deref(),
-        args.input.no_header,
+        args.input.header_mode(),
         args.input.delimiter,
+        &proj,
     )?;
 
     let label_col = args.label_col.unwrap_or(ColSpec::Index(0));
@@ -123,6 +131,22 @@ pub fn run(args: WaffleArgs) -> Result<(), String> {
 
     for ((label, value), color) in labels.iter().zip(values.iter()).zip(colors.iter()) {
         plot = plot.with_category(label.as_str(), *value, color.as_str());
+    }
+
+    #[cfg(feature = "emit_code")]
+    if args.base.emit_code {
+        print!(
+            "{}",
+            crate::emit_code::assemble(
+                &["kuva::plot::WafflePlot", "kuva::plot::CellShape"],
+                "Waffle",
+                &[crate::emit_code::emit_waffle_plot(&plot)],
+                &args.base,
+                None,
+                None,
+            )
+        );
+        return Ok(());
     }
 
     let plots = vec![Plot::Waffle(plot)];

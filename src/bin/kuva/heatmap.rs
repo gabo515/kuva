@@ -55,10 +55,20 @@ pub struct HeatmapArgs {
 use crate::data::parse_colormap;
 
 pub fn run(args: HeatmapArgs) -> Result<(), String> {
+    let proj: Vec<ColSpec> = if args.long_format {
+        vec![
+            args.row_col.clone().unwrap_or(ColSpec::Index(0)),
+            args.col_col.clone().unwrap_or(ColSpec::Index(1)),
+            args.value_col.clone().unwrap_or(ColSpec::Index(2)),
+        ]
+    } else {
+        vec![] // wide matrix: read all columns
+    };
     let table = DataTable::parse(
         args.input.input.as_deref(),
-        args.input.no_header,
+        args.input.header_mode(),
         args.input.delimiter,
+        &proj,
     )?;
 
     if table.rows.is_empty() {
@@ -170,6 +180,22 @@ pub fn run(args: HeatmapArgs) -> Result<(), String> {
     }
     if let Some(ref label) = args.legend {
         plot = plot.with_legend(label.clone());
+    }
+
+    #[cfg(feature = "emit_code")]
+    if args.base.emit_code {
+        print!(
+            "{}",
+            crate::emit_code::assemble(
+                &["kuva::plot::Heatmap", "kuva::plot::ColorMap"],
+                "Heatmap",
+                &[crate::emit_code::emit_heatmap_plot(&plot)],
+                &args.base,
+                Some(&args.axis),
+                None,
+            )
+        );
+        return Ok(());
     }
 
     let plots = vec![Plot::Heatmap(plot)];

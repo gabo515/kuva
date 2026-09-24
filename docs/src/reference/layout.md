@@ -44,10 +44,13 @@ let layout = Layout::new((0.0, 100.0), (-1.0, 1.0))
 # use kuva::render::plots::Plot;
 # let plots: Vec<Plot> = vec![];
 let layout = Layout::auto_from_plots(&plots)
-    .with_title("My Plot")          // text above the plot area
-    .with_x_label("Concentration")  // label below the x-axis
-    .with_y_label("Response (%)");  // label left of the y-axis
+    .with_title("My Plot")              // text above the plot area
+    .with_subtitle("n = 1,234 cells")   // smaller, muted line under the title
+    .with_x_label("Concentration")      // label below the x-axis
+    .with_y_label("Response (%)");      // label left of the y-axis
 ```
+
+`with_subtitle` draws a second line centred under the title — useful for a one-line data summary. By default it is sized at `round(0.7 × title_size)` (override with `with_subtitle_size`) and coloured by muting the title colour toward the background, so it adapts to light and dark themes. Like the title, it stays on one line unless you set a wrap width — `with_subtitle_wrap` wraps it independently of the title — and the title block reserves the extra height automatically. CLI: `--subtitle` and `--subtitle-wrap`.
 
 ---
 
@@ -528,7 +531,7 @@ Font family and sizes for all text elements. Sizes are in pixels.
 # use kuva::render::plots::Plot;
 # let plots: Vec<Plot> = vec![];
 let layout = Layout::auto_from_plots(&plots)
-    .with_font_family("Arial, sans-serif")  // default: "DejaVu Sans, Liberation Sans, Arial, sans-serif"
+    .with_font_family("Arial, sans-serif")  // default: "DejaVu Sans, Verdana, Liberation Sans, Arial, sans-serif"
     .with_title_size(20)                    // default: 18
     .with_label_size(14)                    // default: 14  (axis labels)
     .with_tick_size(11)                     // default: 12  (tick labels)
@@ -536,6 +539,8 @@ let layout = Layout::auto_from_plots(&plots)
 ```
 
 These can also be set via a `Theme` — see the [Themes](./themes.md) reference.
+
+For greyscale/print-safe or color-vision-deficient-accessible rendering, see [Black & White / Accessibility Mode](./bw_mode.md) — `Layout::with_bw_mode()` replaces palette colors with grey shades, hatch patterns, dash styles, and marker shapes.
 
 ---
 
@@ -578,6 +583,7 @@ let layout = Layout::auto_from_plots(&plots)
 |------|-------------|
 | `--wrap <N>` | Wrap all text at N characters |
 | `--title-wrap <N>` | Wrap title only |
+| `--subtitle-wrap <N>` | Wrap subtitle only |
 | `--x-label-wrap <N>` | Wrap x-axis label only |
 | `--y-label-wrap <N>` | Wrap y-axis label only |
 | `--y2-label-wrap <N>` | Wrap secondary y-axis label only |
@@ -586,6 +592,7 @@ let layout = Layout::auto_from_plots(&plots)
 ### What happens when wrapping is enabled
 
 - **Title** wraps into centred lines; `margin_top` grows to fit.
+- **Subtitle** wraps into centred lines below the title; `margin_top` grows to fit.
 - **X label** wraps into centred lines; `margin_bottom` grows.
 - **Y label** wraps into multiple rotated lines stacked horizontally; `margin_left` grows.
 - **Y2 label** same as y-label but on the right side.
@@ -610,6 +617,7 @@ Wrapping splits at whitespace boundaries. A single word longer than the limit is
 | Method | Description |
 |--------|-------------|
 | `.with_title(s)` | Plot title |
+| `.with_subtitle(s)` | Muted second line under the title (`.with_subtitle_size(n)` overrides its size) |
 | `.with_x_label(s)` | X-axis label |
 | `.with_y_label(s)` | Y-axis label |
 | `.with_ticks(n)` | Approximate number of tick intervals |
@@ -670,6 +678,7 @@ Wrapping splits at whitespace boundaries. A single word longer than the limit is
 |--------|-------------|
 | `.with_wrap(n)` | Wrap all text elements at `n` characters (title, labels, legend). Call before per-element overrides. |
 | `.with_title_wrap(n)` | Wrap title at `n` characters |
+| `.with_subtitle_wrap(n)` | Wrap subtitle at `n` characters (independent of the title) |
 | `.with_x_label_wrap(n)` | Wrap x-axis label at `n` characters |
 | `.with_y_label_wrap(n)` | Wrap y-axis label at `n` characters |
 | `.with_y2_label_wrap(n)` | Wrap secondary y-axis label at `n` characters |
@@ -730,8 +739,9 @@ let layout = Layout::auto_from_plots(&plots)
 
 | Method | Default | Description |
 |--------|---------|-------------|
-| `.with_font_family(s)` | `"DejaVu Sans, Liberation Sans, Arial, sans-serif"` | CSS font-family string |
+| `.with_font_family(s)` | `"DejaVu Sans, Verdana, Liberation Sans, Arial, sans-serif"` | CSS font-family string |
 | `.with_title_size(n)` | `18` | Title font size (px) |
+| `.with_subtitle_size(n)` | `0.7 × title` | Subtitle font size (px) |
 | `.with_label_size(n)` | `14` | Axis label font size (px) |
 | `.with_tick_size(n)` | `12` | Tick label font size (px) |
 | `.with_body_size(n)` | `12` | Body text font size (px) |

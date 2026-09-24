@@ -34,8 +34,9 @@ pub struct ChordArgs {
 pub fn run(args: ChordArgs) -> Result<(), String> {
     let table = DataTable::parse(
         args.input.input.as_deref(),
-        args.input.no_header,
+        args.input.header_mode(),
         args.input.delimiter,
+        &[],
     )?;
 
     if table.rows.is_empty() {
@@ -78,6 +79,22 @@ pub fn run(args: ChordArgs) -> Result<(), String> {
     }
     if let Some(ref label) = args.legend {
         plot = plot.with_legend(label.clone());
+    }
+
+    #[cfg(feature = "emit_code")]
+    if args.base.emit_code {
+        print!(
+            "{}",
+            crate::emit_code::assemble(
+                &["kuva::plot::ChordPlot"],
+                "Chord",
+                &[crate::emit_code::emit_chord_plot(&plot)],
+                &args.base,
+                None,
+                None,
+            )
+        );
+        return Ok(());
     }
 
     let plots = vec![Plot::Chord(plot)];

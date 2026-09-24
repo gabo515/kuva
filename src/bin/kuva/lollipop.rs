@@ -59,10 +59,18 @@ pub struct LollipopArgs {
 }
 
 pub fn run(args: LollipopArgs) -> Result<(), String> {
+    let mut proj: Vec<ColSpec> = vec![
+        args.x_col.clone().unwrap_or(ColSpec::Index(0)),
+        args.y_col.clone().unwrap_or(ColSpec::Index(1)),
+    ];
+    if let Some(ref c) = args.label_col {
+        proj.push(c.clone());
+    }
     let table = DataTable::parse(
         args.input.input.as_deref(),
-        args.input.no_header,
+        args.input.header_mode(),
         args.input.delimiter,
+        &proj,
     )?;
 
     let x_col = args.x_col.unwrap_or(ColSpec::Index(0));
@@ -121,6 +129,22 @@ pub fn run(args: LollipopArgs) -> Result<(), String> {
         for (x, y) in xs.iter().zip(ys.iter()) {
             plot = plot.with_point(*x, *y);
         }
+    }
+
+    #[cfg(feature = "emit_code")]
+    if args.base.emit_code {
+        print!(
+            "{}",
+            crate::emit_code::assemble(
+                &["kuva::plot::LollipopPlot"],
+                "Lollipop",
+                &[crate::emit_code::emit_lollipop_plot(&plot)],
+                &args.base,
+                Some(&args.axis),
+                None,
+            )
+        );
+        return Ok(());
     }
 
     let plots = vec![Plot::Lollipop(plot)];

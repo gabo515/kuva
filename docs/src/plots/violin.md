@@ -183,6 +183,37 @@ let plot = ViolinPlot::new()
 
 ---
 
+## Horizontal mode
+
+`.with_horizontal(true)` rotates the chart so categories appear on the Y-axis and values on the X-axis.
+
+```rust,no_run
+use kuva::plot::ViolinPlot;
+use kuva::render::layout::Layout;
+use kuva::render::plots::Plot;
+use kuva::render::render::render_multiple;
+use kuva::backend::svg::SvgBackend;
+
+let plot = ViolinPlot::new()
+    .with_group("Normal",  normal_data)
+    .with_group("Bimodal", bimodal_data)
+    .with_group("Skewed",  skewed_data)
+    .with_group_colors(["steelblue", "tomato", "seagreen"])
+    .with_width(0.8)
+    .with_horizontal(true);
+
+let plots = vec![Plot::Violin(plot)];
+let layout = Layout::auto_from_plots(&plots)
+    .with_title("Horizontal Violin Plot")
+    .with_x_label("Value");
+
+let svg = SvgBackend.render_scene(&render_multiple(plots, layout));
+```
+
+<img src="../assets/violin/horizontal.svg" alt="Horizontal violin plot" width="560">
+
+---
+
 ## API reference
 
 | Method | Description |
@@ -199,3 +230,46 @@ let plot = ViolinPlot::new()
 | `.with_swarm_overlay()` | Overlay beeswarm points (spread to avoid overlap) |
 | `.with_overlay_color(s)` | Overlay point color (default `"rgba(0,0,0,0.45)"`) |
 | `.with_overlay_size(r)` | Overlay point radius in pixels (default `3.0`) |
+| `.with_horizontal(bool)` | Rotate chart: categories on Y-axis, values on X-axis (default `false`) |
+
+**See also:** [Box Plot](./boxplot.md) for a simpler quantile summary, [Raincloud Plot](./raincloud.md) for violin + box + points combined, [Ridgeline Plot](./ridgeline.md) for stacking many groups' densities.
+
+---
+
+## CLI
+
+Kernel-density violin plot. Same input format as `box`.
+
+**Input:** two columns — group label and numeric value, one observation per row.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--group-col <COL>` | `0` | Group label column |
+| `--value-col <COL>` | `1` | Numeric value column |
+| `--y <COL>[,<COL>…]` | — | Comma-separated columns; each column becomes a separate group (column name = group label). Overrides `--group-col` + `--value-col` when 2+ columns given |
+| `--color <CSS>` | `steelblue` | Violin fill color (uniform, all groups) |
+| `--group-colors <CSS,...>` | — | Per-group colors, comma-separated; falls back to `--color` for unlisted groups |
+| `--bandwidth <F>` | *(Silverman)* | KDE bandwidth |
+| `--overlay-points` | off | Overlay individual points as a jittered strip |
+| `--overlay-swarm` | off | Overlay individual points as a non-overlapping beeswarm |
+| `--horizontal` | off | Render groups on the Y-axis, values on the X-axis |
+
+```bash
+kuva violin samples.tsv --group-col group --value-col expression
+
+kuva violin samples.tsv --group-col group --value-col expression \
+    --overlay-swarm --bandwidth 0.3
+
+kuva violin samples.tsv --group-col group --value-col expression \
+    --group-colors "steelblue,tomato,seagreen,goldenrod,mediumpurple"
+
+# multi-column: each numeric column is a group
+kuva violin data.tsv --y col_a,col_b,col_c
+
+# horizontal layout
+kuva violin samples.tsv --group-col group --value-col expression --horizontal
+```
+
+---
+
+*See also: [Shared flags](../cli/index.md#shared-flags) — output, appearance, axes, log scale.*

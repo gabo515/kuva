@@ -60,10 +60,15 @@ pub struct TernaryArgs {
 }
 
 pub fn run(args: TernaryArgs) -> Result<(), String> {
+    let mut proj: Vec<ColSpec> = vec![args.a.clone(), args.b.clone(), args.c.clone()];
+    if let Some(ref c) = args.color_by {
+        proj.push(c.clone());
+    }
     let table = DataTable::parse(
         args.input.input.as_deref(),
-        args.input.no_header,
+        args.input.header_mode(),
         args.input.delimiter,
+        &proj,
     )?;
 
     let mut plot = TernaryPlot::new()
@@ -93,6 +98,22 @@ pub fn run(args: TernaryArgs) -> Result<(), String> {
         for ((a, b), c) in a_vals.iter().zip(b_vals.iter()).zip(c_vals.iter()) {
             plot = plot.with_point(*a, *b, *c);
         }
+    }
+
+    #[cfg(feature = "emit_code")]
+    if args.base.emit_code {
+        print!(
+            "{}",
+            crate::emit_code::assemble(
+                &["kuva::plot::TernaryPlot"],
+                "Ternary",
+                &[crate::emit_code::emit_ternary_plot(&plot)],
+                &args.base,
+                None,
+                None,
+            )
+        );
+        return Ok(());
     }
 
     let plots = vec![Plot::Ternary(plot)];

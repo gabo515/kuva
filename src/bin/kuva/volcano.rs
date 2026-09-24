@@ -36,6 +36,10 @@ pub struct VolcanoArgs {
     #[arg(long)]
     pub top_n: Option<usize>,
 
+    /// Label placement: nudge (default), exact, or repel (force-directed).
+    #[arg(long)]
+    pub label_style: Option<String>,
+
     /// Color for up-regulated points (default: "firebrick").
     #[arg(long)]
     pub color_up: Option<String>,
@@ -70,10 +74,16 @@ pub struct VolcanoArgs {
 }
 
 pub fn run(args: VolcanoArgs) -> Result<(), String> {
+    let proj: Vec<ColSpec> = vec![
+        args.name_col.clone().unwrap_or(ColSpec::Index(0)),
+        args.x_col.clone().unwrap_or(ColSpec::Index(1)),
+        args.y_col.clone().unwrap_or(ColSpec::Index(2)),
+    ];
     let table = DataTable::parse(
         args.input.input.as_deref(),
-        args.input.no_header,
+        args.input.header_mode(),
         args.input.delimiter,
+        &proj,
     )?;
 
     let name_col = args.name_col.unwrap_or(ColSpec::Index(0));
@@ -108,6 +118,12 @@ pub fn run(args: VolcanoArgs) -> Result<(), String> {
     if let Some(n) = args.top_n {
         plot = plot.with_label_top(n);
     }
+    if let Some(ref s) = args.label_style {
+        let style = kuva::plot::LabelStyle::parse(s).ok_or_else(|| {
+            format!("unknown --label-style '{s}' (expected nudge, exact, or repel)")
+        })?;
+        plot = plot.with_label_style(style);
+    }
     if let Some(ref c) = args.color_up {
         plot = plot.with_color_up(c.clone());
     }
@@ -122,6 +138,22 @@ pub fn run(args: VolcanoArgs) -> Result<(), String> {
     }
     if args.legend {
         plot = plot.with_legend("DEG status");
+    }
+
+    #[cfg(feature = "emit_code")]
+    if args.base.emit_code {
+        print!(
+            "{}",
+            crate::emit_code::assemble(
+                &["kuva::plot::VolcanoPlot", "kuva::plot::LabelStyle"],
+                "Volcano",
+                &[crate::emit_code::emit_volcano_plot(&plot)],
+                &args.base,
+                Some(&args.axis),
+                None,
+            )
+        );
+        return Ok(());
     }
 
     let plots = vec![Plot::Volcano(plot)];

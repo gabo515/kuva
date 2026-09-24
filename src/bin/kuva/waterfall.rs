@@ -55,10 +55,15 @@ pub struct WaterfallArgs {
 }
 
 pub fn run(args: WaterfallArgs) -> Result<(), String> {
+    let proj: Vec<ColSpec> = vec![
+        args.label_col.clone().unwrap_or(ColSpec::Index(0)),
+        args.value_col.clone().unwrap_or(ColSpec::Index(1)),
+    ];
     let table = DataTable::parse(
         args.input.input.as_deref(),
-        args.input.no_header,
+        args.input.header_mode(),
         args.input.delimiter,
+        &proj,
     )?;
 
     let label_col = args.label_col.unwrap_or(ColSpec::Index(0));
@@ -93,6 +98,22 @@ pub fn run(args: WaterfallArgs) -> Result<(), String> {
         } else {
             plot = plot.with_delta(label.clone(), *value);
         }
+    }
+
+    #[cfg(feature = "emit_code")]
+    if args.base.emit_code {
+        print!(
+            "{}",
+            crate::emit_code::assemble(
+                &["kuva::plot::WaterfallPlot"],
+                "Waterfall",
+                &[crate::emit_code::emit_waterfall_plot(&plot)],
+                &args.base,
+                Some(&args.axis),
+                None,
+            )
+        );
+        return Ok(());
     }
 
     let plots = vec![Plot::Waterfall(plot)];

@@ -40,6 +40,10 @@ pub struct ManhattanArgs {
     #[arg(long)]
     pub top_n: Option<usize>,
 
+    /// Label placement: nudge (default), exact, or repel (force-directed).
+    #[arg(long)]
+    pub label_style: Option<String>,
+
     /// Point radius in pixels (default: 2.5).
     #[arg(long)]
     pub point_size: Option<f64>,
@@ -70,10 +74,16 @@ pub struct ManhattanArgs {
 }
 
 pub fn run(args: ManhattanArgs) -> Result<(), String> {
+    let proj: Vec<ColSpec> = vec![
+        args.chr_col.clone().unwrap_or(ColSpec::Index(0)),
+        args.pos_col.clone().unwrap_or(ColSpec::Index(1)),
+        args.pvalue_col.clone().unwrap_or(ColSpec::Index(2)),
+    ];
     let table = DataTable::parse(
         args.input.input.as_deref(),
-        args.input.no_header,
+        args.input.header_mode(),
         args.input.delimiter,
+        &proj,
     )?;
 
     let chr_col = args.chr_col.unwrap_or(ColSpec::Index(0));
@@ -126,6 +136,12 @@ pub fn run(args: ManhattanArgs) -> Result<(), String> {
     if let Some(n) = args.top_n {
         plot = plot.with_label_top(n);
     }
+    if let Some(ref s) = args.label_style {
+        let style = kuva::plot::LabelStyle::parse(s).ok_or_else(|| {
+            format!("unknown --label-style '{s}' (expected nudge, exact, or repel)")
+        })?;
+        plot = plot.with_label_style(style);
+    }
     if let Some(s) = args.point_size {
         plot = plot.with_point_size(s);
     }
@@ -137,6 +153,26 @@ pub fn run(args: ManhattanArgs) -> Result<(), String> {
     }
     if args.legend {
         plot = plot.with_legend("GWAS thresholds");
+    }
+
+    #[cfg(feature = "emit_code")]
+    if args.base.emit_code {
+        print!(
+            "{}",
+            crate::emit_code::assemble(
+                &[
+                    "kuva::plot::ManhattanPlot",
+                    "kuva::plot::LabelStyle",
+                    "kuva::Palette",
+                ],
+                "Manhattan",
+                &[crate::emit_code::emit_manhattan_plot(&plot)],
+                &args.base,
+                Some(&args.axis),
+                None,
+            )
+        );
+        return Ok(());
     }
 
     let plots = vec![Plot::Manhattan(plot)];

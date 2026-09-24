@@ -1,11 +1,13 @@
 //! Integration tests for the always-on **lookup tier**: `$...$` math in labels
-//! is lowered to inline Unicode by every backend when the `math` feature is
-//! off (SVG assertions are gated accordingly; the terminal is lookup-only
+//! is lowered to inline Unicode by every backend when the `typst-math` feature
+//! is off (SVG assertions are gated accordingly; the terminal is lookup-only
 //! regardless of features).
 //!
-//! This is the path `cargo test --features cli,full` exercises, so these
-//! guard the default rendering behaviour.
+//! This is the path `cargo ci-test` exercises, so these guard the default
+//! rendering behaviour. Under `cargo ci-test-typst` the SVG cases compile out,
+//! which is why the SVG import is gated too.
 
+#[cfg(not(feature = "typst-math"))]
 use kuva::backend::svg::SvgBackend;
 use kuva::backend::terminal::TerminalBackend;
 use kuva::plot::scatter::ScatterPlot;

@@ -213,3 +213,51 @@ fn textplot_body_math_wraps_lines() {
     );
     assert!(!svg.contains("\\sqrt"), "raw math must not leak");
 }
+
+// Regression: a typeset x-axis label with a deep descender (stacked fraction,
+// radical) must stay inside the canvas. The bottom margin reserves one nominal
+// text line (`label_size`) and axis.rs pins the baseline `label_size * 0.5`
+// above the canvas edge, which only suits an ordinary descender; without
+// `ComputedLayout::x_label_math_extra` the denominator of
+// `\frac{-b \pm \sqrt{b^2-4ac}}{2a}` rendered ~2.7px past the bottom.
+#[test]
+fn tall_math_x_label_stays_inside_the_canvas() {
+    fn attr(svg: &str, name: &str) -> f64 {
+        svg.split(&format!("{name}=\""))
+            .nth(1)
+            .and_then(|s| s.split('"').next())
+            .and_then(|s| s.parse().ok())
+            .unwrap_or_else(|| panic!("no {name} on <svg>"))
+    }
+
+    for label in [
+        r"$x = \frac{-b \pm \sqrt{b^2 - 4 a c}}{2 a}$",
+        r"$\frac{\frac{a}{b}}{\frac{c}{d}}$",
+        r"$\sqrt{\frac{\sigma^2}{n}}$",
+    ] {
+        let plot = ScatterPlot::new().with_data(vec![(1.0_f64, 2.0), (3.0, 5.0)]);
+        let layout = Layout::new((0.0, 4.0), (0.0, 10.0)).with_x_label(label);
+        let scene = render_scatter(&plot, layout);
+        let svg = SvgBackend::new().render_scene(&scene);
+        let canvas_h = attr(&svg, "height");
+
+        // The embedded fragment is placed by a translate(x, y) group; its
+        // vertical extent is the measured fragment height.
+        let frag = render_label_svg(label, 14.0, None).expect("typst compile");
+        let placed_y: f64 = svg
+            .split("<g transform=\"translate(")
+            .nth(1)
+            .and_then(|s| s.split(')').next())
+            .and_then(|s| s.split(',').nth(1))
+            .and_then(|s| s.trim().parse().ok())
+            .expect("embedded math fragment group");
+
+        let bottom = placed_y + frag.height_pt;
+        assert!(
+            bottom <= canvas_h,
+            "{label}: fragment bottom {bottom:.1} exceeds canvas height {canvas_h:.1} \
+             (clipped by {:.1}px)",
+            bottom - canvas_h
+        );
+    }
+}

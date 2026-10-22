@@ -460,6 +460,7 @@ All 57 subcommands, grouped the same way plot pages are grouped in the sidebar. 
 |---|---|
 | [scatter3d](../plots/scatter3d.md#cli) | 3D scatter plot with orthographic projection |
 | [surface3d](../plots/surface3d.md#cli) | 3D surface mesh with depth-sorted rendering |
+| [quiver3d](../plots/quiver3d.md#cli) | 3D vector field rendered as arrows in an orthographic box |
 
 ### Composite & Utility
 

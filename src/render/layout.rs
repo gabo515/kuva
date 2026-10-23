@@ -2850,6 +2850,10 @@ pub struct ComputedLayout {
     /// Effective orientation of each bracket: `true` when its categories run
     /// along y (inferred from the layout, or forced by `with_horizontal`).
     pub bracket_horizontal: Vec<bool>,
+    /// Height of one terminal row in scene pixels when rendering to the
+    /// terminal (`Layout::term_rows`), so bracket labels can clear the bar by
+    /// a whole row; `None` for pixel backends.
+    pub bracket_cell_h: Option<f64>,
     /// Auto-stack geometry for horizontal brackets (value axis = x).
     pub bracket_stack_x: BracketStack,
     /// Auto-stack geometry for vertical brackets (value axis = y).
@@ -3115,13 +3119,15 @@ fn stack_axis(
 
 /// Resolve every bracket's orientation and span, assign stacking levels per
 /// orientation, and grow whichever value axes need it. `plot_px` is the plot
-/// area `(width, height)` in pixels and `body_px` the default label size.
+/// area `(width, height)` in pixels, `body_px` the default label size, and
+/// `cell_h` the height of one terminal row when rendering to the terminal.
 fn resolve_brackets(
     layout: &Layout,
     x: (f64, f64),
     y: (f64, f64),
     plot_px: (f64, f64),
     body_px: f64,
+    cell_h: Option<f64>,
 ) -> ResolvedBrackets {
     let n = layout.brackets.len();
     let mut out = ResolvedBrackets {
@@ -3184,21 +3190,24 @@ fn resolve_brackets(
     // a large font never puts a label on the bar above it; 7% of the axis is
     // the floor so sparse stacks keep a readable gap.
     let font_px = |b: &SignificanceBracket| b.font_size.map(|f| f as f64).unwrap_or(body_px);
-    let label_px =
-        |want_h: bool, measure: &dyn Fn(&SignificanceBracket, f64) -> f64| -> (f64, f64) {
-            let mut pitch: f64 = 0.0;
-            let mut head: f64 = 0.0;
-            for ((b, &h), lv) in layout.brackets.iter().zip(&out.horizontal).zip(&v_levels) {
-                let _ = lv;
-                if h != want_h || b.position.is_some() {
-                    continue;
-                }
-                let f = font_px(b);
-                pitch = pitch.max(f * 2.2);
-                head = head.max(measure(b, f) + f * 0.5);
+    let label_px = |want_h: bool, measure: &dyn Fn(&SignificanceBracket, f64) -> f64| {
+        let mut pitch: f64 = 0.0;
+        let mut head: f64 = 0.0;
+        for (b, &h) in layout.brackets.iter().zip(&out.horizontal) {
+            if h != want_h || b.position.is_some() {
+                continue;
             }
-            (pitch, head)
-        };
+            let f = font_px(b);
+            let extent = measure(b, f);
+            // A horizontal label runs sideways across the next level, so
+            // that pitch must clear the whole label plus a gap on each side.
+            pitch = pitch
+                .max(f * 2.2)
+                .max(if want_h { extent + f } else { 0.0 });
+            head = head.max(extent + f * 0.5);
+        }
+        (pitch, head)
+    };
     let text_w = |b: &SignificanceBracket, f: f64| {
         crate::render::text_metrics::measure_text_width(
             &b.label(),
@@ -3208,7 +3217,19 @@ fn resolve_brackets(
     };
     let text_h = |_b: &SignificanceBracket, f: f64| f * 1.1;
 
-    let (pitch_v, head_v) = label_px(false, &text_h);
+    let (mut pitch_v, mut head_v) = label_px(false, &text_h);
+    let (mut pitch_h, mut head_h) = label_px(true, &text_w);
+    // Terminal: a row is the smallest step a label can take. Keep a bar, its
+    // label and a blank row per level, and one column beside a horizontal
+    // bracket (a cell is about half as wide as it is tall).
+    if let Some(ch) = cell_h {
+        let cw = ch * 0.5;
+        pitch_v = pitch_v.max(3.0 * ch);
+        head_v = head_v.max(2.0 * ch);
+        head_h += cw;
+        pitch_h = pitch_h.max(head_h + cw);
+    }
+
     let (stack_y, y_max) = stack_axis(
         layout.data_y_range,
         y,
@@ -3219,7 +3240,6 @@ fn resolve_brackets(
         (plot_px.1 * 0.07).max(pitch_v),
         head_v,
     );
-    let (pitch_h, head_h) = label_px(true, &text_w);
     let (stack_x, x_max) = stack_axis(
         layout.data_x_range,
         x,
@@ -3895,6 +3915,7 @@ impl ComputedLayout {
                 height - margin_top - margin_bottom,
             ),
             layout.body_size as f64 * s,
+            layout.term_rows.map(|r| height / r as f64),
         );
         let (x_max, y_max) = (brackets.x_max, brackets.y_max);
 
@@ -3961,6 +3982,7 @@ impl ComputedLayout {
             bracket_levels: brackets.levels,
             bracket_spans: brackets.spans,
             bracket_horizontal: brackets.horizontal,
+            bracket_cell_h: layout.term_rows.map(|r| height / r as f64),
             bracket_stack_x: brackets.stack_x,
             bracket_stack_y: brackets.stack_y,
             y_tick_label_px,

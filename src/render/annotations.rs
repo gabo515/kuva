@@ -221,6 +221,13 @@ pub fn add_brackets(layout: &Layout, scene: &mut Scene, computed: &ComputedLayou
         } else {
             font_px * 0.3
         };
+        // Terminal output snaps text to rows and columns: keep the label a
+        // full row above the bar, or a clear column beside a horizontal
+        // bracket (a row is about two columns), so it never touches the
+        // bracket's own cells.
+        let cell_h = computed.bracket_cell_h;
+        let gap_v = cell_h.map_or(gap, |ch| gap.max(ch));
+        let gap_h = cell_h.map_or(gap + font_px * 0.1, |ch| (gap + font_px * 0.1).max(ch));
 
         let (d, tx, ty, anchor) = if horizontal {
             let y_lo = computed.map_y(lo);
@@ -238,7 +245,7 @@ pub fn add_brackets(layout: &Layout, scene: &mut Scene, computed: &ComputedLayou
                     px - tick,
                     y_hi
                 ),
-                px + gap + font_px * 0.1,
+                px + gap_h,
                 (y_lo + y_hi) / 2.0 + font_px * 0.35,
                 TextAnchor::Start,
             )
@@ -259,7 +266,7 @@ pub fn add_brackets(layout: &Layout, scene: &mut Scene, computed: &ComputedLayou
                     py + tick
                 ),
                 (x_lo + x_hi) / 2.0,
-                py - gap,
+                py - gap_v,
                 TextAnchor::Middle,
             )
         };

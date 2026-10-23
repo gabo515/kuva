@@ -326,3 +326,54 @@ fn works_on_bar_and_violin() {
     assert_eq!(bracket_paths(&svg).len(), 1);
     assert!(svg.contains(">ns</text>"));
 }
+
+#[test]
+fn terminal_mode_keeps_labels_a_row_clear_of_the_bar() {
+    let plots = vec![Plot::Box(boxes())];
+    let layout = Layout::auto_from_plots(&plots)
+        .with_term_rows(30)
+        .with_significance("A", "B", 0.04)
+        .with_significance("B", "C", 0.004)
+        .with_significance("A", "C", 0.0004);
+    let computed = ComputedLayout::from_layout(&layout);
+    let cell_h = computed.height / 30.0;
+    let svg = render(plots, layout);
+    let paths = bracket_paths(&svg);
+    assert_eq!(paths.len(), 3);
+    for (label, p) in [("*", &paths[0]), ("**", &paths[1]), ("***", &paths[2])] {
+        let bar_y = p[1].1;
+        let label_y = common::text_y(&svg, label);
+        assert!(
+            bar_y - label_y >= cell_h - 1e-6,
+            "{label}: bar {bar_y}, label {label_y}, row {cell_h}"
+        );
+    }
+    // Bar, label, blank row: at least three rows per level.
+    assert!(paths[0][1].1 - paths[1][1].1 >= 3.0 * cell_h - 1e-6);
+    assert!(paths[1][1].1 - paths[2][1].1 >= 3.0 * cell_h - 1e-6);
+}
+
+#[test]
+fn horizontal_label_never_crosses_the_next_level() {
+    let plots = vec![Plot::Box(boxes().with_horizontal(true))];
+    let long = "Mann–Whitney U, p = 0.012";
+    let layout = Layout::auto_from_plots(&plots)
+        .with_bracket(SignificanceBracket::text("A", "B", long))
+        .with_significance("A", "D", 0.3);
+    let computed = ComputedLayout::from_layout(&layout);
+    let font = computed.body_size as f64;
+    let svg = render(plots, layout);
+    let paths = bracket_paths(&svg);
+    assert_eq!(paths.len(), 2);
+    let next_bar_x = paths[1][1].0;
+    let needle = format!(">{long}</text>");
+    let end = svg.find(&needle).expect("long label");
+    let seg = &svg[..end];
+    let xs = seg.rfind(r#" x=""#).unwrap() + 4;
+    let xe = seg[xs..].find('"').unwrap() + xs;
+    let x: f64 = seg[xs..xe].parse().unwrap();
+    assert!(
+        x + 0.45 * font * long.chars().count() as f64 <= next_bar_x,
+        "label from {x} crosses the next bar at {next_bar_x}"
+    );
+}

@@ -220,12 +220,21 @@ fn test_quiver3d_single_huge_arrow_stays_on_canvas() {
     }
 }
 
+/// Two arrows of different length: with Tail pivot the short one ends where
+/// the gap to the long one begins, with Tip pivot the long one ends at the
+/// short one's anchor — different relative layouts, so different geometry.
+/// (A box that follows the arrows makes a uniform translation invisible.)
 #[test]
 fn test_quiver3d_pivot_moves_arrow() {
-    let tail = svg_of(Quiver3DPlot::new().with_arrows([(0.0, 0.0, 0.0, 1.0, 0.0, 0.0); 2]));
+    let arrows = [
+        (0.0, 0.0, 0.0, 1.0, 0.0, 0.0),
+        (2.0, 0.0, 0.0, 2.0, 0.0, 0.0),
+    ];
+    let tail = svg_of(Quiver3DPlot::new().with_arrows(arrows).with_scale(1.0));
     let tip = svg_of(
         Quiver3DPlot::new()
-            .with_arrows([(0.0, 0.0, 0.0, 1.0, 0.0, 0.0); 2])
+            .with_arrows(arrows)
+            .with_scale(1.0)
             .with_pivot(QuiverPivot::Tip),
     );
     assert_ne!(

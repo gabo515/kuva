@@ -50,14 +50,17 @@ impl Quiver3DArrow {
 /// # Scaling
 ///
 /// By default the scale multiplier is auto-computed so the longest arrow is
-/// roughly one grid cell long (`≈ span / ∛n` for `n` arrows), which keeps
-/// dense fields from overlapping. Pin it with [`Quiver3DPlot::with_scale`] or
-/// change the target fraction with [`Quiver3DPlot::with_auto_scale`].
+/// roughly one grid cell long, measured in the box's own normalised
+/// coordinates so every axis stays legible even on very different data
+/// ranges. Pin it with [`Quiver3DPlot::with_scale`] or change the target
+/// fraction with [`Quiver3DPlot::with_auto_scale`].
 ///
 /// # Bounds
 ///
-/// The coordinate box is sized from the arrow anchors only. Arrows are never
-/// clipped, so those on the outer layer extend past the box faces.
+/// The coordinate box encloses every arrow, tail to tip, so nothing is drawn
+/// outside it. [`Quiver3DPlot::with_tight_bounds`] sizes the box from the
+/// anchors alone instead, letting the outer layer of arrows extend past the
+/// faces. Arrows are never clipped in either mode.
 ///
 /// # Coloring
 ///
@@ -141,6 +144,10 @@ pub struct Quiver3DPlot {
     pub pivot: QuiverPivot,
     /// Fade distant arrows for a depth cue. Default `false`.
     pub depth_shade: bool,
+    /// When `true`, the 3D box is sized from the arrow anchors only and the
+    /// outer arrows extend past its faces. Default `false` (the box encloses
+    /// every tail and tip).
+    pub tight_bounds: bool,
     /// Shared 3D box/grid/axes configuration.
     pub box3d: Box3DConfig,
 }
@@ -172,6 +179,7 @@ impl Quiver3DPlot {
             legend_label: None,
             pivot: QuiverPivot::Tail,
             depth_shade: false,
+            tight_bounds: false,
             box3d: Box3DConfig::default(),
         }
     }
@@ -179,8 +187,9 @@ impl Quiver3DPlot {
     /// Sample a vector-field closure on a regular `nx × ny × nz` grid.
     ///
     /// Each range is a `(min, max, n)` tuple where `n` is the number of
-    /// samples along that axis (endpoints inclusive, like `numpy.linspace`).
-    /// The closure receives `(x, y, z)` and returns `(u, v, w)`.
+    /// samples along that axis, endpoints inclusive; `n == 1` samples the
+    /// midpoint of the range. The closure receives `(x, y, z)` and returns
+    /// `(u, v, w)`.
     ///
     /// ```rust
     /// use kuva::plot::Quiver3DPlot;
@@ -389,6 +398,42 @@ impl Quiver3DPlot {
         self
     }
 
+    /// Head half-width as a fraction of head length (used when no explicit
+    /// head width is set). Default `0.45`.
+    pub fn with_head_aspect(mut self, aspect: impl Into<f64>) -> Self {
+        let aspect = aspect.into();
+        debug_assert!(
+            aspect.is_finite(),
+            "Quiver3DPlot::with_head_aspect: must be finite"
+        );
+        self.head_aspect = aspect;
+        self
+    }
+
+    /// Minimum proportional head length in pixels, so short arrows keep a
+    /// visible head. Default `4.0`.
+    pub fn with_head_min_px(mut self, px: impl Into<f64>) -> Self {
+        let px = px.into();
+        debug_assert!(
+            px.is_finite(),
+            "Quiver3DPlot::with_head_min_px: must be finite"
+        );
+        self.head_min_px = px;
+        self
+    }
+
+    /// Maximum proportional head length in pixels, so long arrows do not grow
+    /// gigantic heads. Default `14.0`.
+    pub fn with_head_max_px(mut self, px: impl Into<f64>) -> Self {
+        let px = px.into();
+        debug_assert!(
+            px.is_finite(),
+            "Quiver3DPlot::with_head_max_px: must be finite"
+        );
+        self.head_max_px = px;
+        self
+    }
+
     /// Color arrows by magnitude using the given colormap.
     pub fn with_color_map(mut self, cmap: ColorMap) -> Self {
         self.color_map = Some(cmap);
@@ -435,6 +480,15 @@ impl Quiver3DPlot {
     /// Fade distant arrows for a depth cue.
     pub fn with_depth_shade(mut self) -> Self {
         self.depth_shade = true;
+        self
+    }
+
+    /// Size the 3D box from the arrow anchors only. The sampled region then
+    /// fills the box and the outer layer of arrows extends past its faces,
+    /// which reads naturally for dense fields but can run into the axis
+    /// tick labels on coarse ones. Arrows are never clipped.
+    pub fn with_tight_bounds(mut self) -> Self {
+        self.tight_bounds = true;
         self
     }
 
@@ -501,10 +555,8 @@ impl Quiver3DPlot {
         Some(r)
     }
 
-    /// Axis-aligned data ranges of the arrow anchors, used to size the 3D
-    /// box. A zero-span axis is padded to `±0.5` so the box stays a box.
-    /// Returns `None` when there are no arrows.
-    pub fn data_ranges(&self) -> Option<DataRanges3D> {
+    /// Pad a zero-span axis to `±0.5` so the box stays a box.
+    fn pad(r: DataRanges3D) -> DataRanges3D {
         let pad = |(lo, hi): (f64, f64)| {
             if (hi - lo).abs() < 1e-12 {
                 (lo - 0.5, hi + 0.5)
@@ -512,48 +564,78 @@ impl Quiver3DPlot {
                 (lo, hi)
             }
         };
-        let r = self.anchor_extent()?;
-        Some(DataRanges3D {
+        DataRanges3D {
             x: pad(r.x),
             y: pad(r.y),
             z: pad(r.z),
-        })
+        }
+    }
+
+    /// Axis-aligned data ranges used to size the 3D box. By default the box
+    /// encloses every arrow's tail and tip; with
+    /// [`Quiver3DPlot::with_tight_bounds`] it encloses the anchors only. A
+    /// zero-span axis is padded to `±0.5`. Returns `None` when there are no
+    /// arrows.
+    pub fn data_ranges(&self) -> Option<DataRanges3D> {
+        let anchors = self.anchor_extent()?;
+        if self.tight_bounds {
+            return Some(Self::pad(anchors));
+        }
+        let scale = self.effective_scale();
+        let mut r = anchors;
+        for a in &self.arrows {
+            let (tail, tip) = self.endpoints_with_scale(a, scale);
+            for p in [tail, tip] {
+                r.x = (r.x.0.min(p[0]), r.x.1.max(p[0]));
+                r.y = (r.y.0.min(p[1]), r.y.1.max(p[1]));
+                r.z = (r.z.0.min(p[2]), r.z.1.max(p[2]));
+            }
+        }
+        Some(Self::pad(r))
     }
 
     /// Resolve the scale multiplier, auto-computing when `scale` is `None`.
     ///
-    /// The auto-scale target is: longest arrow ≈ `fraction × cell`, where the
-    /// cell size for `n` arrows spanning `R` on the tightest axis is `R / ∛n`.
-    /// When every anchor coincides (a single arrow, or several vectors drawn
-    /// from one origin) there is no span to measure, so `R` is taken as the
-    /// `1.0`-wide box that [`Quiver3DPlot::data_ranges`] pads such data to —
-    /// the box is sized from anchors alone, so the arrows must be scaled to it
-    /// rather than drawn at their raw length.
+    /// The target is measured in the box's normalised coordinates, where each
+    /// axis spans one unit whatever its data range, so a field on anisotropic
+    /// ranges gets arrows of the intended on-screen length along every axis.
+    /// For `n` arrows spread over `k` non-degenerate anchor axes the grid cell
+    /// is `n^(-1/k)` box units (`√n` for a planar field, `∛n` for a volume),
+    /// and the longest arrow is scaled to `fraction` of that cell. When every
+    /// anchor coincides (a single arrow, or several vectors from one origin)
+    /// there is no spacing to measure, so each axis is the padded unit box
+    /// and the cell is taken as `n^(-1/3)`.
+    ///
+    /// The cell is measured against the anchor extent rather than the final
+    /// box, which by default also encloses the arrow tips; arrows therefore
+    /// come out slightly shorter on screen than `fraction` of a cell.
     pub(crate) fn effective_scale(&self) -> f64 {
         if let Some(s) = self.scale {
             return s;
         }
-        let Some(r) = self.anchor_extent() else {
+        let Some(anchors) = self.anchor_extent() else {
             return 1.0;
         };
-        let max_mag = self
+        let raw = [anchors.x, anchors.y, anchors.z].map(|(lo, hi)| hi - lo);
+        let k = match raw.iter().filter(|s| **s > 0.0).count() {
+            0 => 3,
+            k => k,
+        };
+        let padded = Self::pad(anchors);
+        let span = [padded.x, padded.y, padded.z].map(|(lo, hi)| hi - lo);
+        let max_norm_mag = self
             .arrows
             .iter()
-            .map(Quiver3DArrow::magnitude)
+            .map(|a| {
+                let (u, v, w) = (a.u / span[0], a.v / span[1], a.w / span[2]);
+                (u * u + v * v + w * w).sqrt()
+            })
             .fold(0.0_f64, f64::max);
-        if max_mag <= 0.0 {
+        if max_norm_mag <= 0.0 {
             return 1.0;
         }
-        // Smallest non-zero span: for a grid this is the tightest axis, and
-        // a flat field (all z equal) falls back to the planar spans.
-        let span = [r.x, r.y, r.z]
-            .iter()
-            .map(|(lo, hi)| hi - lo)
-            .filter(|s| *s > 0.0)
-            .fold(f64::INFINITY, f64::min);
-        let span = if span.is_finite() { span } else { 1.0 };
-        let cell = span / (self.arrows.len() as f64).cbrt();
-        self.auto_scale_fraction * cell / max_mag
+        let cell = (self.arrows.len() as f64).powf(-1.0 / k as f64);
+        self.auto_scale_fraction * cell / max_norm_mag
     }
 
     /// Tail and tip of an arrow in data coordinates for a given scale.
@@ -681,14 +763,48 @@ mod tests {
     }
 
     #[test]
-    fn auto_scale_ignores_flat_axes() {
-        // All z equal: the zero z-span must not collapse the cell to 0.
+    fn auto_scale_uses_square_root_cell_for_planar_fields() {
+        // All z equal: 4 arrows on a unit square → cell = 1/√4 = 0.5, u=1
+        // spans the full 1.0 x-range → scale = 0.9 × 0.5.
         let q =
             Quiver3DPlot::from_function((0.0, 1.0, 2), (0.0, 1.0, 2), (0.0, 0.0, 1), |_, _, _| {
                 (1.0, 0.0, 0.0)
             });
-        let s = q.effective_scale();
-        assert!(s.is_finite() && s > 0.0, "got {s}");
+        assert!(
+            (q.effective_scale() - 0.45).abs() < 1e-12,
+            "got {}",
+            q.effective_scale()
+        );
+    }
+
+    #[test]
+    fn auto_scale_is_measured_in_normalised_box_units() {
+        // 5×5×5 grid on x,y ∈ [0,100], z ∈ [0,1]: cell = 1/5 of the box.
+        // u=1 is 1/100 of the x span → scale 0.9 × 0.2 × 100 = 18, i.e. an
+        // 18-unit arrow that is 0.9 of a cell on screen, not a 0.18-unit sliver.
+        let wide = Quiver3DPlot::from_function(
+            (0.0, 100.0, 5),
+            (0.0, 100.0, 5),
+            (0.0, 1.0, 5),
+            |_, _, _| (1.0, 0.0, 0.0),
+        );
+        assert!(
+            (wide.effective_scale() - 18.0).abs() < 1e-9,
+            "got {}",
+            wide.effective_scale()
+        );
+        // w=1 spans the whole 1.0 z-range → scale 0.9 × 0.2 = 0.18.
+        let tall = Quiver3DPlot::from_function(
+            (0.0, 100.0, 5),
+            (0.0, 100.0, 5),
+            (0.0, 1.0, 5),
+            |_, _, _| (0.0, 0.0, 1.0),
+        );
+        assert!(
+            (tall.effective_scale() - 0.18).abs() < 1e-9,
+            "got {}",
+            tall.effective_scale()
+        );
     }
 
     #[test]
@@ -716,14 +832,17 @@ mod tests {
     }
 
     #[test]
-    fn data_ranges_come_from_anchors_and_pad_flat_axes() {
+    fn data_ranges_enclose_arrows_by_default_and_anchors_when_tight() {
         let q = Quiver3DPlot::new()
-            .with_arrow(0.0, 0.0, 2.0, 100.0, 100.0, 100.0)
-            .with_arrow(4.0, 1.0, 2.0, 100.0, 100.0, 100.0);
+            .with_arrow(0.0, 0.0, 2.0, 1.0, 0.0, 0.0)
+            .with_arrow(4.0, 1.0, 2.0, 1.0, 0.0, 0.0)
+            .with_scale(1.0);
         let r = q.data_ranges().unwrap();
-        assert_eq!(r.x, (0.0, 4.0));
+        assert_eq!(r.x, (0.0, 5.0), "tip at x=5 is inside the box");
         assert_eq!(r.y, (0.0, 1.0));
-        assert_eq!(r.z, (1.5, 2.5));
+        assert_eq!(r.z, (1.5, 2.5), "flat z is padded to a 1.0-wide box");
+        let t = q.with_tight_bounds().data_ranges().unwrap();
+        assert_eq!(t.x, (0.0, 4.0), "tight bounds stop at the anchors");
         assert!(Quiver3DPlot::new().data_ranges().is_none());
     }
 
@@ -740,11 +859,30 @@ mod tests {
 
     #[test]
     fn inverted_head_bounds_do_not_panic() {
-        let mut q = Quiver3DPlot::new();
-        q.head_min_px = 20.0;
-        q.head_max_px = 4.0;
+        let q = Quiver3DPlot::new()
+            .with_head_min_px(20.0)
+            .with_head_max_px(4.0);
         let (len, _) = q.resolve_head(50.0);
         assert!(len.is_finite());
+    }
+
+    #[test]
+    fn head_setters_drive_proportional_sizing() {
+        let q = Quiver3DPlot::new()
+            .with_head_aspect(1.0)
+            .with_head_min_px(6.0)
+            .with_head_max_px(30.0);
+        let (len, half_w) = q.resolve_head(100.0);
+        assert!(
+            (len - 28.0).abs() < 1e-9,
+            "28% of a 100px shaft, under the 30px cap: {len}"
+        );
+        assert!(
+            (half_w - len).abs() < 1e-9,
+            "aspect 1.0 → half-width equals length"
+        );
+        let (len, _) = q.resolve_head(10.0);
+        assert_eq!(len, 6.0, "min head length applies to short shafts");
     }
 
     #[test]

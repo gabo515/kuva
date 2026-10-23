@@ -1,4 +1,4 @@
-//! Full-featured showcase of all 64 kuva plot types.
+//! Full-featured showcase of all 65 kuva plot types.
 //! Each cell uses a larger dataset and includes a title, axis labels,
 //! and a legend where applicable.
 //!
@@ -1239,11 +1239,6 @@ fn main() {
             dasharray: None,
         });
 
-    // ── Assemble 11×6 Figure (row-major, 66 cells) ───────────────────────────
-
-    let hmap_row_labels: Vec<String> = genes.iter().map(|s| s.to_string()).collect();
-    let hmap_col_labels: Vec<String> = genes.iter().map(|s| s.to_string()).collect();
-
     // ── Row 11: Quiver3D (tornado funnel, colored by speed) ────────────────
     let quiver3d = {
         let mut arrows = Vec::new();
@@ -1273,6 +1268,11 @@ fn main() {
             .with_y_label("y")
             .with_z_label("height")
     };
+
+    // ── Assemble 12×6 Figure (row-major, 67 cells; row 11 holds Quiver3D) ─────
+
+    let hmap_row_labels: Vec<String> = genes.iter().map(|s| s.to_string()).collect();
+    let hmap_col_labels: Vec<String> = genes.iter().map(|s| s.to_string()).collect();
 
     let all_plots: Vec<Vec<Plot>> = vec![
         // Row 0: Scatter, Line, Bar, Histogram, Histogram2D, Hexbin

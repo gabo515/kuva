@@ -3696,6 +3696,15 @@ pub fn emit_quiver3d_plot(p: &Quiver3DPlot) -> String {
     if (p.head_ratio - 0.28).abs() > f64::EPSILON {
         frags.push(format!(".with_head_ratio({})", f64_lit(p.head_ratio)));
     }
+    if (p.head_aspect - 0.45).abs() > f64::EPSILON {
+        frags.push(format!(".with_head_aspect({})", f64_lit(p.head_aspect)));
+    }
+    if (p.head_min_px - 4.0).abs() > f64::EPSILON {
+        frags.push(format!(".with_head_min_px({})", f64_lit(p.head_min_px)));
+    }
+    if (p.head_max_px - 14.0).abs() > f64::EPSILON {
+        frags.push(format!(".with_head_max_px({})", f64_lit(p.head_max_px)));
+    }
     if let Some(ref cmap) = p.color_map {
         frags.push(format!(".with_color_map({})", color_map_ctor(cmap)));
     }
@@ -3717,6 +3726,9 @@ pub fn emit_quiver3d_plot(p: &Quiver3DPlot) -> String {
     }
     if p.depth_shade {
         frags.push(".with_depth_shade()".to_string());
+    }
+    if p.tight_bounds {
+        frags.push(".with_tight_bounds()".to_string());
     }
     frags.extend(emit_box3d_frags(&p.box3d));
     chain("Quiver3DPlot::new()", frags)

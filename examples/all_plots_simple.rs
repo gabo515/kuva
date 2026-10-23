@@ -1,4 +1,4 @@
-//! Compact showcase of all 64 kuva plot types in a 11×6 Figure grid.
+//! Compact showcase of all 65 kuva plot types in a 12×6 Figure grid.
 //! Each cell uses minimal inline data — see all_plots_complex for larger
 //! datasets with axes, legends, and titles.
 //!
@@ -696,8 +696,6 @@ fn main() {
             dasharray: None,
         });
 
-    // ── Assemble 11×6 Figure (row-major, 66 cells) ───────────────────────────
-
     // ── Row 11: Quiver3D ─────────────────────────────────────────────────────
 
     // 66: Quiver3DPlot (vortex with updraft)
@@ -705,6 +703,8 @@ fn main() {
         Quiver3DPlot::from_function((-1.0, 1.0, 4), (-1.0, 1.0, 4), (0.0, 2.0, 4), |x, y, _| {
             (-y * 0.4, x * 0.4, 0.3)
         });
+
+    // ── Assemble 12×6 Figure (row-major, 67 cells; row 11 holds Quiver3D) ─────
 
     let all_plots: Vec<Vec<Plot>> = vec![
         // Row 0: Scatter, Line, Bar, Histogram, Histogram2D, Hexbin

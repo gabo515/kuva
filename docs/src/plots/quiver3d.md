@@ -93,7 +93,7 @@ let plot = Quiver3DPlot::from_function(
 
 ## Scaling
 
-By default the scale multiplier is **auto-computed** so the longest arrow is roughly one grid cell long — the cell size for `n` arrows is approximated as `span / ∛n`, where `span` is the tightest non-zero axis extent of the anchors. This keeps dense fields from overlapping no matter what units `(u, v, w)` are in.
+By default the scale multiplier is **auto-computed** so the longest arrow is roughly one grid cell long. The cell is measured in the box's own normalised coordinates, where every axis spans one unit whatever its data range, so a field sampled on `x, y ∈ [0, 100]` and `z ∈ [0, 1]` still gets legible arrows along all three axes. For `n` arrows spread over `k` non-degenerate anchor axes the cell is `n^(-1/k)` box units: `√n` for a planar field, `∛n` for a volume. This keeps dense fields from overlapping no matter what units `(u, v, w)` are in.
 
 - `.with_scale(s)` — pin the multiplier. Arrow length in data coords is `(u, v, w) * s`.
 - `.with_auto_scale(fraction)` — keep auto-scaling on, but change the target fraction of a cell (default `0.9`). Values above `1.0` let neighbouring arrows overlap.
@@ -118,7 +118,7 @@ let plot = Quiver3DPlot::new()
 
 ## Bounds and overlap
 
-The coordinate box is sized from the arrow **anchors only**, and arrows are never clipped. Arrows on the outer layer of a field therefore extend past the box faces; in three dimensions this reads naturally and keeps the box tight around the sampled region. Choose `QuiverPivot::Middle` to split that overhang evenly across opposite faces.
+By default the coordinate box encloses every arrow, tail to tip, so nothing is drawn outside it — the same default as the 2-D quiver. `.with_tight_bounds()` sizes the box from the **anchors only** instead: the sampled region then fills the box and the outer layer of arrows extends past its faces, which reads naturally for dense fields but can run into the axis tick labels on coarse ones. Arrows are never clipped in either mode; choose `QuiverPivot::Middle` to split any overhang evenly across opposite faces.
 
 Arrows are ordered by the depth of their projected midpoint and drawn back to front (the painter's algorithm, as for the 3D scatter plot). Two arrows that genuinely cross each other in 3D may therefore overlap in the wrong order — a vector backend has no per-pixel depth test.
 
@@ -149,6 +149,8 @@ Arrow heads are flat triangles built in screen space along the projected shaft, 
 | `.with_head(len, half_w)` | proportional | Fixed head size in pixels |
 | `.with_head_length(px)` / `.with_head_width(px)` | proportional | Pin one head dimension |
 | `.with_head_ratio(r)` | `0.28` | Head length as a fraction of the shaft |
+| `.with_head_aspect(a)` | `0.45` | Head half-width as a fraction of head length |
+| `.with_head_min_px(px)` / `.with_head_max_px(px)` | `4` / `14` | Clamp for proportional head length |
 | `.with_color_map(map)` | — | Color by magnitude; renders a colorbar automatically |
 | `.with_color_range(lo, hi)` | data | Magnitude range for colormap normalisation |
 | `.with_color_legend_label(s)` | — | Colorbar label |
@@ -156,6 +158,7 @@ Arrow heads are flat triangles built in screen space along the projected shaft, 
 | `.with_legend(s)` | — | Legend entry label |
 | `.with_pivot(QuiverPivot)` | `Tail` | Where the anchor sits on the arrow |
 | `.with_depth_shade()` | off | Fade distant arrows |
+| `.with_tight_bounds()` | off | Size the box from anchors only; outer arrows extend past the faces |
 | `.with_azimuth(deg)` | `-60.0` | Horizontal viewing angle |
 | `.with_elevation(deg)` | `30.0` | Vertical viewing angle |
 | `.with_view(View3D)` | — | Set both angles together |
@@ -166,7 +169,7 @@ Arrow heads are flat triangles built in screen space along the projected shaft, 
 | `.with_z_axis_right(bool)` | auto | Force Z axis to right (`true`) or left (`false`) |
 | `.with_z_axis_auto()` | — | Restore automatic Z-axis placement |
 
-A `Quiver3DPlot` can share a figure with `Scatter3DPlot` and `Surface3DPlot`: all 3D plots in one `render_multiple` call are normalised to one coordinate box, drawn once.
+A `Quiver3DPlot` can share a figure with `Scatter3DPlot` and `Surface3DPlot`: all 3D plots in one `render_multiple` call are normalised to one coordinate box, drawn once. Depth ordering is resolved within each plot, not across plots — later plots in the list paint over earlier ones — so an arrow can cover a nearer point from another series.
 
 ---
 
@@ -211,6 +214,7 @@ kuva quiver3d field.tsv \
 | `--legend <TXT>` | — | Legend entry label |
 | `--pivot <MODE>` | `tail` | Where the anchor sits: `tail`, `middle`, or `tip` |
 | `--depth-shade` | off | Fade distant arrows |
+| `--tight-bounds` | off | Size the box from anchors only (outer arrows extend past the faces) |
 | `--azimuth <DEG>` | `-60` | Horizontal viewing angle |
 | `--elevation <DEG>` | `30` | Vertical viewing angle |
 | `--x-label <S>` / `--y-label <S>` / `--z-label <S>` | — | Axis labels |

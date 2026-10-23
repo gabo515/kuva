@@ -795,10 +795,10 @@ check "quiver3d depth-shade alternate view" \
         --depth-shade --azimuth -120 --elevation 20 \
         --title "3D Quiver Depth Shade"
 
-check "quiver3d fixed scale and head, no grid no box" \
+check "quiver3d fixed scale and head, tight bounds, no grid no box" \
     "$BIN" quiver3d "$DATA/quiver3d.tsv" \
         --arrow-scale 0.3 --head-length 10 --head-width 4 --shaft-width 2 \
-        --no-grid --no-box \
+        --no-grid --no-box --tight-bounds \
         --title "3D Quiver Styled"
 
 check "quiver3d named columns legend z-axis-left pivot tip" \

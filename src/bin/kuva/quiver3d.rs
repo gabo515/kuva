@@ -82,6 +82,10 @@ pub struct Quiver3DArgs {
     #[arg(long)]
     pub depth_shade: bool,
 
+    /// Size the 3D box from the arrow anchors only (outer arrows extend past the box faces).
+    #[arg(long)]
+    pub tight_bounds: bool,
+
     /// Azimuth viewing angle in degrees.
     #[arg(long, default_value_t = -60.0, allow_hyphen_values = true)]
     pub azimuth: f64,
@@ -211,6 +215,9 @@ pub fn run(args: Quiver3DArgs) -> Result<(), String> {
     }
     if args.depth_shade {
         plot = plot.with_depth_shade();
+    }
+    if args.tight_bounds {
+        plot = plot.with_tight_bounds();
     }
     if let Some(xl) = args.x_label {
         plot = plot.with_x_label(xl);

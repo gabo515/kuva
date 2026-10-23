@@ -1,7 +1,7 @@
 mod common;
 use kuva::backend::svg::SvgBackend;
 use kuva::plot::scatter3d::Scatter3DPlot;
-use kuva::plot::{ColorMap, Quiver3DPlot, QuiverPivot};
+use kuva::plot::{ColorMap, Quiver3DPlot, QuiverPivot, View3D};
 use kuva::render::layout::Layout;
 use kuva::render::plots::Plot;
 use kuva::render::render::render_multiple;
@@ -187,20 +187,26 @@ fn test_quiver3d_depth_shade_varies_opacity() {
     );
 }
 
-/// Painter's algorithm: the arrow nearer the viewer is drawn later. The 3D box
-/// always puts the data-minimum (x, y) corner at the open front, so for two
-/// arrows at the same height the one at the minimum corner is nearest.
+/// Painter's algorithm: the arrow nearer the viewer is drawn later. The
+/// nearest floor corner for the default view comes from `View3D` itself, so
+/// the test does not bake in which data corner the box puts at the front.
 #[test]
 fn test_quiver3d_far_arrows_are_drawn_first() {
+    let (fc_x, fc_y) = View3D::default().front_bottom_corner();
+    let near = (
+        if fc_x > 0.0 { 10.0 } else { 0.0 },
+        if fc_y > 0.0 { 10.0 } else { 0.0 },
+    );
+    let far = (10.0 - near.0, 10.0 - near.1);
     let plot = Quiver3DPlot::new()
-        .with_colored_arrow(0.0, 0.0, 0.0, 1.0, 0.0, 0.0, "#ff0000")
-        .with_colored_arrow(10.0, 10.0, 0.0, 1.0, 0.0, 0.0, "#0000ff")
+        .with_colored_arrow(near.0, near.1, 0.0, 1.0, 0.0, 0.0, "#ff0000")
+        .with_colored_arrow(far.0, far.1, 0.0, 1.0, 0.0, 0.0, "#0000ff")
         .with_arrow(5.0, 5.0, 5.0, 1.0, 0.0, 0.0);
     let svg = svg_of(plot);
-    let near = svg.find("#ff0000").expect("near arrow fill missing");
-    let far = svg.find("#0000ff").expect("far arrow fill missing");
+    let near_pos = svg.find("#ff0000").expect("near arrow fill missing");
+    let far_pos = svg.find("#0000ff").expect("far arrow fill missing");
     assert!(
-        far < near,
+        far_pos < near_pos,
         "far arrow (blue) should precede near arrow (red)"
     );
 }
@@ -280,6 +286,51 @@ fn test_quiver3d_shares_one_box_with_scatter3d() {
         single_svg.matches("<line").count(),
         "combined figure should draw exactly one wireframe box over the merged range"
     );
+}
+
+/// A counter-clockwise vortex about +z must read counter-clockwise when
+/// viewed from above. The projection is right-handed (+x right, +y up near
+/// elevation 90°), so on screen the cross product of each arrow's radius
+/// vector and its direction is positive. A mirrored projection flips every
+/// sign here; this is the plot type where that becomes visible.
+#[test]
+fn test_quiver3d_ccw_vortex_reads_ccw_from_above() {
+    let ring: Vec<(f64, f64, f64, f64, f64, f64)> = (0..12)
+        .map(|i| {
+            let t = i as f64 / 12.0 * std::f64::consts::TAU;
+            (t.cos(), t.sin(), 0.0, -t.sin(), t.cos(), 0.0)
+        })
+        .collect();
+    let plot = Quiver3DPlot::new()
+        .with_arrows(ring)
+        .with_azimuth(0.0)
+        .with_elevation(89.0);
+    let svg = svg_of(plot);
+    // Each glyph is M tail_l, L base_l, L wing_l, L tip, L wing_r, L base_r, L tail_r Z.
+    let arrows: Vec<((f64, f64), (f64, f64))> = path_data(&svg)
+        .iter()
+        .map(|d| {
+            let n: Vec<f64> = d
+                .split_whitespace()
+                .filter_map(|t| t.parse().ok())
+                .collect();
+            let p = |i: usize| (n[2 * i], n[2 * i + 1]);
+            let (tl, tr, tip) = (p(0), p(6), p(3));
+            (((tl.0 + tr.0) / 2.0, (tl.1 + tr.1) / 2.0), tip)
+        })
+        .collect();
+    assert_eq!(arrows.len(), 12, "all twelve ring arrows drawn");
+    let cx = arrows.iter().map(|(t, _)| t.0).sum::<f64>() / 12.0;
+    let cy = arrows.iter().map(|(t, _)| t.1).sum::<f64>() / 12.0;
+    for (tail, tip) in &arrows {
+        // Screen-up is -y in SVG coordinates.
+        let (rx, ry) = (tail.0 - cx, -(tail.1 - cy));
+        let (dx, dy) = (tip.0 - tail.0, -(tip.1 - tail.1));
+        assert!(
+            rx * dy - ry * dx > 0.0,
+            "arrow at ({rx:.1}, {ry:.1}) points clockwise: direction ({dx:.1}, {dy:.1})"
+        );
+    }
 }
 
 #[test]
